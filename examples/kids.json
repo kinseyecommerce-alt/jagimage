@@ -1,0 +1,22 @@
+{
+  "Boys": {
+    "age": 7,
+    "region": "North",
+    "skin": "warm wheatish",
+    "shape": "slim build",
+    "hair": "short neat black hair",
+    "feat": ["bright dark brown eyes", "a friendly round face"],
+    "expr": "natural happy smile",
+    "face_ref": null
+  },
+  "Girls": {
+    "age": 6,
+    "region": "South",
+    "skin": "medium brown",
+    "shape": "slim build",
+    "hair": "shoulder-length black hair in a neat ponytail",
+    "feat": ["large dark eyes", "soft rounded cheeks"],
+    "expr": "cheerful open smile",
+    "face_ref": null
+  }
+}

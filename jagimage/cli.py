@@ -18,6 +18,41 @@ def _agent(args) -> ImageAgent:
     )
 
 
+def _catalog(args) -> int:
+    from . import catalog
+
+    kids = catalog.load_kids(args.kids)
+    poses = [p.strip() for p in args.poses.split(",")] if args.poses else list(catalog.POSES)
+    unknown = [p for p in poses if p not in catalog.POSES]
+    if unknown:
+        print(f"Unknown pose(s): {', '.join(unknown)}. Choose from: {', '.join(catalog.POSES)}", file=sys.stderr)
+        return 2
+    items = list(catalog.skus(kids, args.gender, args.style, args.colour))
+    if not items:
+        print("No SKUs match those filters.", file=sys.stderr)
+        return 2
+    print(f"{len(items)} SKUs x {1 + len(poses)} shots = up to {len(items) * (1 + len(poses))} images")
+    if args.dry_run:
+        for s in items:
+            print(f"\n=== {s['gender']}/{s['style']}/{s['colour']} ===")
+            print(f"[{catalog.FRONT}] {catalog.front_prompt(s)}")
+            for p in poses:
+                print(f"[{p}] {catalog.pose_prompt(s, p)}")
+        return 0
+    agent = catalog.CatalogAgent(model=args.model, output_dir=args.out, quality=args.quality,
+                                 size=args.size, fidelity=args.fidelity)
+    failures = 0
+    for s in items:
+        sku = f"{s['gender']}/{s['style']}/{s['colour']}"
+        try:
+            for shot, path, status in agent.run_sku(s, poses=poses, force=args.force):
+                print(f"{sku} [{shot}] {status} {path}")
+        except Exception as exc:  # poses depend on the front shot, so move on to the next SKU
+            failures += 1
+            print(f"{sku} failed: {exc}", file=sys.stderr)
+    return 1 if failures else 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="jagimage", description="E-commerce image agent")
     common = argparse.ArgumentParser(add_help=False)
@@ -43,12 +78,29 @@ def main(argv=None) -> int:
 
     sub.add_parser("shots", help="List available shot types")
 
+    cat = sub.add_parser("catalog", help="Kids' tee catalogue: front + pose shots for every style x colour")
+    cat.add_argument("--kids", required=True, help="JSON with one child model per gender (see examples/kids.json)")
+    cat.add_argument("--gender", choices=["Boys", "Girls"])
+    cat.add_argument("--style", help="e.g. HalfSleeveTee, FullSleeveTee, SleevelessTee")
+    cat.add_argument("--colour", help="e.g. Navy")
+    cat.add_argument("--poses", help="Comma-separated poses (default: all), e.g. 02-threequarter,04-back")
+    cat.add_argument("--model", help=f"Image model (default: $JAGIMAGE_MODEL or {DEFAULT_MODEL})")
+    cat.add_argument("--out", default="output")
+    cat.add_argument("--quality", default="high", choices=["low", "medium", "high", "xhigh", "max", "auto"])
+    cat.add_argument("--size", default="1024x1536")
+    cat.add_argument("--fidelity", choices=["high", "low"], help="input_fidelity for reference edits, if your model supports it")
+    cat.add_argument("--force", action="store_true", help="Regenerate images that already exist")
+    cat.add_argument("--dry-run", action="store_true", help="Print the prompts without calling the API")
+
     args = parser.parse_args(argv)
 
     if args.command == "shots":
         for s in SHOTS.values():
             print(f"{s.key:10} {s.size:10} {s.label}")
         return 0
+
+    if args.command == "catalog":
+        return _catalog(args)
 
     agent = _agent(args)
     failures = 0

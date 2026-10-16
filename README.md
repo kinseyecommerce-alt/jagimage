@@ -48,6 +48,27 @@ Add or change shots in `jagimage/presets.py`.
 
 `--quality low|medium|high|xhigh|max|auto` (default `high`), `--format png|jpeg|webp`, `--size`, `--extra "art direction"`, `--out DIR`, `--model` (or set `JAGIMAGE_MODEL`).
 
+## Kids' tee catalogue
+
+`jagimage catalog` makes a full Myntra-style catalogue for each style and colour: Boys Half-, Full- and Sleeveless tees in 7 colours, and Girls Half- and Full-sleeve tees in 9 colours. That's 39 SKUs. Each SKU gets a front shot plus 4 poses, 195 images in total.
+
+```bash
+# Look at the exact prompts first (no API calls, no cost)
+jagimage catalog --kids examples/kids.json --gender Boys --colour Navy --dry-run
+
+# Try one SKU, then run everything
+jagimage catalog --kids examples/kids.json --gender Girls --style HalfSleeveTee --colour Pink
+jagimage catalog --kids examples/kids.json
+```
+
+- **Same child in every shot:** the front shot (`01-front.png`) is made first. Each pose (`02-threequarter`, `03-side`, `04-back`, `05-handpocket`) is then made from that front shot, so the child, garment and studio stay the same.
+- **Face reference:** set `face_ref` in `examples/kids.json` to a portrait photo (the path is relative to the JSON file). It is used only for the child's face, on every shot.
+- **Resumable:** images that already exist are skipped, so you can re-run after an interruption. Use `--force` to regenerate them.
+- **Output:** `output/<Gender>/<Style>/<Colour>/<shot>.png`, size 1024x1536.
+- Other options: `--poses 02-threequarter,04-back`, `--quality`, `--size`, `--fidelity high` (sends `input_fidelity` on reference edits, if your model supports it).
+
+Colours, poses, categories and prompts live in `jagimage/catalog.py`. By default, full-sleeve tees are styled with joggers (prompts swap "shorts" for "joggers") and everything else with shorts. Bottoms are navy, or charcoal under navy and black tops. Change this in `pants()` and `legs()`.
+
 ## Use from Python
 
 ```python
