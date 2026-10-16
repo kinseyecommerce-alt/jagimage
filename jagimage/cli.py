@@ -27,17 +27,24 @@ def _catalog(args) -> int:
     if unknown:
         print(f"Unknown pose(s): {', '.join(unknown)}. Choose from: {', '.join(catalog.POSES)}", file=sys.stderr)
         return 2
-    items = list(catalog.skus(kids, args.gender, args.style, args.colour))
+    items = list(catalog.skus(kids, args.gender, args.style, args.colour, swatches=args.swatches))
     if not items:
         print("No SKUs match those filters.", file=sys.stderr)
         return 2
-    print(f"{len(items)} SKUs x {1 + len(poses)} shots = up to {len(items) * (1 + len(poses))} images")
+    shots = 1 + len(poses) + (1 if args.texture else 0)
+    print(f"{len(items)} SKUs x {shots} shots = up to {len(items) * shots} images")
+    if args.swatches:
+        missing = sorted({s["colour"] for s in items if not s["swatch"]})
+        if missing:
+            print(f"No swatch photo found for: {', '.join(missing)} (those use the text description only)")
     if args.dry_run:
         for s in items:
             print(f"\n=== {s['gender']}/{s['style']}/{s['colour']} ===")
             print(f"[{catalog.FRONT}] {catalog.front_prompt(s)}")
             for p in poses:
                 print(f"[{p}] {catalog.pose_prompt(s, p)}")
+            if args.texture:
+                print(f"[{catalog.TEXTURE}] {catalog.texture_prompt(s)}")
         return 0
     agent = catalog.CatalogAgent(model=args.model, output_dir=args.out, quality=args.quality,
                                  size=args.size, fidelity=args.fidelity)
@@ -45,7 +52,7 @@ def _catalog(args) -> int:
     for s in items:
         sku = f"{s['gender']}/{s['style']}/{s['colour']}"
         try:
-            for shot, path, status in agent.run_sku(s, poses=poses, force=args.force):
+            for shot, path, status in agent.run_sku(s, poses=poses, force=args.force, texture=args.texture):
                 print(f"{sku} [{shot}] {status} {path}")
         except Exception as exc:  # poses depend on the front shot, so move on to the next SKU
             failures += 1
@@ -84,6 +91,8 @@ def main(argv=None) -> int:
     cat.add_argument("--style", help="e.g. HalfSleeveTee, FullSleeveTee, SleevelessTee")
     cat.add_argument("--colour", help="e.g. Navy")
     cat.add_argument("--poses", help="Comma-separated poses (default: all), e.g. 02-threequarter,04-back")
+    cat.add_argument("--texture", action="store_true", help="Also make a fabric close-up (06-fabric) per SKU")
+    cat.add_argument("--swatches", help="Folder of real fabric photos named <Colour>.jpg or <Style>-<Colour>.jpg, used as texture/colour reference")
     cat.add_argument("--model", help=f"Image model (default: $JAGIMAGE_MODEL or {DEFAULT_MODEL})")
     cat.add_argument("--out", default="output")
     cat.add_argument("--quality", default="high", choices=["low", "medium", "high", "xhigh", "max", "auto"])

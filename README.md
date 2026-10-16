@@ -65,6 +65,16 @@ jagimage catalog --kids examples/kids.json
 - **Face reference:** set `face_ref` in `examples/kids.json` to a portrait photo (the path is relative to the JSON file). It is used only for the child's face, on every shot.
 - **Resumable:** images that already exist are skipped, so you can re-run after an interruption. Use `--force` to regenerate them.
 - **Output:** `output/<Gender>/<Style>/<Colour>/<shot>.png`, size 1024x1536.
+
+### Fabric texture
+
+- **Fabric close-up:** `--texture` adds a `06-fabric` shot to each SKU. It's an extreme macro of the chest and ribbed collar, with raking light that shows the knit loops and stitching, and no child in frame. It is made from that SKU's front shot, so it's the same garment.
+- **Real fabric photos:** `--swatches DIR` uses your own fabric photos as the reference for knit texture and exact colour on every shot. Name them `<Colour>.jpg` (e.g. `Navy.jpg`), or `<Style>-<Colour>.jpg` for a different fabric per style (that name wins). `.jpeg`, `.png` and `.webp` also work. Colours with no photo fall back to the text description, and the run tells you which ones those are. A flat, evenly lit, colour-accurate close-up of the actual fabric works best.
+- **Fabric wording:** the knit description used in every prompt is `FABRIC` in `jagimage/catalog.py`. Change it there, e.g. to give a GSM or say combed or bio-washed cotton.
+
+```bash
+jagimage catalog --kids examples/kids.json --swatches swatches/ --texture
+```
 - Other options: `--poses 02-threequarter,04-back`, `--quality`, `--size`, `--fidelity high` (sends `input_fidelity` on reference edits, if your model supports it).
 
 Colours, poses, categories and prompts live in `jagimage/catalog.py`. By default, full-sleeve tees are styled with joggers (prompts swap "shorts" for "joggers") and everything else with shorts. Bottoms are navy, or charcoal under navy and black tops. Change this in `pants()` and `legs()`.

@@ -47,6 +47,15 @@ POSES = {
 STUDIO = "Smooth plain seamless light grey studio background with no texture, specks or gradient banding, soft even studio lighting, gentle shadows, true-to-life natural colours, photorealistic Myntra e-commerce catalogue photo, 85mm lens look, full body head to shoes with clear empty space above the head and below the shoes, garment sharp. Exactly one child, two arms, two hands, two legs. No logos, no text, no print on the top, no watermark."
 
 FRONT = "01-front"
+TEXTURE = "06-fabric"
+
+# Fabric description used in every shot. Edit here to change how the knit is described.
+FABRIC = ("Clearly visible fine single-jersey knit texture, matte dry cotton, no sheen, soft natural folds, ribbed crew collar, "
+          "crisp double-needle stitching visible on hems, solid uniform dye, clean fabric with no lint or specks. ")
+
+# Prepended when a real fabric swatch photo is supplied for the SKU's colour.
+SWATCH_LEAD = ("Use the fabric swatch photo ONLY as the reference for the top's knit texture, yarn and exact colour "
+               "(match it closely); do not copy its framing or background. ")
 
 
 # --- Bottoms. ASSUMPTION: full-sleeve tees are styled with joggers, everything else with
@@ -78,18 +87,28 @@ def kid_text(s):
 
 
 def garment(s):
-    return (f"Wearing a {s['desc']}, 100% pure cotton, regular fit, colour {COL[s['colour']][1]}. Clearly visible fine single-jersey knit texture, matte dry cotton, "
-            f"no sheen, soft natural folds, ribbed crew collar, crisp double-needle stitching visible on hems, solid uniform dye, clean fabric with no lint or specks. "
-            + legs(s))
+    return (f"Wearing a {s['desc']}, 100% pure cotton, regular fit, colour {COL[s['colour']][1]}. " + FABRIC + legs(s))
+
+
+def _swatch(s):
+    return SWATCH_LEAD if s.get("swatch") else ""
 
 
 def front_prompt(s):
-    lead = ("Use the reference portrait ONLY for the child's face identity (same face, features, skin tone, hairstyle); new full-body photo. " if s["face_ref"] else "")
+    lead = _swatch(s) + ("Use the reference portrait ONLY for the child's face identity (same face, features, skin tone, hairstyle); new full-body photo. " if s["face_ref"] else "")
     return _sh(s, lead + f"Photo of {kid_text(s)}, standing facing camera, one hand casually in shorts pocket, other arm relaxed with a soft bend, weight on one leg. ") + garment(s) + STUDIO
 
 
 def pose_prompt(s, p):
-    return _sh(s, "Use the reference photos: keep exactly the same child (same face, hair, skin tone), same top and shorts, same studio. The same child " + POSES[p] + ". ") + garment(s) + STUDIO
+    return _sh(s, _swatch(s) + "Use the reference photos: keep exactly the same child (same face, hair, skin tone), same top and shorts, same studio. The same child " + POSES[p] + ". ") + garment(s) + STUDIO
+
+
+def texture_prompt(s):
+    return (_swatch(s) + f"Use the reference photo: exactly the same top the child is wearing. Extreme macro close-up of the chest and ribbed crew "
+            f"collar of the {s['desc']}, filling the frame, colour {COL[s['colour']][1]}. Individual single-jersey knit loops sharply resolved, "
+            "fine cotton yarn fibres, collar rib and double-needle stitching in crisp detail, matte dry 100% pure cotton, no sheen, "
+            "soft raking side light revealing the knit structure, gentle natural folds, solid uniform dye, clean fabric with no lint or specks. "
+            "Photorealistic e-commerce fabric detail photo. Fabric only: no face, no skin, no hands, no logos, no text, no print, no watermark.")
 
 
 # --- SKUs and generation ---
@@ -103,7 +122,22 @@ def load_kids(path: str) -> dict:
     return kids
 
 
-def skus(kids: dict, gender=None, style=None, colour=None) -> Iterator[dict]:
+SWATCH_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def find_swatch(folder: Optional[str], style: str, colour: str) -> Optional[str]:
+    """Look for <style>-<colour>.<ext> first, then <colour>.<ext>, in the swatch folder."""
+    if not folder:
+        return None
+    for name in (f"{style}-{colour}", colour):
+        for ext in SWATCH_EXTS:
+            path = Path(folder) / f"{name}{ext}"
+            if path.exists():
+                return str(path.resolve())
+    return None
+
+
+def skus(kids: dict, gender=None, style=None, colour=None, swatches: Optional[str] = None) -> Iterator[dict]:
     for g, st, desc in CATEGORIES:
         if g not in kids or (gender and g != gender) or (style and st != style):
             continue
@@ -112,7 +146,8 @@ def skus(kids: dict, gender=None, style=None, colour=None) -> Iterator[dict]:
                 continue
             ident = kids[g]
             yield {"gender": g, "style": st, "desc": desc, "colour": c,
-                   "ident": ident, "face_ref": ident.get("face_ref")}
+                   "ident": ident, "face_ref": ident.get("face_ref"),
+                   "swatch": find_swatch(swatches, st, c)}
 
 
 class CatalogAgent:
@@ -148,23 +183,25 @@ class CatalogAgent:
             result = self.client.images.generate(**params)
         return base64.b64decode(result.data[0].b64_json)
 
-    def run_sku(self, s, poses=None, force=False) -> Iterator[tuple]:
+    def run_sku(self, s, poses=None, force=False, texture=False) -> Iterator[tuple]:
         """Yields (shot name, path, 'made'|'skipped'). Existing files are kept unless force=True,
         so an interrupted run resumes where it stopped."""
         folder = self.folder(s)
         folder.mkdir(parents=True, exist_ok=True)
         front = folder / f"{FRONT}.png"
         if force or not front.exists():
-            refs = [s["face_ref"]] if s["face_ref"] else []
+            refs = [r for r in (s["face_ref"], s.get("swatch")) if r]
             front.write_bytes(self._call(front_prompt(s), refs))
             yield FRONT, front, "made"
         else:
             yield FRONT, front, "skipped"
-        for p in poses or POSES:
-            path = folder / f"{p}.png"
+        jobs = [(p, pose_prompt(s, p), [str(front), s["face_ref"], s.get("swatch")]) for p in (poses or POSES)]
+        if texture:
+            jobs.append((TEXTURE, texture_prompt(s), [str(front), s.get("swatch")]))
+        for name, prompt, refs in jobs:
+            path = folder / f"{name}.png"
             if not force and path.exists():
-                yield p, path, "skipped"
+                yield name, path, "skipped"
                 continue
-            refs = [str(front)] + ([s["face_ref"]] if s["face_ref"] else [])
-            path.write_bytes(self._call(pose_prompt(s, p), refs))
-            yield p, path, "made"
+            path.write_bytes(self._call(prompt, [r for r in refs if r]))
+            yield name, path, "made"
