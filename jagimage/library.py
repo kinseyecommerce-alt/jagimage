@@ -1,0 +1,245 @@
+"""SPB Textile image prompt library: Men, Women, Kids Boys, Kids Girls x 7 products x
+Pure Cotton / Cotton Mix x colour x 6 poses.
+
+Prompts are assembled from the library's parts with the master template:
+    {REFERENCE_LINE}Photo of {MODEL}, {POSE}. Wearing {GARMENT}, fabric: {FABRIC}, paired with {PAIRING}. {BACKGROUND} {RULES}
+Identity flow: front_main (and front_main_white) use the face reference only; every
+other pose sends image 1 = face reference, image 2 = the approved front_main.
+"""
+
+import json
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional
+
+CATEGORIES = ["Men", "Women", "Kids_Boys", "Kids_Girls"]
+PRODUCTS = ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Shorts", "Trackpants", "Hoodie", "Sweatshirt"]
+FABRICS = {"PureCotton": "Pure Cotton (100% cotton)", "CottonMix": "Cotton Mix (PC, poly-cotton blend)"}
+
+COLOURS = {
+    "PureCotton": {
+        "Black": "#000000", "White": "#FFFFFF", "Light Pink": "#FFA3B5", "Red": "#CD001A", "Navy": "#0C2340",
+        "Green": "#6CC24A", "Lavender": "#C7B2DE", "Orange": "#FF671F", "Yellow": "#FDDA24",
+    },
+    "CottonMix": {
+        "Black": "#151515", "Blue": "#004DBE", "Maroon": "#490D14", "Melange": "#C9C7C9", "White": "#E7E7EC",
+        "Red": "#CF0B15", "Yellow": "#F9A712", "Light Pink": "#EBBECE", "Dark Pink": "#E6276A",
+        "Navy Blue": "#1F3A5F", "Olive": "#556B2F", "Beige": "#D8C8A8", "Grey": "#8E8E90",
+        "Royal Blue": "#2A4BA8", "Military Green": "#4B5320", "Pink": "#E8A0B8", "Green": "#2E7D32",
+    },
+}
+
+MODELS = {
+    "Men": "an Indian man aged 22-32, lean-athletic or regular build, fair to wheatish even skin, short textured crop with tapered sides, neat light stubble, friendly natural expression",
+    "Women": "an Indian woman aged 21-30, regular slim build, fair to wheatish even skin, natural fresh makeup, nude lip, hair in soft loose waves or a sleek low ponytail kept off the neckline, small stud earrings only",
+    "Kids_Boys": "a small 4-5 year old Indian boy, toddler proportions: baby face, round chubby cheeks, soft small nose, big bright eyes, large head relative to a small short body (head about one fifth of body height), short chubby limbs, fair to wheatish even skin, short neat kids haircut, cheerful innocent smile",
+    "Kids_Girls": "a small 4-5 year old Indian girl, toddler proportions: baby face, round chubby cheeks, soft small nose, big bright eyes, large head relative to a small short body (head about one fifth of body height), short chubby limbs, fair to wheatish even skin, hairstyle exactly as in the reference (e.g. short bob, pigtails or ponytail) kept identical in every pose, cheerful innocent smile",
+}
+GIRLS_HAIR_EXAMPLE = "(e.g. short bob, pigtails or ponytail)"
+
+FABRIC_TEXT = {
+    "PureCotton": {
+        "top": "100% pure cotton single jersey knit, 180-200 GSM combed cotton, fine visible knit texture, soft matte finish, neat visible stitching at neckband, shoulder seams and hems",
+        "fleece": "100% pure cotton loopback French Terry fleece, 280-320 GSM, smooth matte face, soft structured drape, neat visible stitching",
+        "bottom": "100% pure cotton French Terry knit, smooth matte face, soft drape, neat visible stitching at waistband and side seams",
+    },
+    "CottonMix": {
+        "top": "Cotton Mix poly-cotton single jersey knit, 160-180 GSM, smooth fine knit with a very subtle sheen, crisp shape, neat visible stitching at neckband, shoulder seams and hems",
+        "fleece": "Cotton Mix poly-cotton brushed fleece, 280-300 GSM, smooth even face, structured shape, neat visible stitching",
+        "bottom": "Cotton Mix poly-cotton French Terry knit, smooth even surface, slight structured drape, neat visible stitching at waistband and side seams",
+    },
+}
+FABRIC_KIND = {"HalfSleeveTee": "top", "FullSleeveTee": "top", "SleevelessTee": "top", "Shorts": "bottom",
+               "Trackpants": "bottom", "Hoodie": "fleece", "Sweatshirt": "fleece"}
+
+GARMENTS = {
+    "HalfSleeveTee": "a plain {COLOUR} regular-fit crew-neck half-sleeve t-shirt, 1x1 ribbed neckband, set-in shoulder seam at the natural shoulder, sleeves ending mid-bicep, straight hem at the hip, worn untucked, no print, no logo, no pocket",
+    "FullSleeveTee": "a plain {COLOUR} regular-fit crew-neck full-sleeve t-shirt, ribbed neckband, sleeves ending at the wrist bone with a plain flat hemmed sleeve end, straight hem at the hip, worn untucked, no print, no logo, no pocket",
+    "SleevelessTee": "a plain {COLOUR} regular-fit crew-neck sleeveless vest/tank tee with neat bound armholes, straight hem, worn untucked, no print, no logo, no pocket",
+    "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, covered elastic waistband with flat drawcord, two side seam pockets, straight flat hem, no logo",
+    "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, covered elastic waistband with flat drawcord, two side seam pockets, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
+    "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, ribbed cuffs and ribbed hem band, no print, no logo",
+    "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, ribbed neckband, ribbed cuffs and ribbed hem band, set-in sleeves, no print, no logo, no pocket",
+}
+KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
+
+PAIRING = {
+    ("Men", "top"): "straight-leg light-wash blue denim jeans (dark tops) or black cotton trousers (light tops), clean white low-top sneakers",
+    ("Men", "bottom"): "a plain white crew-neck t-shirt tucked loosely, clean white low-top sneakers",
+    ("Women", "top"): "straight-leg light-wash blue denim jeans (dark tops) or black trousers (light tops), clean white low-top sneakers",
+    ("Women", "bottom"): "a plain white crew-neck t-shirt, clean white low-top sneakers",
+    ("Kids", "top"): "matching-colour Cotton Mix French Terry shorts, small white kids sneakers",
+    ("Kids", "bottom"): "a plain white kids crew-neck t-shirt, small white kids sneakers",
+}
+# The library's Kids FullSleeveTee prompts say "worn with ... joggers" and then "paired with
+# matching-colour ... shorts". The set already includes the joggers, so only shoes are added here.
+KIDS_FULLSLEEVE_PAIRING = "small white kids sneakers"
+
+FRONT_POSE = "standing straight, facing the camera squarely, weight slightly on one leg, both arms relaxed and natural with a soft bend at the elbow and a small visible gap between arm and torso, open relaxed hands, looking at the camera with a gentle smile"
+POSES = {
+    "front_main": FRONT_POSE,
+    "front_main_white": FRONT_POSE,
+    "threequarter": "body turned about 45 degrees to the left, head and face turned the same direction as the body and gently looking at the camera, arms relaxed with a natural bend, exactly two arms and two hands",
+    "side": "TRUE side profile facing right: whole body AND head turned 90 degrees in the same direction, face seen in clean profile (one eye, nose and chin silhouette), head NOT turned back toward the camera, arms relaxed hanging naturally with a slight bend, rear arm partly hidden behind the body, same hairstyle as reference seen from the side",
+    "back": "TRUE rear view: model standing with the back fully to the camera, head facing straight away from the camera, NO face visible, not looking over the shoulder, arms relaxed at the sides with a slight bend, full back of the garment visible, hairstyle exactly the same as the reference seen from behind (same length, colour, parting, ties/accessories)",
+    "handpocket": "facing the camera at a slight angle, one hand casually in the side/front pocket, the other arm relaxed with a soft bend, relaxed weight shift, gentle smile",
+}
+FRONTS = ("front_main", "front_main_white")
+
+GREY_FRONT = "Plain seamless light grey studio background (#EDEDED), soft even shadow-free lighting."
+BACKGROUNDS = {
+    "front_main": GREY_FRONT,
+    "front_main_white": "Pure white seamless studio background (RGB 255,255,255), soft even shadow-free lighting, marketplace main-image compliant.",
+}
+GREY = "Plain seamless light grey studio background (#EDEDED), soft even lighting."
+
+REFERENCE_LINE = "Use the reference image ONLY for identity: keep exactly the same face, facial features, skin tone, hairstyle, hair colour and hair length. Create a new full-body photo. "
+MATCH_FRONT_LINE = "Also match image 2 (approved front of the same model and colour) for garment, colour and hairstyle. "
+
+RULES = ("Exact garment colour {COLOUR} ({HEX}), uniform and true under neutral daylight-balanced 5500K studio light, no colour cast. "
+         "Sharp HD face in crisp focus with natural skin texture, clear eyes, lashes and brows. "
+         "Skin tone even and identical across face, ears, neck, hands and arms; no shadow under the chin or on the neck; natural neck-to-collar transition. "
+         "Natural anatomy, correct face orientation, no twisted or distorted face, exactly two arms, two hands with five fingers. "
+         "Full body head to shoes in frame with small margins, model about 85-90% of frame height, eye-level camera, 3:4 portrait, "
+         "photorealistic e-commerce catalogue photo, no text, no logo, no watermark, no props, compliant with Amazon, Flipkart, Myntra and Meesho.")
+KIDS_RULE = " The child must clearly look 4-5 years old with toddler proportions."
+JOGGER_RULE = " Joggers end in a plain straight hem, no ribbed cuffs."
+
+NEGATIVE = ("blurry face, soft face, low resolution, waxy plastic skin, over-smoothed skin, grey or discoloured ears, dark neck shadow, "
+            "black shadow under chin, mismatched face and body skin tone, orange neck, twisted face, head turned opposite to body, "
+            "distorted face, extra limbs, extra fingers, missing fingers, fused hands, deformed hands, stiff arms pinned to body, "
+            "arms glued to sides, military stance, wrong garment colour, colour shift, faded colour, print, logo, graphic, text, "
+            "watermark, chest pocket, extra layers, undershirt, wrinkled messy garment, cropped head, cut-off feet, busy background, "
+            "props, gradient background, harsh shadows, vignette, collage, frame, border, cartoon, illustration, 3D render, CGI")
+NEGATIVE_KIDS = "adult face, teenager, older child, mature proportions, long legs, slim adult body, makeup on child"
+NEGATIVE_JOGGERS = "ribbed cuffs on joggers, elastic ankle cuffs"
+NEGATIVE_POSE = {
+    "side": "face looking at camera, frontal face on side pose, head twisted toward camera",
+    "back": "visible face, looking over shoulder, face in back view, different hairstyle",
+}
+
+
+def is_kids(category: str) -> bool:
+    return category.startswith("Kids")
+
+
+def has_joggers(category: str, product: str) -> bool:
+    return product == "Trackpants" or (is_kids(category) and product == "FullSleeveTee")
+
+
+def model_text(category: str, hairstyle: Optional[str] = None) -> str:
+    text = MODELS[category]
+    if hairstyle and category == "Kids_Girls":
+        text = text.replace(GIRLS_HAIR_EXAMPLE, f"({hairstyle})")
+    return text
+
+
+def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None) -> str:
+    """Prompt for one cell of the library. Leaves {COLOUR}/{HEX} in place when colour is None."""
+    kind = FABRIC_KIND[product]
+    kids = is_kids(category)
+    if kids and product == "FullSleeveTee":
+        garment, pairing = KIDS_FULLSLEEVE_SET, KIDS_FULLSLEEVE_PAIRING
+    else:
+        garment = GARMENTS[product]
+        pairing = PAIRING[("Kids" if kids else category, "bottom" if kind == "bottom" else "top")]
+    reference = REFERENCE_LINE + ("" if pose in FRONTS else MATCH_FRONT_LINE)
+    text = (f"{reference}Photo of {model_text(category, hairstyle)}, {POSES[pose]}. Wearing {garment}, "
+            f"fabric: {FABRIC_TEXT[fabric][kind]}, paired with {pairing}. {BACKGROUNDS.get(pose, GREY)} {RULES}")
+    if kids:
+        text += KIDS_RULE
+    if has_joggers(category, product):
+        text += JOGGER_RULE
+    if colour:
+        text = text.replace("{COLOUR}", colour).replace("{HEX}", COLOURS[fabric][colour])
+    return text
+
+
+def build_negative(category, product, pose) -> str:
+    parts = [NEGATIVE]
+    if is_kids(category):
+        parts.append(NEGATIVE_KIDS)
+    if has_joggers(category, product):
+        parts.append(NEGATIVE_JOGGERS)
+    if pose in NEGATIVE_POSE:
+        parts.append(NEGATIVE_POSE[pose])
+    return ", ".join(parts)
+
+
+def export(path: str) -> dict:
+    """Write prompts.json: category_product -> fabric -> pose -> {prompt, negative} (with {COLOUR}/{HEX})."""
+    data = {
+        f"{c}_{p}": {
+            f: {pose: {"prompt": build_prompt(c, p, f, pose), "negative": build_negative(c, p, pose)} for pose in POSES}
+            for f in FABRICS
+        }
+        for c in CATEGORIES for p in PRODUCTS
+    }
+    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    return data
+
+
+def load_models(path: str) -> Dict[str, dict]:
+    """JSON keyed by category: {"Men": {"face_ref": "faces/men.jpg"}, "Kids_Girls": {"face_ref": ..., "hairstyle": ...}}."""
+    models = json.loads(Path(path).read_text())
+    base = Path(path).parent
+    for m in models.values():
+        if m.get("face_ref"):
+            m["face_ref"] = str((base / m["face_ref"]).resolve())
+    return models
+
+
+def items(categories=None, products=None, fabrics=None, colours=None) -> Iterator[dict]:
+    for c in categories or CATEGORIES:
+        for p in products or PRODUCTS:
+            for f in fabrics or FABRICS:
+                for colour in COLOURS[f]:
+                    if colours and colour not in colours:
+                        continue
+                    yield {"category": c, "product": p, "fabric": f, "colour": colour}
+
+
+def folder_for(out: str, it: dict) -> Path:
+    return Path(out) / it["category"] / it["product"] / it["fabric"] / it["colour"].replace(" ", "_")
+
+
+class LibraryRunner:
+    """Generates library images. stage='fronts' makes front_main + front_main_white for review;
+    stage='poses' makes the other poses from approved fronts; stage='all' does both."""
+
+    def __init__(self, agent, models: Dict[str, dict], out="output", negative=True):
+        self.agent = agent  # anything with _call(prompt, refs) -> bytes (CatalogAgent)
+        self.models = models
+        self.out = out
+        self.negative = negative
+
+    def prompt(self, it, pose) -> str:
+        m = self.models.get(it["category"], {})
+        text = build_prompt(it["category"], it["product"], it["fabric"], pose, it["colour"], m.get("hairstyle"))
+        if self.negative:  # the image API has no negative-prompt field, so it is appended as an instruction
+            text += " Avoid: " + build_negative(it["category"], it["product"], pose) + "."
+        return text
+
+    def run(self, it, poses: List[str], stage="all", force=False) -> Iterator[tuple]:
+        face = self.models.get(it["category"], {}).get("face_ref")
+        if not face:
+            raise ValueError(f"No face_ref for {it['category']} in the models file")
+        folder = folder_for(self.out, it)
+        folder.mkdir(parents=True, exist_ok=True)
+        front = folder / "front_main.png"
+        for pose in poses:
+            is_front = pose in FRONTS
+            if (stage == "fronts" and not is_front) or (stage == "poses" and is_front):
+                continue
+            path = folder / f"{pose}.png"
+            if path.exists() and not force:
+                yield pose, path, "skipped"
+                continue
+            if is_front:
+                refs = [face]
+            elif front.exists():
+                refs = [face, str(front)]
+            else:
+                yield pose, path, "waiting for front_main"
+                continue
+            path.write_bytes(self.agent._call(self.prompt(it, pose), refs))
+            yield pose, path, "made"

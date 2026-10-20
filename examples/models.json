@@ -1,0 +1,6 @@
+{
+  "Men": {"face_ref": "faces/men.jpg"},
+  "Women": {"face_ref": "faces/women.jpg"},
+  "Kids_Boys": {"face_ref": "faces/kids_boys.jpg"},
+  "Kids_Girls": {"face_ref": "faces/kids_girls.jpg", "hairstyle": "two pigtails with pink ties"}
+}

@@ -79,6 +79,27 @@ jagimage catalog --kids examples/kids.json --swatches swatches/ --texture
 
 Colours, poses, categories and prompts live in `jagimage/catalog.py`. By default, full-sleeve tees are styled with joggers (prompts swap "shorts" for "joggers") and everything else with shorts. Bottoms are navy, or charcoal under navy and black tops. Change this in `pants()` and `legs()`.
 
+## SPB Textile prompt library
+
+`jagimage library` makes images from the full SPB Textile prompt library. It covers **Men, Women, Kids Boys and Kids Girls**, each in **7 products** (HalfSleeveTee, FullSleeveTee, SleevelessTee, Shorts, Trackpants, Hoodie, Sweatshirt). Each product comes in **Pure Cotton** (9 colours) or **Cotton Mix** (17 colours), and each variant gets **6 poses** (front_main, front_main_white, threequarter, side, back, handpocket). The prompts are built from the library's parts in `jagimage/library.py`, and tests check them word for word against the library document.
+
+Identity is kept consistent in two stages, as the library describes:
+
+```bash
+# 1. Make fronts only (front_main + front_main_white), using each category's face reference
+jagimage library --models examples/models.json --category Men --product HalfSleeveTee --fabric PureCotton --stage fronts
+# 2. Review them, delete any you reject, and re-run step 1 to remake them
+# 3. Make the other poses: image 1 = face reference, image 2 = the approved front_main
+jagimage library --models examples/models.json --category Men --product HalfSleeveTee --fabric PureCotton --stage poses
+```
+
+- `examples/models.json` sets one `face_ref` per category. For Kids_Girls, set `hairstyle` (e.g. "two pigtails with pink ties") so the exact hairstyle appears in every pose's prompt.
+- Filters take comma-separated values: `--category`, `--product`, `--fabric`, `--colour "Navy Blue,Light Pink"`, `--poses`.
+- `--dry-run` prints the prompts without calling the API. `--export prompts.json` writes the whole library (category → fabric → pose → prompt/negative).
+- The OpenAI image API has no negative-prompt field, so each pose's negative list is added to the prompt as an `Avoid: …` line. `--no-negative` turns that off.
+- Images that already exist are skipped. Output goes to `output/<Category>/<Product>/<Fabric>/<Colour>/<pose>.png`.
+- The full library is 728 variants × 6 poses = 4,368 images. Use filters to run it in batches.
+
 ## Use from Python
 
 ```python

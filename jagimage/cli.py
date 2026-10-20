@@ -60,6 +60,57 @@ def _catalog(args) -> int:
     return 1 if failures else 0
 
 
+def _csv(value):
+    return [v.strip() for v in value.split(",") if v.strip()] if value else None
+
+
+def _library(args) -> int:
+    from . import library as L
+
+    if args.export:
+        L.export(args.export)
+        print(f"Wrote {args.export}")
+        return 0
+    checks = [(_csv(args.category), L.CATEGORIES, "category"), (_csv(args.product), L.PRODUCTS, "product"),
+              (_csv(args.fabric), list(L.FABRICS), "fabric"), (_csv(args.poses), list(L.POSES), "pose")]
+    for given, allowed, name in checks:
+        bad = [g for g in given or [] if g not in allowed]
+        if bad:
+            print(f"Unknown {name}: {', '.join(bad)}. Choose from: {', '.join(allowed)}", file=sys.stderr)
+            return 2
+    poses = _csv(args.poses) or list(L.POSES)
+    items = list(L.items(_csv(args.category), _csv(args.product), _csv(args.fabric), _csv(args.colour)))
+    if not items:
+        print("No SKUs match those filters (colour names must match the fabric's palette).", file=sys.stderr)
+        return 2
+    print(f"{len(items)} SKUs x {len(poses)} poses = up to {len(items) * len(poses)} images")
+    models = L.load_models(args.models) if args.models else {}
+    if args.dry_run:
+        runner = L.LibraryRunner(None, models, negative=not args.no_negative)
+        for it in items:
+            print(f"\n=== {it['category']}/{it['product']}/{it['fabric']}/{it['colour']} ===")
+            for pose in poses:
+                print(f"[{pose}] {runner.prompt(it, pose)}")
+        return 0
+    if not args.models:
+        print("--models is required to generate images (face reference per category).", file=sys.stderr)
+        return 2
+    from .catalog import CatalogAgent
+
+    agent = CatalogAgent(model=args.model, output_dir=args.out, quality=args.quality, size=args.size, fidelity=args.fidelity)
+    runner = L.LibraryRunner(agent, models, out=args.out, negative=not args.no_negative)
+    failures = 0
+    for it in items:
+        sku = f"{it['category']}/{it['product']}/{it['fabric']}/{it['colour']}"
+        try:
+            for pose, path, status in runner.run(it, poses, stage=args.stage, force=args.force):
+                print(f"{sku} [{pose}] {status} {path}")
+        except Exception as exc:
+            failures += 1
+            print(f"{sku} failed: {exc}", file=sys.stderr)
+    return 1 if failures else 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="jagimage", description="E-commerce image agent")
     common = argparse.ArgumentParser(add_help=False)
@@ -101,6 +152,25 @@ def main(argv=None) -> int:
     cat.add_argument("--force", action="store_true", help="Regenerate images that already exist")
     cat.add_argument("--dry-run", action="store_true", help="Print the prompts without calling the API")
 
+    lib = sub.add_parser("library", help="SPB Textile prompt library: Men/Women/Kids x 7 products x 2 fabrics x 6 poses")
+    lib.add_argument("--models", help="JSON with a face_ref per category (see examples/models.json)")
+    lib.add_argument("--category", help="Comma-separated: Men, Women, Kids_Boys, Kids_Girls")
+    lib.add_argument("--product", help="Comma-separated: HalfSleeveTee, FullSleeveTee, SleevelessTee, Shorts, Trackpants, Hoodie, Sweatshirt")
+    lib.add_argument("--fabric", help="Comma-separated: PureCotton, CottonMix")
+    lib.add_argument("--colour", help='Comma-separated colour names, e.g. "Navy Blue,Light Pink"')
+    lib.add_argument("--poses", help="Comma-separated: front_main, front_main_white, threequarter, side, back, handpocket")
+    lib.add_argument("--stage", default="all", choices=["fronts", "poses", "all"],
+                     help="fronts = front_main(+white) only for review; poses = other poses from approved fronts")
+    lib.add_argument("--no-negative", action="store_true", help="Don't append the negative list as an 'Avoid:' line")
+    lib.add_argument("--export", metavar="FILE", help="Write the whole library as prompts.json and exit")
+    lib.add_argument("--model", help=f"Image model (default: $JAGIMAGE_MODEL or {DEFAULT_MODEL})")
+    lib.add_argument("--out", default="output")
+    lib.add_argument("--quality", default="high", choices=["low", "medium", "high", "xhigh", "max", "auto"])
+    lib.add_argument("--size", default="1024x1536")
+    lib.add_argument("--fidelity", choices=["high", "low"], help="input_fidelity for reference edits, if your model supports it")
+    lib.add_argument("--force", action="store_true", help="Regenerate images that already exist")
+    lib.add_argument("--dry-run", action="store_true", help="Print the prompts without calling the API")
+
     args = parser.parse_args(argv)
 
     if args.command == "shots":
@@ -110,6 +180,8 @@ def main(argv=None) -> int:
 
     if args.command == "catalog":
         return _catalog(args)
+    if args.command == "library":
+        return _library(args)
 
     agent = _agent(args)
     failures = 0
