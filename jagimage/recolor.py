@@ -14,6 +14,8 @@ from scipy import ndimage
 
 W_L = 0.35  # weight of lightness vs colour when matching the garment (shadows stay in)
 MODES = ("match", "hue", "scale")
+WHITE_FROM = 0.93  # targets this light keep texture as shadow below the hex (white can't go brighter)
+FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
 
 class MaskError(RuntimeError):
@@ -80,6 +82,9 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
     sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
     keep = np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1
     m = np.isin(lbl, keep)
+    # grow into connected deep folds/shadows of the same fabric that the strict match missed
+    loose = np.linalg.norm((lab - centre) * w, axis=-1) < tol * 2.2
+    m = ndimage.binary_propagation(m, mask=m | loose)
     m = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
     # fill only small holes (knit speckle, stitching); keep real gaps like arm-to-body background
     holes = ndimage.binary_fill_holes(m) & ~m
@@ -95,21 +100,62 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
     return soft, lab[core].mean(axis=0) if core.any() else centre
 
 
-def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = "match") -> np.ndarray:
+def texture_gain(mean_L: float, target_L: float) -> float:
+    """How much stronger the fabric's light-and-shadow must be at the new colour. Real fabric
+    shows its folds and knit with more contrast in light dyes than in dark ones, so going from
+    a black photo to yellow multiplies the texture (about 2.5x) and white to navy reduces it."""
+    return float(np.clip(((target_L + 0.08) / (mean_L + 0.08)) ** 0.8, 0.35, 3.5))
+
+
+def fabric_layers(L: np.ndarray, mask: Optional[np.ndarray]):
+    """Split lightness into: folds/shading (soft, large scale), knit grain (fine, after removing
+    1-pixel camera/JPEG noise) and that noise. Blurs only inside the garment so the background
+    doesn't bleed in at the edges."""
+    Ld = ndimage.median_filter(L, size=3)
+    if mask is None:
+        return Ld, Ld, L - Ld
+    m = (mask > 0.5).astype(np.float32)
+    num = ndimage.gaussian_filter(Ld * m, 3.0)
+    den = ndimage.gaussian_filter(m, 3.0)
+    Lb = np.where(den > 1e-3, num / np.maximum(den, 1e-3), Ld)
+    return Lb, Ld - Lb, L - Ld
+
+
+def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = "match",
+                mask: Optional[np.ndarray] = None, texture: float = 1.0) -> np.ndarray:
+    """Recolour in OKLab. The garment's own colour is discarded; only its texture is kept.
+    match: the fabric's folds, shading and knit (scaled for the new lightness) around the exact hex.
+    hue:   keep the photo's lightness as it is; only hue and colour strength change.
+    scale: multiply lightness by target/original (older behaviour, can look grainy)."""
     T = hex_to_lab(target_hex)
-    L, ab = lab[..., :1], lab[..., 1:]
+    L, ab = lab[..., 0], lab[..., 1:]
     if mode == "hue":
-        L2, ab2 = L, T[1:] + (ab - mean[1:]) * 0.35
+        L2 = L
     elif mode == "scale":
         f = T[0] / mean[0] if mean[0] > 0.02 else 1.0
-        L2, ab2 = np.minimum(1, L * f), np.broadcast_to(T[1:], ab.shape)
+        L2 = L * f
     else:
-        L2, ab2 = T[0] + (L - mean[0]), T[1:] + (ab - mean[1:]) * 0.35
-    return np.concatenate([np.clip(L2, 0, 1), ab2], axis=-1)
+        g = texture_gain(float(mean[0]), float(T[0]))
+        Lb, knit, noise = fabric_layers(L, mask)
+        fold = g * (Lb - mean[0])  # cap deep creases so boosted shadows don't read as dirt
+        L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + g * texture * knit + noise * min(1.0, 1.0 / g)
+        if T[0] > WHITE_FROM:  # near-white: highlights stay on the hex, folds show as shadow only
+            return np.concatenate([np.clip(T[0] + np.minimum(L2 - T[0], 0), 0, 1)[..., None],
+                                   T[1:] + (ab - mean[1:]) * 0.35], axis=-1)
+        # Light targets: roll highlights off below 1 instead of clipping them flat, then
+        # re-centre so the garment still averages the exact target lightness.
+        for _ in range(2):
+            over = L2 > T[0]
+            head = max(1.0 - T[0], 1e-3)
+            L2 = np.where(over, T[0] + head * np.tanh((L2 - T[0]) / head), L2)
+            if mask is not None and (mask > 0.95).any():
+                L2 = L2 + (T[0] - L2[mask > 0.95].mean())
+    ab2 = T[1:] + (ab - mean[1:]) * (0.35 if mode != "scale" else 0.0)
+    return np.concatenate([np.clip(L2, 0, 1)[..., None], ab2], axis=-1)
 
 
 def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = "match",
-                  mask: Optional[np.ndarray] = None) -> Tuple[Image.Image, float, np.ndarray]:
+                  mask: Optional[np.ndarray] = None, texture: float = 1.0) -> Tuple[Image.Image, float, np.ndarray]:
     """Returns (recoloured image, ΔE x100 of the garment vs target, soft mask used)."""
     rgba = np.asarray(img.convert("RGBA"))
     rgb = rgba[..., :3]
@@ -121,7 +167,7 @@ def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = 
         if not core.any():
             raise MaskError("The supplied mask is empty.")
         mean = lab[core].mean(axis=0)
-    new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode)).astype(np.float32)
+    new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=mask, texture=texture)).astype(np.float32)
     out = _composite(rgb.astype(np.float32), new, mask)
     core = mask > 0.95
     de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - hex_to_lab(target_hex)) * 100)

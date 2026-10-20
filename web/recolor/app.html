@@ -301,9 +301,9 @@ PALETTES.Custom = parseCustom(customText);
 
 // ---------- State ----------
 const MODES = {
-  match: "Lands on the exact shade on average. Folds and knit keep their relative depth.",
+  match: "Reads the fabric's folds and knit and rebuilds them in the new colour, on the exact shade. Texture is strengthened for light colours.",
   hue: "Keeps the photo's own light and shadow; only the hue and colour strength change.",
-  scale: "Scales shading in proportion. Use it for big jumps like black to white so texture stays visible.",
+  scale: "Multiplies the photo's lightness by the change. Stronger, but can look grainy on dark photos.",
 };
 const state = { docs: [], active: -1, k: 6, wL: 0.35, mode: "match", hex: "#0C2340", sel: new Set(), hover: -1, palette: "Pure Cotton", ways: [], comparing: false, connected: true, tol: 0.05 };
 const view = $("view"), vctx = view.getContext("2d", { willReadFrequently: true });
@@ -398,6 +398,16 @@ function splitAt(doc, split, record) {
     if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     if (x > 0 && ok(i - 1)) { mask[i - 1] = 1; stack[sp++] = i - 1; } if (x < W - 1 && ok(i + 1)) { mask[i + 1] = 1; stack[sp++] = i + 1; }
     if (y > 0 && ok(i - W)) { mask[i - W] = 1; stack[sp++] = i - W; } if (y < H - 1 && ok(i + W)) { mask[i + W] = 1; stack[sp++] = i + W; } }
+  { // grow into connected deep folds/shadows of the same fabric that the region match missed
+    const lab = [0, 0, 0], wL = doc.wL, lim = Math.max(split.tol, 0.03) * 2.2, src = doc.src;
+    const close = (j) => { if (mask[j] || labels[j] === 255) return false; const o = j * 4; rgbToLab(src[o], src[o+1], src[o+2], lab);
+      return Math.hypot(lab[0] * wL - f0[0], lab[1] - f0[1], lab[2] - f0[2]) < lim; };
+    for (let i = 0; i < mask.length; i++) if (mask[i]) stack[sp++] = i;
+    while (sp) { const i = stack[--sp]; const x = i % W, y = (i / W) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1])
+        if (j >= 0 && close(j)) { mask[j] = 1; stack[sp++] = j; count++; } }
+  }
   let nearTotal = 0; for (let i = 0; i < labels.length; i++) if (labels[i] !== 255 && near[labels[i]]) nearTotal++;
   if (count > nearTotal * 0.97 && near.reduce((s, v) => s + v, 0) === 1) return L0; // already one piece
   // close small holes (knit speckle, stitching) inside the part
@@ -426,36 +436,77 @@ function recountShares(doc) {
 }
 
 // ---------- Recolouring ----------
-function recolorPixel(L, a, b, e, out, o) {
-  const T = e.lab, M = e.mean;
-  let L2, a2, b2;
-  if (e.mode === "hue") { L2 = L; a2 = T[1] + (a - M[1]) * 0.35; b2 = T[2] + (b - M[2]) * 0.35; }
-  else if (e.mode === "scale") { const f = M[0] > 0.02 ? T[0] / M[0] : 1; L2 = Math.min(1, L * f); a2 = T[1]; b2 = T[2]; }
-  else { L2 = T[0] + (L - M[0]); a2 = T[1] + (a - M[1]) * 0.35; b2 = T[2] + (b - M[2]) * 0.35; }
-  labToRgb(Math.max(0, Math.min(1, L2)), a2, b2, out, o);
-}
+// The garment's own colour is discarded; only its texture is kept. In "Exact match" the
+// fabric's folds/shading and knit grain are rebuilt around the exact hex, with their contrast
+// scaled for the new lightness (black -> yellow needs ~2.5x stronger texture to look real).
+const FOLD_CAP = 0.2;
+const textureGain = (mL, tL) => Math.min(3.5, Math.max(0.35, ((tL + 0.08) / (mL + 0.08)) ** 0.8));
 function prepEdits(doc, edits) {
   const E = new Array(256).fill(null);
   for (const [lbl, ed] of Object.entries(edits)) { const c = doc.clusters[lbl]; if (!c) continue;
-    E[lbl] = { mode: ed.mode, lab: hexToLab(ed.hex), mean: [c.L, c.a, c.b] }; }
+    const lab = hexToLab(ed.hex); E[lbl] = { mode: ed.mode, lab, mean: [c.L, c.a, c.b], g: textureGain(c.L, lab[0]), delta: 0 }; }
   return E;
+}
+function median5(L, touched, W, H) { // removes 1-pixel camera/JPEG noise, keeps knit structure
+  const out = new Float32Array(L.length), v = new Float32Array(5);
+  for (let i = 0; i < L.length; i++) { if (!touched[i]) continue; const x = i % W, c = L[i];
+    v[0] = c; v[1] = x > 0 && touched[i-1] ? L[i-1] : c; v[2] = x < W-1 && touched[i+1] ? L[i+1] : c;
+    v[3] = i >= W && touched[i-W] ? L[i-W] : c; v[4] = i + W < L.length && touched[i+W] ? L[i+W] : c;
+    v.sort(); out[i] = v[2]; }
+  return out;
+}
+function maskedBlur(V, M, W, H, r) { // box blur (x2, ~gaussian) that only averages garment pixels
+  let val = new Float32Array(V.length), wt = new Float32Array(V.length);
+  for (let i = 0; i < V.length; i++) if (M[i]) { val[i] = V[i]; wt[i] = 1; }
+  const pass = (a, horiz) => { const o = new Float32Array(a.length), len = horiz ? W : H, lines = horiz ? H : W;
+    for (let ln = 0; ln < lines; ln++) { let s = 0; const at = (k) => horiz ? ln * W + k : k * W + ln;
+      for (let k = -r; k <= r; k++) if (k >= 0 && k < len) s += a[at(k)];
+      for (let k = 0; k < len; k++) { o[at(k)] = s; const add = k + r + 1, rem = k - r; if (add < len) s += a[at(add)]; if (rem >= 0) s -= a[at(rem)]; } }
+    return o; };
+  for (let p = 0; p < 2; p++) { val = pass(pass(val, true), false); wt = pass(pass(wt, true), false); }
+  const out = new Float32Array(V.length);
+  for (let i = 0; i < V.length; i++) out[i] = wt[i] > 1e-6 ? val[i] / wt[i] : V[i];
+  return out;
 }
 function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
   ensureMaps(doc);
-  const { src } = doc, { labels, label2, ratio } = doc.maps, n = doc.w * doc.h, E = prepEdits(doc, edits);
-  const lab = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0];
+  const { src, w: W, h: H } = doc, { labels, label2, ratio } = doc.maps, n = W * H, E = prepEdits(doc, edits);
+  const touched = new Uint8Array(n); let any = false;
+  for (let i = 0; i < n; i++) { const l = labels[i]; if (l !== 255 && (E[l] || E[label2[i]])) { touched[i] = 1; any = true; } }
+  if (!any) { out.set(src); return; }
+  const L = new Float32Array(n), A = new Float32Array(n), B = new Float32Array(n), lab = [0, 0, 0];
+  for (let i = 0; i < n; i++) if (touched[i]) { const o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); L[i] = lab[0]; A[i] = lab[1]; B[i] = lab[2]; }
+  let Ld = L, Lb = L;
+  if (E.some((e) => e && e.mode === "match")) {
+    const M = new Uint8Array(n); for (let i = 0; i < n; i++) if (touched[i] && E[labels[i]] && E[labels[i]].mode === "match") M[i] = 1;
+    Ld = median5(L, touched, W, H); Lb = maskedBlur(Ld, M, W, H, 4);
+  }
+  const texL = (e, i) => {
+    const T = e.lab, Mn = e.mean;
+    if (e.mode === "hue") return L[i];
+    if (e.mode === "scale") return L[i] * (Mn[0] > 0.02 ? T[0] / Mn[0] : 1);
+    const fold = e.g * (Lb[i] - Mn[0]); // cap deep creases so boosted shadows don't read as dirt
+    let v = T[0] + FOLD_CAP * Math.tanh(fold / FOLD_CAP) + e.g * (Ld[i] - Lb[i]) + (L[i] - Ld[i]) * Math.min(1, 1 / e.g);
+    if (T[0] > 0.93) return Math.min(v, T[0]); // near-white: highlights on the hex, folds as shadow only
+    if (v > T[0]) { const hd = Math.max(1 - T[0], 1e-3); v = T[0] + hd * Math.tanh((v - T[0]) / hd); } // roll off highlights
+    return v + e.delta;
+  };
+  // re-centre each region so it still averages the exact target lightness
+  const sum = new Float64Array(256), cnt = new Float64Array(256);
+  for (let i = 0; i < n; i++) { const l = labels[i]; if (touched[i] && E[l] && E[l].mode === "match" && ratio[i] < 128) { sum[l] += Math.min(1, Math.max(0, texL(E[l], i))); cnt[l]++; } }
+  E.forEach((e, l) => { if (e && cnt[l] && e.lab[0] <= 0.93) e.delta = e.lab[0] - sum[l] / cnt[l]; });
+  const p1 = [0, 0, 0], p2 = [0, 0, 0];
+  const paint = (e, i, p, o) => { if (!e) { p[0] = src[o]; p[1] = src[o+1]; p[2] = src[o+2]; return; }
+    const sat = e.mode === "scale" ? 0 : 0.35;
+    labToRgb(Math.max(0, Math.min(1, texL(e, i))), e.lab[1] + (A[i] - e.mean[1]) * sat, e.lab[2] + (B[i] - e.mean[2]) * sat, p, 0); };
   for (let i = 0; i < n; i++) {
-    const o = i * 4, l1 = labels[i];
-    const e1 = l1 === 255 ? null : E[l1], e2 = l1 === 255 ? null : E[label2[i]];
-    if (!e1 && !e2) { out[o] = src[o]; out[o+1] = src[o+1]; out[o+2] = src[o+2]; out[o+3] = src[o+3]; continue; }
-    rgbToLab(src[o], src[o + 1], src[o + 2], lab);
-    // boundary blend: interior pixels take their own region fully, edges mix with the runner-up
+    const o = i * 4;
+    if (!touched[i]) { out[o] = src[o]; out[o+1] = src[o+1]; out[o+2] = src[o+2]; out[o+3] = src[o+3]; continue; }
+    const e1 = E[labels[i]], e2 = E[label2[i]];
     const r = ratio[i] / 255, wgt = r < 0.6 ? 1 : Math.max(0.5, 1 - (r - 0.6) * 1.25);
-    if (e1) recolorPixel(lab[0], lab[1], lab[2], e1, p1, 0); else { p1[0] = src[o]; p1[1] = src[o+1]; p1[2] = src[o+2]; }
-    if (wgt < 1) {
-      if (e2) recolorPixel(lab[0], lab[1], lab[2], e2, p2, 0); else { p2[0] = src[o]; p2[1] = src[o+1]; p2[2] = src[o+2]; }
-      out[o] = p1[0] * wgt + p2[0] * (1 - wgt); out[o+1] = p1[1] * wgt + p2[1] * (1 - wgt); out[o+2] = p1[2] * wgt + p2[2] * (1 - wgt);
-    } else { out[o] = p1[0]; out[o+1] = p1[1]; out[o+2] = p1[2]; }
+    paint(e1, i, p1, o);
+    if (wgt < 1) { paint(e2, i, p2, o); out[o] = p1[0] * wgt + p2[0] * (1 - wgt); out[o+1] = p1[1] * wgt + p2[1] * (1 - wgt); out[o+2] = p1[2] * wgt + p2[2] * (1 - wgt); }
+    else { out[o] = p1[0]; out[o+1] = p1[1]; out[o+2] = p1[2]; }
     out[o + 3] = src[o + 3];
   }
 }

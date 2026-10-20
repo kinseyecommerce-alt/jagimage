@@ -1,6 +1,4 @@
-import base64
 import json
-from types import SimpleNamespace
 
 import pytest
 
