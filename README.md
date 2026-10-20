@@ -93,7 +93,12 @@ jagimage library --models examples/models.json --category Men --product HalfSlee
 jagimage library --models examples/models.json --category Men --product HalfSleeveTee --fabric PureCotton --stage poses
 ```
 
-- `examples/models.json` sets one `face_ref` per category. For Kids_Girls, set `hairstyle` (e.g. "two pigtails with pink ties") so the exact hairstyle appears in every pose's prompt.
+- **A different model for each variant:** each product/fabric/colour gets its own model from the category's list in `examples/models.json`. The list rotates, and the model stays the same across that variant's 6 poses. Each entry can have:
+  - a `face` photo,
+  - a `hairstyle` (put the exact hairstyle for every Kids_Girls entry),
+  - a `look` (extra face details).
+
+  An entry without a photo creates a brand-new face. Run with no `--models` file at all and every variant gets a new face. Use `--face-by product` to keep one model across all colours of a product. Whichever model was used for a front is saved in `model.json` next to the images, so the poses always match it.
 - Filters take comma-separated values: `--category`, `--product`, `--fabric`, `--colour "Navy Blue,Light Pink"`, `--poses`.
 - `--dry-run` prints the prompts without calling the API. `--export prompts.json` writes the whole library (category → fabric → pose → prompt/negative).
 - The OpenAI image API has no negative-prompt field, so each pose's negative list is added to the prompt as an `Avoid: …` line. `--no-negative` turns that off.

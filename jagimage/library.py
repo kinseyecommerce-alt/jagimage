@@ -126,24 +126,42 @@ def has_joggers(category: str, product: str) -> bool:
     return product == "Trackpants" or (is_kids(category) and product == "FullSleeveTee")
 
 
-def model_text(category: str, hairstyle: Optional[str] = None) -> str:
+# Used instead of REFERENCE_LINE + MATCH_FRONT_LINE when there is no face photo: the
+# approved front (the only reference image) carries the model's identity.
+FRONT_ONLY_LINE = ("Use the reference image (approved front of the same model and colour) for identity: keep exactly the same "
+                   "face, facial features, skin tone, hairstyle, hair colour and hair length, and the same garment and colour. "
+                   "Create a new full-body photo. ")
+
+
+def model_text(category: str, hairstyle: Optional[str] = None, look: Optional[str] = None, has_reference=True) -> str:
     text = MODELS[category]
-    if hairstyle and category == "Kids_Girls":
-        text = text.replace(GIRLS_HAIR_EXAMPLE, f"({hairstyle})")
+    if category == "Kids_Girls":
+        if hairstyle:
+            text = text.replace(GIRLS_HAIR_EXAMPLE, f"({hairstyle})")
+        if not has_reference:
+            text = text.replace("hairstyle exactly as in the reference ", "hairstyle ")
+    if look:
+        text += f", {look}"
     return text
 
 
-def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None) -> str:
-    """Prompt for one cell of the library. Leaves {COLOUR}/{HEX} in place when colour is None."""
+def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None, look=None, face=True) -> str:
+    """Prompt for one cell of the library. Leaves {COLOUR}/{HEX} in place when colour is None.
+    face=False: no face photo, so fronts invent a new model and poses copy it from the front."""
     kind = FABRIC_KIND[product]
     kids = is_kids(category)
+    front = pose in FRONTS
     if kids and product == "FullSleeveTee":
         garment, pairing = KIDS_FULLSLEEVE_SET, KIDS_FULLSLEEVE_PAIRING
     else:
         garment = GARMENTS[product]
         pairing = PAIRING[("Kids" if kids else category, "bottom" if kind == "bottom" else "top")]
-    reference = REFERENCE_LINE + ("" if pose in FRONTS else MATCH_FRONT_LINE)
-    text = (f"{reference}Photo of {model_text(category, hairstyle)}, {POSES[pose]}. Wearing {garment}, "
+    if face:
+        reference = REFERENCE_LINE + ("" if front else MATCH_FRONT_LINE)
+    else:
+        reference = "" if front else FRONT_ONLY_LINE
+    model = model_text(category, hairstyle, look, has_reference=face or not front)
+    text = (f"{reference}Photo of {model}, {POSES[pose]}. Wearing {garment}, "
             f"fabric: {FABRIC_TEXT[fabric][kind]}, paired with {pairing}. {BACKGROUNDS.get(pose, GREY)} {RULES}")
     if kids:
         text += KIDS_RULE
@@ -178,13 +196,24 @@ def export(path: str) -> dict:
     return data
 
 
-def load_models(path: str) -> Dict[str, dict]:
-    """JSON keyed by category: {"Men": {"face_ref": "faces/men.jpg"}, "Kids_Girls": {"face_ref": ..., "hairstyle": ...}}."""
-    models = json.loads(Path(path).read_text())
-    base = Path(path).parent
-    for m in models.values():
-        if m.get("face_ref"):
-            m["face_ref"] = str((base / m["face_ref"]).resolve())
+def load_models(path: Optional[str]) -> Dict[str, List[dict]]:
+    """JSON keyed by category, each a list of models: {"Men": {"faces": [{"face": "faces/men1.jpg"},
+    {"face": "faces/men2.jpg"}, {"look": "oval face, thick wavy hair"}]}}. Each entry may have
+    face (photo), hairstyle and look. An entry without a face photo makes a brand-new face.
+    Old style {"face_ref": ..., "hairstyle": ...} is still accepted. No file = new faces everywhere."""
+    raw = json.loads(Path(path).read_text()) if path else {}
+    base = Path(path).parent if path else Path(".")
+    models = {}
+    for category in CATEGORIES:
+        cfg = raw.get(category, {})
+        entries = cfg.get("faces") or ([{"face": cfg["face_ref"], "hairstyle": cfg.get("hairstyle")}] if cfg.get("face_ref") else [{}])
+        pool = []
+        for e in entries:
+            e = {"face": e} if isinstance(e, str) else dict(e)
+            if e.get("face"):
+                e["face"] = str((base / e["face"]).resolve())
+            pool.append(e)
+        models[category] = pool
     return models
 
 
@@ -198,34 +227,61 @@ def items(categories=None, products=None, fabrics=None, colours=None) -> Iterato
                     yield {"category": c, "product": p, "fabric": f, "colour": colour}
 
 
+def model_index(it: dict, face_by="sku") -> int:
+    """Position of this SKU (or product+fabric) in the full, unfiltered category list, so the
+    same SKU always gets the same model whatever filters a run uses."""
+    keys = []
+    for p in PRODUCTS:
+        for f in FABRICS:
+            if face_by == "product":
+                keys.append((p, f))
+            else:
+                keys.extend((p, f, c) for c in COLOURS[f])
+    key = (it["product"], it["fabric"]) if face_by == "product" else (it["product"], it["fabric"], it["colour"])
+    return keys.index(key)
+
+
 def folder_for(out: str, it: dict) -> Path:
     return Path(out) / it["category"] / it["product"] / it["fabric"] / it["colour"].replace(" ", "_")
 
 
 class LibraryRunner:
     """Generates library images. stage='fronts' makes front_main + front_main_white for review;
-    stage='poses' makes the other poses from approved fronts; stage='all' does both."""
+    stage='poses' makes the other poses from approved fronts; stage='all' does both.
+    Each SKU gets its own model from the category's pool (rotating), kept across its 6 poses."""
 
-    def __init__(self, agent, models: Dict[str, dict], out="output", negative=True):
+    def __init__(self, agent, models: Dict[str, List[dict]], out="output", negative=True, face_by="sku"):
         self.agent = agent  # anything with _call(prompt, refs) -> bytes (CatalogAgent)
         self.models = models
         self.out = out
         self.negative = negative
+        self.face_by = face_by
 
-    def prompt(self, it, pose) -> str:
-        m = self.models.get(it["category"], {})
-        text = build_prompt(it["category"], it["product"], it["fabric"], pose, it["colour"], m.get("hairstyle"))
+    def identity(self, it) -> dict:
+        """The model for this SKU. Once a front exists, the identity saved with it wins, so
+        poses always match the front even if the pool changes later."""
+        saved = folder_for(self.out, it) / "model.json"
+        if saved.exists():
+            return json.loads(saved.read_text())
+        pool = self.models.get(it["category"]) or [{}]
+        return pool[model_index(it, self.face_by) % len(pool)]
+
+    def prompt(self, it, pose, ident=None) -> str:
+        ident = ident if ident is not None else self.identity(it)
+        text = build_prompt(it["category"], it["product"], it["fabric"], pose, it["colour"],
+                            ident.get("hairstyle"), ident.get("look"), face=bool(ident.get("face")))
         if self.negative:  # the image API has no negative-prompt field, so it is appended as an instruction
             text += " Avoid: " + build_negative(it["category"], it["product"], pose) + "."
         return text
 
     def run(self, it, poses: List[str], stage="all", force=False) -> Iterator[tuple]:
-        face = self.models.get(it["category"], {}).get("face_ref")
-        if not face:
-            raise ValueError(f"No face_ref for {it['category']} in the models file")
         folder = folder_for(self.out, it)
         folder.mkdir(parents=True, exist_ok=True)
         front = folder / "front_main.png"
+        if force and front.exists() and "front_main" in poses:
+            (folder / "model.json").unlink(missing_ok=True)  # remaking the front may pick a new model
+        ident = self.identity(it)
+        face = ident.get("face")
         for pose in poses:
             is_front = pose in FRONTS
             if (stage == "fronts" and not is_front) or (stage == "poses" and is_front):
@@ -235,11 +291,13 @@ class LibraryRunner:
                 yield pose, path, "skipped"
                 continue
             if is_front:
-                refs = [face]
+                refs = [face] if face else []
             elif front.exists():
-                refs = [face, str(front)]
+                refs = ([face] if face else []) + [str(front)]
             else:
                 yield pose, path, "waiting for front_main"
                 continue
-            path.write_bytes(self.agent._call(self.prompt(it, pose), refs))
+            path.write_bytes(self.agent._call(self.prompt(it, pose, ident), refs))
+            if pose == "front_main":
+                (folder / "model.json").write_text(json.dumps(ident, indent=2))
             yield pose, path, "made"

@@ -70,7 +70,7 @@ def test_staged_run_uses_face_then_front(tmp_path):
     face = tmp_path / "men.jpg"
     face.write_bytes(b"x")
     agent = FakeAgent()
-    runner = L.LibraryRunner(agent, {"Men": {"face_ref": str(face)}}, out=str(tmp_path / "out"))
+    runner = L.LibraryRunner(agent, {"Men": [{"face": str(face)}]}, out=str(tmp_path / "out"))
     it = {"category": "Men", "product": "Hoodie", "fabric": "CottonMix", "colour": "Navy Blue"}
     poses = list(L.POSES)
 
@@ -93,3 +93,44 @@ def test_cli_library_dry_run_and_export(tmp_path, capsys):
     assert "1 SKUs" in out and "Exact garment colour Red (#CD001A)" in out
     assert main(["library", "--export", str(tmp_path / "p.json")]) == 0
     assert (tmp_path / "p.json").exists()
+
+
+def test_each_sku_gets_a_different_model_and_keeps_it(tmp_path):
+    faces = []
+    for i in range(3):
+        f = tmp_path / f"m{i}.jpg"
+        f.write_bytes(b"x")
+        faces.append(f"m{i}.jpg")
+    (tmp_path / "models.json").write_text(json.dumps({"Men": {"faces": faces}}))
+    models = L.load_models(str(tmp_path / "models.json"))
+    runner = L.LibraryRunner(FakeAgent(), models, out=str(tmp_path / "out"))
+    skus = list(L.items(["Men"], ["Hoodie"], ["PureCotton"]))[:3]
+    assert len({runner.identity(it)["face"] for it in skus}) == 3
+    # same SKU -> same model regardless of filters
+    one = next(L.items(["Men"], ["Hoodie"], ["PureCotton"], ["Red"]))
+    assert runner.identity(one) == runner.identity([s for s in L.items(["Men"], ["Hoodie"], ["PureCotton"]) if s["colour"] == "Red"][0])
+    # the model saved with the front wins for the poses, even if the pool changes
+    list(runner.run(one, ["front_main"]))
+    saved = runner.identity(one)["face"]
+    runner.models = {"Men": [{"face": "other.jpg"}]}
+    assert runner.identity(one)["face"] == saved
+    # product mode: one model across colours
+    prod = L.LibraryRunner(None, models, out=str(tmp_path / "o2"), face_by="product")
+    assert len({prod.identity(it)["face"] for it in skus}) == 1
+
+
+def test_no_face_photo_makes_new_face_then_copies_it(tmp_path):
+    agent = FakeAgent()
+    runner = L.LibraryRunner(agent, L.load_models(None), out=str(tmp_path))
+    it = {"category": "Kids_Girls", "product": "Shorts", "fabric": "CottonMix", "colour": "Pink"}
+    list(runner.run(it, ["front_main", "back"]))
+    (front_prompt, front_refs), (back_prompt, back_refs) = agent.calls
+    assert front_refs == [] and front_prompt.startswith("Photo of a small 4-5 year old Indian girl")
+    assert "exactly as in the reference" not in front_prompt.split(" Avoid:")[0]
+    assert back_refs == [str(tmp_path / "Kids_Girls/Shorts/CottonMix/Pink/front_main.png")]
+    assert back_prompt.startswith(L.FRONT_ONLY_LINE)
+
+
+def test_look_is_added_to_model_description():
+    p = L.build_prompt("Men", "Hoodie", "CottonMix", "front_main", "Grey", look="oval face, thick wavy hair", face=False)
+    assert "friendly natural expression, oval face, thick wavy hair, standing straight" in p

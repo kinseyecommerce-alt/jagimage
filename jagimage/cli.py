@@ -1,6 +1,7 @@
 """Command-line interface: `jagimage create ...`, `jagimage batch ...`, `jagimage shots`."""
 
 import argparse
+from pathlib import Path
 import sys
 
 from .agent import DEFAULT_MODEL, Brand, ImageAgent
@@ -84,21 +85,21 @@ def _library(args) -> int:
         print("No SKUs match those filters (colour names must match the fabric's palette).", file=sys.stderr)
         return 2
     print(f"{len(items)} SKUs x {len(poses)} poses = up to {len(items) * len(poses)} images")
-    models = L.load_models(args.models) if args.models else {}
+    models = L.load_models(args.models)
     if args.dry_run:
-        runner = L.LibraryRunner(None, models, negative=not args.no_negative)
+        runner = L.LibraryRunner(None, models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
         for it in items:
-            print(f"\n=== {it['category']}/{it['product']}/{it['fabric']}/{it['colour']} ===")
+            ident = runner.identity(it)
+            who = Path(ident["face"]).name if ident.get("face") else "new face"
+            extra = "; ".join(f"{k}: {ident[k]}" for k in ("hairstyle", "look") if ident.get(k))
+            print(f"\n=== {it['category']}/{it['product']}/{it['fabric']}/{it['colour']}  (model: {who}{'; ' + extra if extra else ''}) ===")
             for pose in poses:
                 print(f"[{pose}] {runner.prompt(it, pose)}")
         return 0
-    if not args.models:
-        print("--models is required to generate images (face reference per category).", file=sys.stderr)
-        return 2
     from .catalog import CatalogAgent
 
     agent = CatalogAgent(model=args.model, output_dir=args.out, quality=args.quality, size=args.size, fidelity=args.fidelity)
-    runner = L.LibraryRunner(agent, models, out=args.out, negative=not args.no_negative)
+    runner = L.LibraryRunner(agent, models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
     failures = 0
     for it in items:
         sku = f"{it['category']}/{it['product']}/{it['fabric']}/{it['colour']}"
@@ -153,7 +154,9 @@ def main(argv=None) -> int:
     cat.add_argument("--dry-run", action="store_true", help="Print the prompts without calling the API")
 
     lib = sub.add_parser("library", help="SPB Textile prompt library: Men/Women/Kids x 7 products x 2 fabrics x 6 poses")
-    lib.add_argument("--models", help="JSON with a face_ref per category (see examples/models.json)")
+    lib.add_argument("--models", help="JSON with a pool of models per category (see examples/models.json); omit for a new face per SKU")
+    lib.add_argument("--face-by", default="sku", choices=["sku", "product"],
+                     help="sku = a different model for every product/fabric/colour; product = one model per product+fabric across its colours")
     lib.add_argument("--category", help="Comma-separated: Men, Women, Kids_Boys, Kids_Girls")
     lib.add_argument("--product", help="Comma-separated: HalfSleeveTee, FullSleeveTee, SleevelessTee, Shorts, Trackpants, Hoodie, Sweatshirt")
     lib.add_argument("--fabric", help="Comma-separated: PureCotton, CottonMix")

@@ -1,6 +1,23 @@
 {
-  "Men": {"face_ref": "faces/men.jpg"},
-  "Women": {"face_ref": "faces/women.jpg"},
-  "Kids_Boys": {"face_ref": "faces/kids_boys.jpg"},
-  "Kids_Girls": {"face_ref": "faces/kids_girls.jpg", "hairstyle": "two pigtails with pink ties"}
+  "Men": {"faces": [
+    {"face": "faces/men_1.jpg"},
+    {"face": "faces/men_2.jpg"},
+    {"look": "oval face, thick wavy hair, warm wheatish skin"},
+    {"look": "square jaw, short side-parted hair, light beard"}
+  ]},
+  "Women": {"faces": [
+    {"face": "faces/women_1.jpg"},
+    {"look": "round face, long straight hair in a low ponytail"},
+    {"look": "heart-shaped face, shoulder-length soft waves"}
+  ]},
+  "Kids_Boys": {"faces": [
+    {"face": "faces/boy_1.jpg"},
+    {"look": "curly short hair, dimples"},
+    {"look": "straight fringe haircut, round glasses-free bright eyes"}
+  ]},
+  "Kids_Girls": {"faces": [
+    {"face": "faces/girl_1.jpg", "hairstyle": "two pigtails with pink ties"},
+    {"hairstyle": "short bob with side fringe", "look": "dimpled cheeks"},
+    {"hairstyle": "single high ponytail with a red bow"}
+  ]}
 }
