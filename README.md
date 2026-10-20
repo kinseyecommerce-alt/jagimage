@@ -119,3 +119,16 @@ paths = agent.create("linen throw pillow, sage green", shot="lifestyle", n=2)
 ```bash
 pip install -e ".[dev]" && pytest
 ```
+
+## Recolor web app
+
+`web/recolor/index.html` is a browser tool for recolouring existing garment photos. Open the file in a browser; nothing is uploaded anywhere. `app.html` is the same page without the HTML wrapper (the published version).
+
+- **Pick the garment:** it detects colour regions; hover to see them, click to select. "Pick only the part I click" keeps black hair separate from a black tee. "Include similar shades" also pulls in folds and shadows.
+- **Exact colour:** set a hex code or click a Pure Cotton / Cotton Mix swatch. Each region shows ΔE to the target (under 3 = on shade).
+- **Three modes:**
+  - **Exact match:** lands on the hex on average.
+  - **Keep lightness:** keeps the photo's own light and shadow.
+  - **Scale shading:** best for big jumps like black to white.
+- **Colorways:** one photo in every palette colour, saved as a ZIP.
+- **Batch and history:** apply one photo's edits to all photos, export as a ZIP, undo/redo, and a shade ramp you can export as CSS or JSON.

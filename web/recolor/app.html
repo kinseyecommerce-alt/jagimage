@@ -1,0 +1,818 @@
+<title>Jag Recolor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Schibsted+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: dye-room workbench — photos rail | stage | colour desk; stacks to one column on phones */
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #161a22; --muted: #5b6372; --line: #d9dde4;
+  --accent: #3346a8; --accent-soft: #e4e8fb; --accent-ink: #ffffff;
+  --check1: #e6e9ee; --check2: #f3f5f8; --ok: #2c8655; --warn: #a96500; --shade: rgba(14,17,26,.48);
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #101319; --panel: #181c24; --ink: #e8ebf1; --muted: #9aa3b2; --line: #2a303b;
+  --accent: #8b99ff; --accent-soft: #252b48; --accent-ink: #0f1220;
+  --check1: #1c2029; --check2: #232833; --ok: #5cc28d; --warn: #f0b45a; --shade: rgba(0,0,0,.55); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #101319; --panel: #181c24; --ink: #e8ebf1; --muted: #9aa3b2; --line: #2a303b;
+  --accent: #8b99ff; --accent-soft: #252b48; --accent-ink: #0f1220;
+  --check1: #1c2029; --check2: #232833; --ok: #5cc28d; --warn: #f0b45a; --shade: rgba(0,0,0,.55); color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 32px }
+button, input, select { font: inherit; color: inherit }
+button { cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums }
+
+header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 16px }
+.brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-right: auto }
+.brand h1 { font: 700 26px/1 var(--display); margin: 0; letter-spacing: -.01em }
+.brand h1 span { color: var(--accent) }
+.brand p { margin: 0; color: var(--muted) }
+.actions { display: flex; gap: 8px; flex-wrap: wrap }
+
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 7px 12px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px; transition: border-color .15s, background .15s }
+.btn:hover { border-color: var(--accent) }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+.btn:disabled { opacity: .45; cursor: not-allowed }
+.btn.small { padding: 4px 9px; font-size: 13px }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--muted) }
+
+.bench { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; gap: 16px; align-items: start }
+@media (max-width: 1100px) { .bench { grid-template-columns: minmax(0, 1fr) 300px } .rail { grid-column: 1 / -1; order: 3 } }
+@media (max-width: 760px) { .bench { grid-template-columns: minmax(0, 1fr) } .rail { order: 3 } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0 }
+.panel + .panel { margin-top: 12px }
+.panel h2 { font: 600 11px/1 var(--body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px }
+.panel h2 b { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 12px }
+
+/* Photos rail */
+.files { display: grid; gap: 8px; grid-template-columns: 1fr }
+@media (max-width: 1100px) { .files { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) } }
+.file { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left;
+  border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 5px }
+.file.on { border-color: var(--accent); background: var(--accent-soft) }
+.file img { width: 44px; height: 54px; object-fit: cover; border-radius: 5px; background: var(--check1) }
+.file .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px }
+.chip { display: inline-block; font-size: 11px; border-radius: 999px; padding: 1px 7px; border: 1px solid var(--line); color: var(--muted) }
+.chip.ok { color: var(--ok); border-color: currentColor } .chip.warn { color: var(--warn); border-color: currentColor }
+.rail .stack { display: grid; gap: 8px; margin-top: 10px }
+.drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 10px; color: var(--muted); font-size: 12px; text-align: center }
+
+/* Stage */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
+.toolbar .sep { flex: 1 }
+.stage { position: relative; display: grid; place-items: center; min-height: 320px; border-radius: 8px; overflow: hidden;
+  background: repeating-conic-gradient(var(--check1) 0 25%, var(--check2) 0 50%) 50% / 18px 18px }
+.frame { position: relative; display: inline-block; max-width: 100%; line-height: 0 }
+#view { display: block; max-width: 100%; max-height: 72vh; width: auto; height: auto; cursor: crosshair }
+#overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
+.busy { position: absolute; inset: auto 10px 10px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px }
+.hint { color: var(--muted); font-size: 12px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px }
+.detect { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; margin-top: 12px }
+.detect label { display: grid; gap: 2px; font-size: 12px; color: var(--muted) }
+input[type=range] { width: 100%; accent-color: var(--accent) }
+
+/* Regions */
+.regions { display: grid; gap: 4px }
+.region { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left;
+  padding: 5px 6px; border-radius: 6px; border: 1px solid transparent; background: transparent }
+.region:hover { border-color: var(--line) }
+.region.on { border-color: var(--accent); background: var(--accent-soft) }
+.sw { width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--line); display: inline-block }
+.region .to { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted) }
+.region .to .sw { width: 16px; height: 16px }
+.bar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 3px; overflow: hidden }
+.bar i { display: block; height: 100%; background: var(--muted) }
+
+/* Colour desk */
+.colorrow { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: center }
+#picker { width: 44px; height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 2px; background: var(--panel) }
+#hex { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; background: var(--bg); font-family: var(--mono) }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 10px }
+.seg button { border: 0; background: transparent; padding: 7px 4px; font-size: 12px; font-weight: 500 }
+.seg button + button { border-left: 1px solid var(--line) }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink) }
+.modehelp { color: var(--muted); font-size: 12px; margin: 6px 0 0 }
+.readout { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted) }
+.readout b { color: var(--ink); font-weight: 500 }
+
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px }
+.tabs button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 3px 10px; font-size: 12px }
+.tabs button[aria-selected=true] { border-color: var(--accent); color: var(--accent); font-weight: 600 }
+.palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px }
+.pal { border: 1px solid var(--line); border-radius: 6px; padding: 0; background: transparent; display: grid; overflow: hidden }
+.pal i { display: block; aspect-ratio: 1; max-width: 100% }
+.pal span { font-size: 9.5px; line-height: 1.2; padding: 2px 2px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted) }
+.pal:hover { border-color: var(--accent) }
+#customList { width: 100%; min-height: 64px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--bg); font: 12px var(--mono); resize: vertical }
+
+.ways { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin-top: 10px }
+.ways figure { margin: 0; display: grid; gap: 2px }
+.ways img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); background: var(--check1) }
+.ways figcaption { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+progress { width: 100%; accent-color: var(--accent); height: 6px }
+
+.ramp { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); border-radius: 6px; overflow: hidden; border: 1px solid var(--line) }
+.ramp div { aspect-ratio: 1 / 1.4; display: grid; align-content: end; font: 9px var(--mono); padding: 2px; max-width: 100% }
+.row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
+
+.history { display: grid; gap: 2px; max-height: 140px; overflow: auto; font-size: 12px; color: var(--muted) }
+.history div.cur { color: var(--ink); font-weight: 500 }
+
+#toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; max-width: calc(100% - 32px) }
+@media (prefers-reduced-motion: no-preference) { .btn, .region, .pal { transition: border-color .15s, background .15s } }
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Jag <span>Recolor</span></h1>
+    <p>Recolour garment photos to exact shades, keeping the knit, folds and stitching.</p>
+  </div>
+  <div class="actions">
+    <button class="btn" id="addBtn" type="button">Add photos</button>
+    <button class="btn primary" id="exportBtn" type="button">Export PNG <kbd>⌘S</kbd></button>
+  </div>
+  <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
+</header>
+
+<main class="bench">
+  <aside class="rail">
+    <section class="panel">
+      <h2>Photos <b id="fileCount" class="mono"></b></h2>
+      <div class="files" id="files"></div>
+      <div class="stack">
+        <div class="drop">Drop or paste photos here. PNG, JPG, WEBP or SVG.</div>
+        <button class="btn small" id="applyAllBtn" type="button">Apply these edits to all photos</button>
+        <button class="btn small" id="exportAllBtn" type="button">Export all as ZIP</button>
+      </div>
+    </section>
+  </aside>
+
+  <section class="panel">
+    <div class="toolbar">
+      <button class="btn small" id="undoBtn" type="button" title="Undo (⌘Z)">Undo</button>
+      <button class="btn small" id="redoBtn" type="button" title="Redo (⇧⌘Z)">Redo</button>
+      <button class="btn small" id="resetBtn" type="button">Clear edits</button>
+      <span class="sep"></span>
+      <button class="btn small" id="compareBtn" type="button" title="Hold, or hold C">Hold to see original</button>
+    </div>
+    <div class="stage" id="stage">
+      <div class="frame">
+        <canvas id="view" width="600" height="800" aria-label="Photo being recoloured"></canvas>
+        <canvas id="overlay" width="600" height="800"></canvas>
+      </div>
+      <div class="busy" id="busy" hidden>Working…</div>
+    </div>
+    <div class="hint">
+      <span>Hover to see colour regions.</span><span>Click a region to select it, shift-click to add more.</span>
+      <span id="dims" class="mono"></span>
+      <label for="connected" style="display:inline-flex;gap:6px;align-items:center;color:var(--ink)"><input id="connected" type="checkbox" checked>
+        Pick only the part I click (keeps black hair apart from a black tee)</label>
+    </div>
+    <div class="detect">
+      <label for="kRange">Regions to find <span class="mono" id="kVal">6</span>
+        <input id="kRange" type="range" min="2" max="12" value="6"></label>
+      <label for="tolRange">Include similar shades when picking a part <span class="mono" id="tolVal">0.05</span>
+        <input id="tolRange" type="range" min="0" max="0.12" step="0.01" value="0.05"></label>
+      <label for="wRange">Split by light and shadow <span class="mono" id="wVal">0.35</span>
+        <input id="wRange" type="range" min="0.1" max="1" step="0.05" value="0.35"></label>
+    </div>
+  </section>
+
+  <aside>
+    <section class="panel">
+      <h2>Regions <b id="selInfo"></b></h2>
+      <div class="regions" id="regions"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Colour</h2>
+      <div class="colorrow">
+        <input id="picker" type="color" value="#0c2340" aria-label="Pick a colour">
+        <input id="hex" type="text" value="#0C2340" spellcheck="false" aria-label="Hex code">
+        <button class="btn small primary" id="applyBtn" type="button">Apply</button>
+      </div>
+      <div class="seg" role="group" aria-label="How to recolour">
+        <button type="button" data-mode="match" aria-pressed="true">Exact match</button>
+        <button type="button" data-mode="hue" aria-pressed="false">Keep lightness</button>
+        <button type="button" data-mode="scale" aria-pressed="false">Scale shading</button>
+      </div>
+      <p class="modehelp" id="modeHelp"></p>
+      <div class="readout" id="readout"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Palettes</h2>
+      <div class="tabs" role="tablist" id="palTabs"></div>
+      <div class="palette" id="palette"></div>
+      <textarea id="customList" hidden spellcheck="false" aria-label="Custom colours, one per line as Name #HEX"></textarea>
+    </section>
+
+    <section class="panel">
+      <h2>Colorways</h2>
+      <p class="modehelp" style="margin-top:0">Make one photo for every colour in the open palette, using the selected regions.</p>
+      <div class="row"><button class="btn small primary" id="waysBtn" type="button">Make colorways</button>
+        <button class="btn small" id="waysZipBtn" type="button" disabled>Save ZIP</button></div>
+      <progress id="waysProg" value="0" max="1" hidden></progress>
+      <div class="ways" id="ways"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Shade ramp <b class="mono" id="rampBase"></b></h2>
+      <div class="ramp" id="ramp"></div>
+      <div class="row">
+        <button class="btn small" id="copyCss" type="button">Copy CSS</button>
+        <button class="btn small" id="copyJson" type="button">Copy JSON</button>
+        <button class="btn small" id="saveJson" type="button">Save JSON</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>History</h2>
+      <div class="history" id="history"></div>
+    </section>
+  </aside>
+</main>
+<div id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MAX_SIDE = 2400;
+
+// ---------- Colour maths (OKLab) ----------
+const LIN = new Float32Array(256);
+for (let i = 0; i < 256; i++) { const c = i / 255; LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+const GAM = new Uint8ClampedArray(4097);
+for (let i = 0; i <= 4096; i++) { const c = i / 4096; GAM[i] = Math.round(255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055)); }
+const toByte = (c) => GAM[c <= 0 ? 0 : c >= 1 ? 4096 : (c * 4096) | 0];
+const cbrt = Math.cbrt;
+function rgbToLab(r, g, b, out) {
+  r = LIN[r]; g = LIN[g]; b = LIN[b];
+  const l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  out[0] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+  out[1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  out[2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  return out;
+}
+function labToRgb(L, a, b, out, o) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+  out[o] = toByte(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s);
+  out[o + 1] = toByte(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s);
+  out[o + 2] = toByte(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+}
+const hexToRgb = (h) => { h = h.replace("#", ""); if (h.length === 3) h = h.replace(/./g, "$&$&"); const n = parseInt(h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+const rgbToHex = (r, g, b) => "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase();
+const hexToLab = (h) => { const [r, g, b] = hexToRgb(h); return rgbToLab(r, g, b, [0, 0, 0]); };
+const labToHex = (L, a, b) => { const o = [0, 0, 0]; labToRgb(L, a, b, o, 0); return rgbToHex(o[0], o[1], o[2]); };
+const validHex = (h) => /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.test(h.trim());
+const normHex = (h) => { h = h.trim().replace("#", ""); if (h.length === 3) h = h.replace(/./g, "$&$&"); return "#" + h.toUpperCase(); };
+
+// ---------- Palettes (SPB Textile library) ----------
+const PALETTES = {
+  "Pure Cotton": [["Black","#000000"],["White","#FFFFFF"],["Light Pink","#FFA3B5"],["Red","#CD001A"],["Navy","#0C2340"],["Green","#6CC24A"],["Lavender","#C7B2DE"],["Orange","#FF671F"],["Yellow","#FDDA24"]],
+  "Cotton Mix": [["Black","#151515"],["Blue","#004DBE"],["Maroon","#490D14"],["Melange","#C9C7C9"],["White","#E7E7EC"],["Red","#CF0B15"],["Yellow","#F9A712"],["Light Pink","#EBBECE"],["Dark Pink","#E6276A"],["Navy Blue","#1F3A5F"],["Olive","#556B2F"],["Beige","#D8C8A8"],["Grey","#8E8E90"],["Royal Blue","#2A4BA8"],["Military Green","#4B5320"],["Pink","#E8A0B8"],["Green","#2E7D32"]],
+  "Custom": [],
+};
+let customText = "Mustard #D4A017\nTeal #00808A\nCoral #FF6F61";
+try { customText = localStorage.getItem("jr.custom") || customText; } catch (e) {}
+const parseCustom = (t) => t.split("\n").map((s) => s.trim()).filter(Boolean).map((s) => {
+  const m = s.match(/^(.*?)[\s,]*(#?[0-9a-f]{6}|#?[0-9a-f]{3})$/i);
+  return m && validHex(m[2]) ? [m[1].trim() || normHex(m[2]), normHex(m[2])] : null;
+}).filter(Boolean);
+PALETTES.Custom = parseCustom(customText);
+
+// ---------- State ----------
+const MODES = {
+  match: "Lands on the exact shade on average. Folds and knit keep their relative depth.",
+  hue: "Keeps the photo's own light and shadow; only the hue and colour strength change.",
+  scale: "Scales shading in proportion. Use it for big jumps like black to white so texture stays visible.",
+};
+const state = { docs: [], active: -1, k: 6, wL: 0.35, mode: "match", hex: "#0C2340", sel: new Set(), hover: -1, palette: "Pure Cotton", ways: [], comparing: false, connected: true, tol: 0.05 };
+const view = $("view"), vctx = view.getContext("2d", { willReadFrequently: true });
+const overlay = $("overlay"), octx = overlay.getContext("2d");
+
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---------- Segmentation ----------
+function kmeans(doc, k, wL) {
+  const { src, w, h } = doc, n = w * h, rand = rng(1234 + k);
+  const samples = [], lab = [0, 0, 0];
+  const step = Math.max(1, Math.floor(n / 24000));
+  for (let i = 0; i < n; i += step) {
+    const o = i * 4; if (src[o + 3] < 16) continue;
+    rgbToLab(src[o], src[o + 1], src[o + 2], lab); samples.push(lab[0] * wL, lab[1], lab[2]);
+  }
+  const m = samples.length / 3; if (!m) return [];
+  k = Math.min(k, m);
+  const C = [], d = new Float32Array(m).fill(Infinity);
+  let first = Math.floor(rand() * m); C.push([samples[first * 3], samples[first * 3 + 1], samples[first * 3 + 2]]);
+  while (C.length < k) { // k-means++ seeding
+    const c = C[C.length - 1]; let sum = 0;
+    for (let i = 0; i < m; i++) { const dx = samples[i*3]-c[0], dy = samples[i*3+1]-c[1], dz = samples[i*3+2]-c[2]; const v = dx*dx+dy*dy+dz*dz; if (v < d[i]) d[i] = v; sum += d[i]; }
+    let r = rand() * sum, j = 0; for (; j < m - 1; j++) { r -= d[j]; if (r <= 0) break; }
+    C.push([samples[j*3], samples[j*3+1], samples[j*3+2]]);
+  }
+  const asg = new Uint8Array(m);
+  for (let it = 0; it < 14; it++) {
+    const acc = C.map(() => [0, 0, 0, 0]);
+    for (let i = 0; i < m; i++) {
+      let best = 0, bd = Infinity; const x = samples[i*3], y = samples[i*3+1], z = samples[i*3+2];
+      for (let c = 0; c < C.length; c++) { const dx = x-C[c][0], dy = y-C[c][1], dz = z-C[c][2]; const v = dx*dx+dy*dy+dz*dz; if (v < bd) { bd = v; best = c; } }
+      asg[i] = best; const a = acc[best]; a[0] += x; a[1] += y; a[2] += z; a[3]++;
+    }
+    acc.forEach((a, c) => { if (a[3]) C[c] = [a[0] / a[3], a[1] / a[3], a[2] / a[3]]; });
+  }
+  return C.map((c) => ({ f: c, L: c[0] / wL, a: c[1], b: c[2] }));
+}
+
+function assign(doc) { // per-pixel label, runner-up label and boundary ratio (byte)
+  const { src, w, h, clusters, wL } = doc, n = w * h, K = clusters.length;
+  const labels = new Uint8Array(n), label2 = new Uint8Array(n), ratio = new Uint8Array(n);
+  const counts = new Float64Array(K), lab = [0, 0, 0], F = clusters.map((c) => c.f);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4; if (src[o + 3] < 16) { labels[i] = 255; label2[i] = 255; continue; }
+    rgbToLab(src[o], src[o + 1], src[o + 2], lab);
+    const x = lab[0] * wL, y = lab[1], z = lab[2];
+    let b1 = 0, d1 = Infinity, b2 = 0, d2 = Infinity;
+    for (let c = 0; c < K; c++) { const dx = x-F[c][0], dy = y-F[c][1], dz = z-F[c][2]; const v = dx*dx+dy*dy+dz*dz;
+      if (v < d1) { d2 = d1; b2 = b1; d1 = v; b1 = c; } else if (v < d2) { d2 = v; b2 = c; } }
+    labels[i] = b1; label2[i] = K > 1 ? b2 : b1; counts[b1]++;
+    ratio[i] = K > 1 ? Math.min(255, Math.round(255 * Math.sqrt(d1) / (Math.sqrt(d2) + 1e-9))) : 0;
+  }
+  return { labels, label2, ratio, counts };
+}
+
+function segment(doc) {
+  const clusters = kmeans(doc, state.k, state.wL);
+  doc.wL = state.wL; doc.k = state.k; doc.clusters = clusters;
+  const maps = assign(doc);
+  const total = maps.counts.reduce((s, v) => s + v, 0) || 1;
+  // order regions largest first, remapping labels
+  const order = clusters.map((_, i) => i).sort((a, b) => maps.counts[b] - maps.counts[a]);
+  const remap = new Uint8Array(256).fill(255); order.forEach((old, nw) => { remap[old] = nw; });
+  for (const arr of [maps.labels, maps.label2]) for (let i = 0; i < arr.length; i++) arr[i] = remap[arr[i]];
+  doc.clusters = order.map((old) => ({ ...clusters[old], share: maps.counts[old] / total }));
+  doc.clusters.forEach((c) => { c.hex = labToHex(c.L, c.a, c.b); });
+  doc.maps = maps; doc.baseK = doc.clusters.length; doc.splits = []; doc.edits = {}; doc.history = [{ label: "Detected " + doc.clusters.length + " regions", edits: {} }]; doc.hpos = 0;
+  buildPreview(doc);
+}
+function ensureMaps(doc) {
+  if (doc.maps) return;
+  doc.clusters.length = doc.baseK; doc.maps = assign(doc); // rebuild, then replay any "part" splits in order
+  (doc.splits || []).forEach((s) => splitAt(doc, s, false));
+  buildPreview(doc);
+}
+
+// Split off the connected part around one pixel, so e.g. a black tee can be recoloured
+// without the black hair that shares its colour. Connected pixels whose region colour is
+// within `tol` of the clicked one are included, so folds and deep shadows come along.
+function splitAt(doc, split, record) {
+  const { labels, label2, ratio } = doc.maps, W = doc.w, H = doc.h, seed = split.seed, L0 = labels[seed];
+  if (L0 === 255 || doc.clusters.length >= 250) return L0;
+  const f0 = doc.clusters[L0].f, near = new Uint8Array(256);
+  doc.clusters.forEach((c, i) => { if (!c.parent && c.parent !== 0 && Math.hypot(c.f[0] - f0[0], c.f[1] - f0[1], c.f[2] - f0[2]) <= split.tol) near[i] = 1; });
+  near[L0] = 1;
+  const mask = new Uint8Array(W * H), stack = new Int32Array(W * H); let sp = 0, count = 0;
+  const ok = (j) => !mask[j] && labels[j] !== 255 && (near[labels[j]] || (near[label2[j]] && ratio[j] > 150));
+  mask[seed] = 1; stack[sp++] = seed;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  while (sp) { const i = stack[--sp]; count++; const x = i % W, y = (i / W) | 0;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    if (x > 0 && ok(i - 1)) { mask[i - 1] = 1; stack[sp++] = i - 1; } if (x < W - 1 && ok(i + 1)) { mask[i + 1] = 1; stack[sp++] = i + 1; }
+    if (y > 0 && ok(i - W)) { mask[i - W] = 1; stack[sp++] = i - W; } if (y < H - 1 && ok(i + W)) { mask[i + W] = 1; stack[sp++] = i + W; } }
+  let nearTotal = 0; for (let i = 0; i < labels.length; i++) if (labels[i] !== 255 && near[labels[i]]) nearTotal++;
+  if (count > nearTotal * 0.97 && near.reduce((s, v) => s + v, 0) === 1) return L0; // already one piece
+  // close small holes (knit speckle, stitching) inside the part
+  const R = 3, bw = x1 - x0 + 1, bh = y1 - y0 + 1, S = new Int32Array((bw + 1) * (bh + 1));
+  for (let y = 0; y < bh; y++) { let row = 0; for (let x = 0; x < bw; x++) { row += mask[(y + y0) * W + x + x0]; S[(y + 1) * (bw + 1) + x + 1] = S[y * (bw + 1) + x + 1] + row; } }
+  const NL = doc.clusters.length, src = doc.src, lab = [0, 0, 0]; let sL = 0, sa = 0, sb = 0, sc = 0;
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    const i = (y + y0) * W + x + x0; if (labels[i] === 255) continue;
+    let take = mask[i];
+    if (!take) { const ax = Math.max(0, x - R), ay = Math.max(0, y - R), bx = Math.min(bw, x + R + 1), by = Math.min(bh, y + R + 1);
+      const s = S[by * (bw + 1) + bx] - S[ay * (bw + 1) + bx] - S[by * (bw + 1) + ax] + S[ay * (bw + 1) + ax];
+      take = s >= 0.7 * (bx - ax) * (by - ay); }
+    if (take) { if (near[label2[i]] || label2[i] === labels[i]) label2[i] = NL; labels[i] = NL;
+      if ((i & 7) === 0) { const o = i * 4; rgbToLab(src[o], src[o + 1], src[o + 2], lab); sL += lab[0]; sa += lab[1]; sb += lab[2]; sc++; } }
+  }
+  const mL = sc ? sL / sc : doc.clusters[L0].L, ma = sc ? sa / sc : doc.clusters[L0].a, mb = sc ? sb / sc : doc.clusters[L0].b;
+  doc.clusters.push({ f: [mL * doc.wL, ma, mb], L: mL, a: ma, b: mb, hex: labToHex(mL, ma, mb), name: `Region ${L0 + 1} · part`, parent: L0, share: 0 });
+  recountShares(doc);
+  if (record) { (doc.splits = doc.splits || []).push(split); buildPreview(doc); }
+  return NL;
+}
+function recountShares(doc) {
+  const cnt = new Float64Array(doc.clusters.length), lb = doc.maps.labels; let tot = 0;
+  for (let i = 0; i < lb.length; i++) if (lb[i] !== 255) { cnt[lb[i]]++; tot++; }
+  doc.clusters.forEach((c, i) => { c.share = tot ? cnt[i] / tot : 0; });
+}
+
+// ---------- Recolouring ----------
+function recolorPixel(L, a, b, e, out, o) {
+  const T = e.lab, M = e.mean;
+  let L2, a2, b2;
+  if (e.mode === "hue") { L2 = L; a2 = T[1] + (a - M[1]) * 0.35; b2 = T[2] + (b - M[2]) * 0.35; }
+  else if (e.mode === "scale") { const f = M[0] > 0.02 ? T[0] / M[0] : 1; L2 = Math.min(1, L * f); a2 = T[1]; b2 = T[2]; }
+  else { L2 = T[0] + (L - M[0]); a2 = T[1] + (a - M[1]) * 0.35; b2 = T[2] + (b - M[2]) * 0.35; }
+  labToRgb(Math.max(0, Math.min(1, L2)), a2, b2, out, o);
+}
+function prepEdits(doc, edits) {
+  const E = new Array(256).fill(null);
+  for (const [lbl, ed] of Object.entries(edits)) { const c = doc.clusters[lbl]; if (!c) continue;
+    E[lbl] = { mode: ed.mode, lab: hexToLab(ed.hex), mean: [c.L, c.a, c.b] }; }
+  return E;
+}
+function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
+  ensureMaps(doc);
+  const { src } = doc, { labels, label2, ratio } = doc.maps, n = doc.w * doc.h, E = prepEdits(doc, edits);
+  const lab = [0, 0, 0], p1 = [0, 0, 0], p2 = [0, 0, 0];
+  for (let i = 0; i < n; i++) {
+    const o = i * 4, l1 = labels[i];
+    const e1 = l1 === 255 ? null : E[l1], e2 = l1 === 255 ? null : E[label2[i]];
+    if (!e1 && !e2) { out[o] = src[o]; out[o+1] = src[o+1]; out[o+2] = src[o+2]; out[o+3] = src[o+3]; continue; }
+    rgbToLab(src[o], src[o + 1], src[o + 2], lab);
+    // boundary blend: interior pixels take their own region fully, edges mix with the runner-up
+    const r = ratio[i] / 255, wgt = r < 0.6 ? 1 : Math.max(0.5, 1 - (r - 0.6) * 1.25);
+    if (e1) recolorPixel(lab[0], lab[1], lab[2], e1, p1, 0); else { p1[0] = src[o]; p1[1] = src[o+1]; p1[2] = src[o+2]; }
+    if (wgt < 1) {
+      if (e2) recolorPixel(lab[0], lab[1], lab[2], e2, p2, 0); else { p2[0] = src[o]; p2[1] = src[o+1]; p2[2] = src[o+2]; }
+      out[o] = p1[0] * wgt + p2[0] * (1 - wgt); out[o+1] = p1[1] * wgt + p2[1] * (1 - wgt); out[o+2] = p1[2] * wgt + p2[2] * (1 - wgt);
+    } else { out[o] = p1[0]; out[o+1] = p1[1]; out[o+2] = p1[2]; }
+    out[o + 3] = src[o + 3];
+  }
+}
+function deltaE(doc, out, lbl, hex) { // mean OKLab distance x100 between recoloured region and target
+  const { labels, ratio } = doc.maps, n = doc.w * doc.h, step = Math.max(1, Math.floor(n / 60000)), lab = [0, 0, 0];
+  let sL = 0, sa = 0, sb = 0, c = 0;
+  for (let i = 0; i < n; i += step) if (labels[i] === +lbl && ratio[i] < 128) { const o = i * 4; rgbToLab(out[o], out[o+1], out[o+2], lab); sL += lab[0]; sa += lab[1]; sb += lab[2]; c++; }
+  if (!c) return null; const T = hexToLab(hex);
+  return Math.hypot(sL / c - T[0], sa / c - T[1], sb / c - T[2]) * 100;
+}
+
+// ---------- Preview masks for hover / selection ----------
+function buildPreview(doc) {
+  const s = Math.min(1, 900 / Math.max(doc.w, doc.h)), pw = Math.max(1, Math.round(doc.w * s)), ph = Math.max(1, Math.round(doc.h * s));
+  const pl = new Uint8Array(pw * ph);
+  for (let y = 0; y < ph; y++) { const sy = Math.min(doc.h - 1, Math.floor(y / s)); for (let x = 0; x < pw; x++) pl[y * pw + x] = doc.maps.labels[sy * doc.w + Math.min(doc.w - 1, Math.floor(x / s))]; }
+  doc.preview = { pw, ph, pl };
+}
+function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function drawOverlay() {
+  const doc = cur(); if (!doc || !doc.preview) return;
+  const { pw, ph, pl } = doc.preview;
+  if (overlay.width !== pw || overlay.height !== ph) { overlay.width = pw; overlay.height = ph; }
+  octx.clearRect(0, 0, pw, ph);
+  if (state.comparing || (state.hover < 0 && !state.sel.size)) return;
+  const img = octx.createImageData(pw, ph), d = img.data;
+  const acc = hexToRgb(rgbHexFromCss(cssColor("--accent")));
+  for (let i = 0; i < pl.length; i++) {
+    const l = pl[i], o = i * 4;
+    if (state.hover >= 0 && l !== state.hover) { d[o] = 10; d[o+1] = 12; d[o+2] = 20; d[o+3] = 110; }
+    if (state.sel.has(l)) { // selection outline
+      const x = i % pw, y = (i / pw) | 0;
+      const edge = (x > 0 && pl[i-1] !== l) || (x < pw-1 && pl[i+1] !== l) || (y > 0 && pl[i-pw] !== l) || (y < ph-1 && pl[i+pw] !== l);
+      if (edge) { d[o] = acc[0]; d[o+1] = acc[1]; d[o+2] = acc[2]; d[o+3] = 255; }
+    }
+  }
+  octx.putImageData(img, 0, 0);
+}
+function rgbHexFromCss(v) { if (v.startsWith("#")) return v; const m = v.match(/\d+/g); return m ? rgbToHex(+m[0], +m[1], +m[2]) : "#3346A8"; }
+
+// ---------- Documents ----------
+const cur = () => state.docs[state.active];
+function makeDoc(name, canvas, sample) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const src = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  return { name, w: canvas.width, h: canvas.height, src, sample: !!sample, edits: {}, history: [], hpos: 0, status: "", thumb: canvas.toDataURL("image/jpeg", 0.7) };
+}
+function imageToCanvas(img) {
+  let w = img.naturalWidth || img.width || 1000, h = img.naturalHeight || img.height || 1000;
+  const s = Math.min(1, MAX_SIDE / Math.max(w, h)); w = Math.round(w * s); h = Math.round(h * s);
+  const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); return c;
+}
+function loadFile(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(makeDoc(file.name.replace(/\.[^.]+$/, ""), imageToCanvas(img))); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error(file.name + " could not be read as an image.")); };
+    img.src = url;
+  });
+}
+async function addFiles(list) {
+  const files = [...list].filter((f) => /^image\//.test(f.type)); if (!files.length) return toast("Those files aren't images. Use PNG, JPG, WEBP or SVG.");
+  busy(true);
+  const start = state.docs.length;
+  for (const f of files) { try { state.docs.push(await loadFile(f)); } catch (e) { toast(e.message); } }
+  state.docs = state.docs.filter((d) => !d.sample || state.docs.length === 1);
+  busy(false);
+  if (state.docs.length) openDoc(Math.max(0, state.docs.findIndex((d, i) => i >= start - 1 && !d.sample)));
+  toast(`Added ${files.length} photo${files.length > 1 ? "s" : ""}.`);
+}
+function openDoc(i) {
+  const prev = cur(); if (prev && prev !== state.docs[i] && prev.maps && state.docs.length > 3) { prev.maps = null; prev.preview = null; } // free memory
+  state.active = i; state.sel.clear(); state.hover = -1;
+  const doc = cur(); busy(true);
+  setTimeout(() => {
+    if (!doc.clusters || doc.k !== state.k || doc.wL !== state.wL) { if (!doc.clusters) segment(doc); else ensureMaps(doc); }
+    else ensureMaps(doc);
+    if (!doc.history.length) { doc.history = [{ label: "Opened", edits: {} }]; doc.hpos = 0; }
+    view.width = doc.w; view.height = doc.h; $("dims").textContent = `${doc.w} × ${doc.h} px`;
+    if (doc.clusters.length && !Object.keys(doc.edits).length) state.sel.add(0);
+    redraw(); busy(false); renderAll();
+  }, 10);
+}
+function redraw() {
+  const doc = cur(); if (!doc) return;
+  const img = vctx.createImageData(doc.w, doc.h);
+  if (state.comparing) img.data.set(doc.src); else render(doc, doc.edits, img.data);
+  vctx.putImageData(img, 0, 0); doc.lastOut = img.data; drawOverlay();
+}
+
+// ---------- Edits & history ----------
+function commit(label, edits) {
+  const doc = cur(); doc.history = doc.history.slice(0, doc.hpos + 1); doc.history.push({ label, edits }); doc.hpos = doc.history.length - 1;
+  doc.edits = edits; doc.status = Object.keys(edits).length ? "Edited" : ""; afterEdit();
+}
+function afterEdit() { busy(true); setTimeout(() => { redraw(); refreshThumb(cur()); busy(false); renderAll(); }, 10); }
+function applyColor(hex, name) {
+  const doc = cur(); if (!doc) return;
+  if (!state.sel.size) return toast("Select a region first. Click the garment in the photo.");
+  hex = normHex(hex); setHex(hex);
+  const edits = { ...doc.edits }; state.sel.forEach((l) => { edits[l] = { hex, mode: state.mode }; });
+  commit(`${regionNames()} → ${name ? name + " " : ""}${hex}`, edits);
+}
+const regionName = (l) => (cur().clusters[l] && cur().clusters[l].name) || "Region " + (+l + 1);
+const regionNames = () => [...state.sel].sort((a, b) => a - b).map(regionName).join(", ");
+function undo() { const d = cur(); if (!d || d.hpos <= 0) return; d.hpos--; d.edits = d.history[d.hpos].edits; afterEdit(); }
+function redo() { const d = cur(); if (!d || d.hpos >= d.history.length - 1) return; d.hpos++; d.edits = d.history[d.hpos].edits; afterEdit(); }
+function refreshThumb(doc) {
+  if (!doc || !doc.lastOut) return;
+  const c = document.createElement("canvas"); c.width = doc.w; c.height = doc.h; c.getContext("2d").putImageData(new ImageData(doc.lastOut, doc.w, doc.h), 0, 0);
+  const t = document.createElement("canvas"), s = 120 / Math.max(doc.w, doc.h); t.width = Math.round(doc.w * s); t.height = Math.round(doc.h * s);
+  t.getContext("2d").drawImage(c, 0, 0, t.width, t.height); doc.thumb = t.toDataURL("image/jpeg", 0.8);
+}
+
+// ---------- Batch ----------
+function mapEditsTo(srcDoc, dst) { // match each edited source region to the nearest region by colour
+  const edits = {}; let missed = 0;
+  for (const [lbl, ed] of Object.entries(srcDoc.edits)) {
+    const s = srcDoc.clusters[lbl]; let best = -1, bd = Infinity;
+    dst.clusters.forEach((c, i) => { const v = Math.hypot((c.L - s.L) * 0.6, c.a - s.a, c.b - s.b); if (v < bd) { bd = v; best = i; } });
+    if (best >= 0 && bd < 0.09) edits[best] = { ...ed }; else missed++;
+  }
+  return { edits, missed };
+}
+async function applyAll() {
+  const src = cur(); if (!src || !Object.keys(src.edits).length) return toast("Recolour this photo first, then apply its edits to the rest.");
+  const others = state.docs.filter((d) => d !== src); if (!others.length) return toast("Add more photos to apply these edits to.");
+  busy(true, "Applying…"); let missedTotal = 0;
+  for (const d of others) {
+    await tick();
+    if (!d.clusters || d.k !== src.k || d.wL !== src.wL) { const k = state.k, w = state.wL; state.k = src.k; state.wL = src.wL; segment(d); state.k = k; state.wL = w; }
+    else ensureMaps(d);
+    const { edits, missed } = mapEditsTo(src, d); missedTotal += missed;
+    d.history.push({ label: "Applied edits from " + src.name, edits }); d.hpos = d.history.length - 1; d.edits = edits;
+    d.status = missed ? "Check" : "Applied";
+    const out = new Uint8ClampedArray(d.w * d.h * 4); render(d, edits, out); d.lastOut = out; refreshThumb(d); d.lastOut = null;
+    d.maps = null; d.preview = null;
+  }
+  busy(false); renderAll();
+  toast(missedTotal ? `Applied. ${missedTotal} region match${missedTotal > 1 ? "es were" : " was"} too far off; photos marked Check need a look.` : `Applied to ${others.length} photo${others.length > 1 ? "s" : ""}.`);
+}
+
+// ---------- Export ----------
+let downloadsCap = null;
+const capReady = window.claude && window.claude.use ? window.claude.use("downloads").then((d) => { downloadsCap = d; }).catch(() => {}) : Promise.resolve();
+async function saveFile(filename, blob) {
+  await capReady;
+  if (downloadsCap) {
+    try { await downloadsCap.save({ filename, data: blob }); toast("Saved " + filename); }
+    catch (e) { toast(e && e.code === "declined" ? "Save cancelled." : (e && e.message) || "That file couldn't be saved here."); }
+    return;
+  }
+  if (window.claude) return toast("Saving files isn't available in this view.");
+  const url = URL.createObjectURL(blob), a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000); toast("Saved " + filename);
+}
+function pixelsToBlob(w, h, data) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").putImageData(new ImageData(data, w, h), 0, 0);
+  return new Promise((r) => c.toBlob(r, "image/png"));
+}
+const slug = (s) => s.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "image";
+async function exportCurrent() { const d = cur(); if (!d) return; busy(true, "Exporting…"); await tick(); const out = new Uint8ClampedArray(d.w * d.h * 4); render(d, d.edits, out); const blob = await pixelsToBlob(d.w, d.h, out); busy(false); saveFile(slug(d.name) + "_recolor.png", blob); }
+async function exportAll() {
+  if (!window.JSZip) return toast("The ZIP tool didn't load. Check your connection and reload.");
+  busy(true, "Building ZIP…"); const zip = new JSZip();
+  for (const d of state.docs) { await tick(); const out = new Uint8ClampedArray(d.w * d.h * 4); render(d, d.edits, out); if (d !== cur()) { d.maps = null; d.preview = null; }
+    zip.file(slug(d.name) + "_recolor.png", await pixelsToBlob(d.w, d.h, out)); }
+  const blob = await zip.generateAsync({ type: "blob" }); busy(false); saveFile("jag-recolor.zip", blob);
+}
+
+// ---------- Colorways ----------
+async function makeColorways() {
+  const d = cur(); if (!d) return;
+  if (!state.sel.size) return toast("Select the garment region first, then make colorways.");
+  const pal = PALETTES[state.palette]; if (!pal.length) return toast("This palette is empty. Add colours in Custom.");
+  const prog = $("waysProg"); prog.hidden = false; prog.max = pal.length; prog.value = 0;
+  state.ways = []; $("ways").innerHTML = ""; $("waysZipBtn").disabled = true; $("waysBtn").disabled = true;
+  for (const [name, hex] of pal) {
+    await tick();
+    const edits = { ...d.edits }; state.sel.forEach((l) => { edits[l] = { hex, mode: state.mode }; });
+    const out = new Uint8ClampedArray(d.w * d.h * 4); render(d, edits, out);
+    const blob = await pixelsToBlob(d.w, d.h, out), url = URL.createObjectURL(blob);
+    state.ways.push({ name, hex, blob, url, de: deltaE(d, out, [...state.sel][0], hex) });
+    prog.value = state.ways.length; renderWays();
+  }
+  prog.hidden = true; $("waysZipBtn").disabled = false; $("waysBtn").disabled = false;
+  toast(`Made ${pal.length} colorways of ${d.name}.`);
+}
+async function saveWays() {
+  if (!state.ways.length) return; if (!window.JSZip) return toast("The ZIP tool didn't load. Check your connection and reload.");
+  const d = cur(), zip = new JSZip(); state.ways.forEach((w) => zip.file(`${slug(d.name)}_${slug(w.name)}.png`, w.blob));
+  saveFile(`${slug(d.name)}_${slug(state.palette)}_colorways.zip`, await zip.generateAsync({ type: "blob" }));
+}
+
+// ---------- Shade ramp ----------
+const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+function ramp(hex) {
+  const [L, a, b] = hexToLab(hex), C = Math.hypot(a, b), H = Math.atan2(b, a);
+  const Ls = [0.975, 0.95, 0.89, 0.81, 0.71, 0.62, 0.53, 0.44, 0.36, 0.28, 0.21];
+  return STEPS.map((s, i) => { const t = Ls[i], c = C * (1 - Math.abs(t - 0.6) * 0.9); return [s, labToHex(t, c * Math.cos(H), c * Math.sin(H))]; });
+}
+function rampText(kind) {
+  const r = ramp(state.hex);
+  return kind === "css" ? ":root {\n" + r.map(([s, h]) => `  --shade-${s}: ${h};`).join("\n") + "\n}" : JSON.stringify({ base: state.hex, shades: Object.fromEntries(r) }, null, 2);
+}
+async function copy(text) { try { await navigator.clipboard.writeText(text); toast("Copied."); } catch (e) { toast("Copy isn't allowed here. Use Save JSON instead."); } }
+
+// ---------- Rendering UI ----------
+function renderFiles() {
+  $("fileCount").textContent = state.docs.length ? state.docs.length + "" : "";
+  $("files").innerHTML = state.docs.map((d, i) => `<button class="file${i === state.active ? " on" : ""}" type="button" data-i="${i}">
+      <img alt="" src="${d.thumb}"><span style="min-width:0"><span class="nm">${esc(d.name)}</span>
+      ${d.sample ? '<span class="chip">Sample</span>' : d.status ? `<span class="chip ${d.status === "Check" ? "warn" : "ok"}">${d.status}</span>` : ""}</span></button>`).join("");
+}
+function renderRegions() {
+  const d = cur(); if (!d || !d.clusters) { $("regions").innerHTML = ""; return; }
+  $("selInfo").textContent = state.sel.size ? `${state.sel.size} selected` : "";
+  $("regions").innerHTML = d.clusters.map((c, i) => { const e = d.edits[i];
+    return `<button type="button" class="region${state.sel.has(i) ? " on" : ""}" data-l="${i}">
+      <span class="sw" style="background:${c.hex}"></span>
+      <span style="min-width:0"><span>${esc(regionName(i))}</span> <span class="mono" style="color:var(--muted);font-size:12px">${(c.share * 100).toFixed(c.share < 0.1 ? 1 : 0)}%</span>
+        <div class="bar"><i style="width:${Math.max(2, c.share * 100)}%"></i></div></span>
+      <span class="to">${e ? `→ <span class="sw" style="background:${e.hex}"></span><span class="mono">${e.hex}</span>` : `<span class="mono">${c.hex}</span>`}</span></button>`; }).join("");
+}
+function renderReadout() {
+  const d = cur(), el = $("readout");
+  if (!d || !d.lastOut) { el.innerHTML = ""; return; }
+  const parts = [];
+  [...state.sel].forEach((l) => { const e = d.edits[l]; if (!e) return; const de = deltaE(d, d.lastOut, l, e.hex);
+    if (de != null) parts.push(`${esc(regionName(l))}: <b class="mono">ΔE ${de.toFixed(1)}</b> <span class="chip ${de < 3 ? "ok" : "warn"}">${de < 3 ? "on shade" : "check"}</span>`); });
+  el.innerHTML = parts.join("") || "Pick a colour or a palette swatch to recolour the selected regions.";
+}
+function renderPalette() {
+  $("palTabs").innerHTML = Object.keys(PALETTES).map((n) => `<button type="button" role="tab" aria-selected="${n === state.palette}" data-p="${esc(n)}">${esc(n)} <span class="mono">${PALETTES[n].length}</span></button>`).join("");
+  $("palette").innerHTML = PALETTES[state.palette].map(([n, h]) => `<button type="button" class="pal" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}"><i style="background:${h}"></i><span>${esc(n)}</span></button>`).join("");
+  $("customList").hidden = state.palette !== "Custom";
+  $("waysBtn").textContent = `Make ${PALETTES[state.palette].length} colorways`;
+}
+function renderWays() {
+  $("ways").innerHTML = state.ways.map((w) => `<figure><img alt="${esc(w.name)}" src="${w.url}"><figcaption>${esc(w.name)}${w.de != null ? ` · ΔE ${w.de.toFixed(1)}` : ""}</figcaption></figure>`).join("");
+}
+function renderRamp() {
+  $("rampBase").textContent = state.hex;
+  $("ramp").innerHTML = ramp(state.hex).map(([s, h]) => { const L = hexToLab(h)[0]; return `<div style="background:${h};color:${L > 0.62 ? "#161a22" : "#ffffff"}" title="${s} ${h}">${s}</div>`; }).join("");
+}
+function renderHistory() {
+  const d = cur(); if (!d) return;
+  $("history").innerHTML = d.history.map((h, i) => `<div class="${i === d.hpos ? "cur" : ""}">${i === d.hpos ? "● " : ""}${esc(h.label)}</div>`).join("");
+  $("undoBtn").disabled = d.hpos <= 0; $("redoBtn").disabled = d.hpos >= d.history.length - 1; $("resetBtn").disabled = !Object.keys(d.edits).length;
+}
+function renderAll() { renderFiles(); renderRegions(); renderReadout(); renderHistory(); renderRamp(); drawOverlay(); }
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tick = () => new Promise((r) => setTimeout(r, 0));
+function busy(on, text) { $("busy").hidden = !on; if (text) $("busy").textContent = text; else $("busy").textContent = "Working…"; }
+let toastT; function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3200); }
+function setHex(h) { state.hex = normHex(h); $("hex").value = state.hex; $("picker").value = state.hex.toLowerCase(); renderRamp(); }
+function setMode(m) { state.mode = m; document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.mode === m)); $("modeHelp").textContent = MODES[m]; }
+
+// ---------- Events ----------
+function labelAt(ev) {
+  const d = cur(); if (!d || !d.preview) return -1;
+  const r = view.getBoundingClientRect(), { pw, ph, pl } = d.preview;
+  const x = Math.floor((ev.clientX - r.left) / r.width * pw), y = Math.floor((ev.clientY - r.top) / r.height * ph);
+  if (x < 0 || y < 0 || x >= pw || y >= ph) return -1; const l = pl[y * pw + x]; return l === 255 ? -1 : l;
+}
+view.addEventListener("pointermove", (ev) => { const l = labelAt(ev); if (l !== state.hover) { state.hover = l; drawOverlay(); } });
+view.addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
+view.addEventListener("click", (ev) => {
+  let l = labelAt(ev); if (l < 0) return; const d = cur();
+  if (state.connected && !d.clusters[l].parent && d.clusters[l].parent !== 0) {
+    const r = view.getBoundingClientRect();
+    const x = Math.min(d.w - 1, Math.floor((ev.clientX - r.left) / r.width * d.w)), y = Math.min(d.h - 1, Math.floor((ev.clientY - r.top) / r.height * d.h));
+    const before = d.clusters.length; l = splitAt(d, { seed: y * d.w + x, tol: state.tol }, true);
+    if (d.clusters.length > before) { d.history.push({ label: `Separated ${regionName(l)}`, edits: d.edits }); d.hpos = d.history.length - 1; }
+  }
+  select(l, ev.shiftKey || ev.metaKey || ev.ctrlKey);
+});
+function select(l, add) {
+  if (add) { state.sel.has(l) ? state.sel.delete(l) : state.sel.add(l); } else { state.sel.clear(); state.sel.add(l); }
+  const e = cur().edits[l]; if (e) { setHex(e.hex); setMode(e.mode); }
+  renderRegions(); renderReadout(); drawOverlay();
+}
+$("regions").addEventListener("click", (ev) => { const b = ev.target.closest(".region"); if (b) select(+b.dataset.l, ev.shiftKey || ev.metaKey || ev.ctrlKey); });
+$("regions").addEventListener("pointerover", (ev) => { const b = ev.target.closest(".region"); const l = b ? +b.dataset.l : -1; if (l !== state.hover) { state.hover = l; drawOverlay(); } });
+$("regions").addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
+$("files").addEventListener("click", (ev) => { const b = ev.target.closest(".file"); if (b) openDoc(+b.dataset.i); });
+$("addBtn").onclick = () => $("fileInput").click();
+$("fileInput").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+document.addEventListener("paste", (e) => { const f = [...(e.clipboardData?.files || [])]; if (f.length) addFiles(f); });
+$("picker").addEventListener("change", (e) => applyColor(e.target.value));
+$("picker").addEventListener("input", (e) => { state.hex = normHex(e.target.value); $("hex").value = state.hex; renderRamp(); });
+$("hex").addEventListener("keydown", (e) => { if (e.key === "Enter") $("applyBtn").click(); });
+$("applyBtn").onclick = () => { const v = $("hex").value; if (!validHex(v)) return toast("Enter a hex code like #0C2340."); applyColor(v); };
+document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => { setMode(b.dataset.mode);
+  const d = cur(); if (d && [...state.sel].some((l) => d.edits[l])) { const edits = { ...d.edits }; state.sel.forEach((l) => { if (edits[l]) edits[l] = { ...edits[l], mode: state.mode }; }); commit(`${regionNames()} → ${b.textContent}`, edits); } });
+$("palTabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.palette = b.dataset.p; renderPalette(); });
+$("palette").addEventListener("click", (e) => { const b = e.target.closest(".pal"); if (b) applyColor(b.dataset.h, b.dataset.n); });
+$("customList").value = customText;
+$("customList").addEventListener("input", (e) => { PALETTES.Custom = parseCustom(e.target.value); try { localStorage.setItem("jr.custom", e.target.value); } catch (x) {}
+  const pal = $("palette"); pal.innerHTML = PALETTES.Custom.map(([n, h]) => `<button type="button" class="pal" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}"><i style="background:${h}"></i><span>${esc(n)}</span></button>`).join("");
+  $("waysBtn").textContent = `Make ${PALETTES.Custom.length} colorways`; document.querySelector('#palTabs [data-p="Custom"] .mono').textContent = PALETTES.Custom.length; });
+$("tolRange").addEventListener("input", (e) => { state.tol = +e.target.value; $("tolVal").textContent = state.tol.toFixed(2); });
+$("connected").onchange = (e) => { state.connected = e.target.checked; };
+$("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
+$("resetBtn").onclick = () => commit("Cleared all edits", {});
+$("exportBtn").onclick = exportCurrent; $("exportAllBtn").onclick = exportAll; $("applyAllBtn").onclick = applyAll;
+$("waysBtn").onclick = makeColorways; $("waysZipBtn").onclick = saveWays;
+$("copyCss").onclick = () => copy(rampText("css")); $("copyJson").onclick = () => copy(rampText("json"));
+$("saveJson").onclick = () => saveFile(`shades_${state.hex.slice(1)}.json`, new Blob([rampText("json")], { type: "application/json" }));
+const compare = (on) => { if (state.comparing === on) return; state.comparing = on; redraw(); };
+$("compareBtn").addEventListener("pointerdown", () => compare(true));
+["pointerup", "pointerleave", "pointercancel"].forEach((ev) => $("compareBtn").addEventListener(ev, () => compare(false)));
+document.addEventListener("keydown", (e) => {
+  const typing = /input|textarea/i.test(e.target.tagName);
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key.toLowerCase() === "z" && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); exportCurrent(); }
+  else if (!typing && e.key.toLowerCase() === "c" && !mod && !e.repeat) compare(true);
+});
+document.addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "c") compare(false); });
+const resegment = () => { const d = cur(); if (!d) return; busy(true); setTimeout(() => { segment(d); state.sel.clear(); state.sel.add(0); redraw(); refreshThumb(d); busy(false); renderAll(); }, 10); };
+$("kRange").addEventListener("input", (e) => { $("kVal").textContent = e.target.value; });
+$("kRange").addEventListener("change", (e) => { state.k = +e.target.value; resegment(); });
+$("wRange").addEventListener("input", (e) => { $("wVal").textContent = (+e.target.value).toFixed(2); });
+$("wRange").addEventListener("change", (e) => { state.wL = +e.target.value; resegment(); });
+
+// ---------- Sample garment (so the bench opens ready to try) ----------
+function sampleTee() {
+  const W = 900, H = 1200, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d");
+  const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, "#EDEDED"); bg.addColorStop(1, "#E4E4E4"); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const body = new Path2D("M300 190 L370 160 Q450 215 530 160 L600 190 L770 300 L705 470 L640 440 L645 1030 Q450 1062 255 1030 L260 440 L195 470 L130 300 Z");
+  g.save(); g.shadowColor = "rgba(0,0,0,.18)"; g.shadowBlur = 40; g.shadowOffsetY = 18; g.fillStyle = "#FF671F"; g.fill(body); g.restore();
+  g.save(); g.clip(body);
+  const sh = g.createLinearGradient(130, 0, 770, 0); sh.addColorStop(0, "rgba(0,0,0,.28)"); sh.addColorStop(.25, "rgba(0,0,0,0)"); sh.addColorStop(.6, "rgba(255,255,255,.08)"); sh.addColorStop(1, "rgba(0,0,0,.3)");
+  g.fillStyle = sh; g.fillRect(0, 0, W, H);
+  g.filter = "blur(18px)"; g.strokeStyle = "rgba(0,0,0,.22)"; g.lineWidth = 26;
+  [[340, 470, 380, 1000], [560, 520, 520, 990], [270, 640, 330, 700], [600, 300, 660, 420]].forEach(([a, b, x, y]) => { g.beginPath(); g.moveTo(a, b); g.quadraticCurveTo((a + x) / 2 + 30, (b + y) / 2, x, y); g.stroke(); });
+  g.strokeStyle = "rgba(255,255,255,.16)"; g.lineWidth = 18; g.beginPath(); g.moveTo(450, 330); g.quadraticCurveTo(480, 650, 440, 980); g.stroke(); g.filter = "none";
+  g.fillStyle = "#F4F4F2"; // white rib trims: collar and sleeve hems
+  g.beginPath(); g.moveTo(365, 160); g.quadraticCurveTo(450, 248, 535, 160); g.lineTo(550, 168); g.quadraticCurveTo(450, 278, 350, 168); g.closePath(); g.fill();
+  g.save(); g.translate(162, 385); g.rotate(-1.18); g.fillRect(-90, -16, 180, 34); g.restore();
+  g.save(); g.translate(738, 385); g.rotate(1.18); g.fillRect(-90, -16, 180, 34); g.restore();
+  g.strokeStyle = "rgba(0,0,0,.25)"; g.setLineDash([7, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(262, 1004); g.quadraticCurveTo(450, 1034, 640, 1004); g.stroke(); g.setLineDash([]);
+  g.restore();
+  const img = g.getImageData(0, 0, W, H), d = img.data, r = rng(7); // single-jersey knit grain
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4; if (d[o] === d[o + 1] && d[o] > 200) continue;
+    const n = (r() - 0.5) * 14 + ((x + (y >> 1)) % 4 < 2 ? 3 : -3); d[o] += n; d[o + 1] += n; d[o + 2] += n; }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// ---------- Start ----------
+setMode("match"); setHex(state.hex); renderPalette();
+state.docs.push(makeDoc("Sample tee", sampleTee(), true));
+openDoc(0);
+setTimeout(() => { const d = cur(); if (d && d.clusters && !Object.keys(d.edits).length) { state.sel.clear(); state.sel.add(0); renderRegions(); } }, 60);
+})();
+</script>
