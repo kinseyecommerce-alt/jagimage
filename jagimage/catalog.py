@@ -6,9 +6,7 @@ reference), so the same child, garment and studio carry across all shots.
 Output: <out>/<Gender>/<Style>/<Colour>/01-front.png, 02-threequarter.png, ...
 """
 
-import base64
 import json
-from contextlib import ExitStack
 from pathlib import Path
 from typing import Iterator, List, Optional
 
@@ -152,36 +150,17 @@ def skus(kids: dict, gender=None, style=None, colour=None, swatches: Optional[st
 
 class CatalogAgent:
     def __init__(self, client=None, model: Optional[str] = None, output_dir="output",
-                 quality="high", size="1024x1536", fidelity: Optional[str] = None):
-        from .agent import DEFAULT_MODEL
-        import os
+                 quality="high", size="1024x1536", fidelity: Optional[str] = None, provider=None):
+        from .providers import OpenAIProvider
 
-        if client is None:
-            from openai import OpenAI
-
-            client = OpenAI()
-        self.client = client
-        self.model = model or os.environ.get("JAGIMAGE_MODEL", DEFAULT_MODEL)
+        self.provider = provider or OpenAIProvider(client=client, model=model, quality=quality, size=size, fidelity=fidelity)
         self.output_dir = Path(output_dir)
-        self.quality = quality
-        self.size = size
-        self.fidelity = fidelity
 
     def folder(self, s) -> Path:
         return self.output_dir / s["gender"] / s["style"] / s["colour"]
 
     def _call(self, prompt: str, refs: List[str]) -> bytes:
-        params = dict(model=self.model, prompt=prompt, size=self.size, quality=self.quality,
-                      background="opaque", output_format="png", n=1)
-        if refs:
-            if self.fidelity:
-                params["input_fidelity"] = self.fidelity
-            with ExitStack() as stack:
-                files = [stack.enter_context(open(r, "rb")) for r in refs]
-                result = self.client.images.edit(image=files, **params)
-        else:
-            result = self.client.images.generate(**params)
-        return base64.b64decode(result.data[0].b64_json)
+        return self.provider.generate(prompt, refs)
 
     def run_sku(self, s, poses=None, force=False, texture=False) -> Iterator[tuple]:
         """Yields (shot name, path, 'made'|'skipped'). Existing files are kept unless force=True,

@@ -4,10 +4,11 @@ version = "0.1.0"
 description = "E-commerce product image agent powered by OpenAI's gpt-image-2.5-flare model"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["openai>=3.31"]
+dependencies = ["openai>=3.31", "numpy", "pillow", "scipy"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+gemini = ["google-genai>=2.31"]
+dev = ["pytest", "google-genai>=2.31"]
 
 [project.scripts]
 jagimage = "jagimage.cli:main"

@@ -120,6 +120,25 @@ paths = agent.create("linen throw pillow, sage green", shot="lifestyle", n=2)
 pip install -e ".[dev]" && pytest
 ```
 
+### Gemini, and two base colours for the whole palette
+
+`--provider gemini` uses Google's Gemini image model (`gemini-3-pro-image` by default) at `--gemini-size 2K` (HD; `4K` also works), 3:4 portrait. Set `GEMINI_API_KEY` and install with `pip install -e ".[gemini]"`.
+
+`--bases` shoots each style in just **two base colours** with AI, then makes every palette colour from those photos with exact-hex recolouring:
+
+```bash
+# 1. AI: fronts of both bases (light = mint green, dark = bottle green), review them
+jagimage library --bases --provider gemini --category Kids_Boys --product HalfSleeveTee --fabric PureCotton --stage fronts
+# 2. AI: the other poses from the approved fronts, then recolour all 9 colours
+jagimage library --bases --provider gemini --category Kids_Boys --product HalfSleeveTee --fabric PureCotton
+```
+
+- Light colours (OKLab lightness 0.55 and up, e.g. White, Yellow, Lavender) come from the light base; darker ones (Black, Navy, Red, Maroon) from the dark base.
+- The bases are greens because no skin, hair, grey studio, denim or black trousers is green, so the garment can be found reliably. Change them with `--base-light` / `--base-dark`.
+- Every recoloured photo gets a `qc.json` entry with its ΔE to the target hex (under 3 is on shade). The garment mask is saved as `_base_*/<pose>_mask.png`; edit it (white = garment) and re-run with `--stage recolor --force` to fix a bad edge.
+- Base photos live in `_base_light/` and `_base_dark/` next to the colour folders.
+- Full library: 336 styles×poses ×2 = 672 AI images instead of 4,368.
+
 ## Recolor web app
 
 `web/recolor/index.html` is a browser tool for recolouring existing garment photos. Open the file in a browser; nothing is uploaded anywhere. `app.html` is the same page without the HTML wrapper (the published version).

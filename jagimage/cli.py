@@ -84,8 +84,10 @@ def _library(args) -> int:
     if not items:
         print("No SKUs match those filters (colour names must match the fabric's palette).", file=sys.stderr)
         return 2
-    print(f"{len(items)} SKUs x {len(poses)} poses = up to {len(items) * len(poses)} images")
     models = L.load_models(args.models)
+    if args.bases:
+        return _library_bases(args, L, items, poses, models)
+    print(f"{len(items)} SKUs x {len(poses)} poses = up to {len(items) * len(poses)} images")
     if args.dry_run:
         runner = L.LibraryRunner(None, models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
         for it in items:
@@ -96,10 +98,7 @@ def _library(args) -> int:
             for pose in poses:
                 print(f"[{pose}] {runner.prompt(it, pose)}")
         return 0
-    from .catalog import CatalogAgent
-
-    agent = CatalogAgent(model=args.model, output_dir=args.out, quality=args.quality, size=args.size, fidelity=args.fidelity)
-    runner = L.LibraryRunner(agent, models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
+    runner = L.LibraryRunner(_engine(args), models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
     failures = 0
     for it in items:
         sku = f"{it['category']}/{it['product']}/{it['fabric']}/{it['colour']}"
@@ -109,6 +108,60 @@ def _library(args) -> int:
         except Exception as exc:
             failures += 1
             print(f"{sku} failed: {exc}", file=sys.stderr)
+    return 1 if failures else 0
+
+
+def _engine(args):
+    from .catalog import CatalogAgent
+    from .providers import make_provider
+
+    provider = make_provider(args.provider, model=args.model, quality=args.quality, size=args.size,
+                             fidelity=args.fidelity, image_size=args.gemini_size)
+    return CatalogAgent(provider=provider, output_dir=args.out)
+
+
+def _library_bases(args, L, items, poses, models) -> int:
+    """AI makes each style in two base colours; every palette colour is recoloured from them."""
+    named = {"#8FD3A8": "mint green", "#1E4636": "bottle green"}
+    light, dark = args.base_light.upper(), args.base_dark.upper()
+    bases = {"light": (named.get(light, "colour " + light), light), "dark": (named.get(dark, "colour " + dark), dark)}
+    styles = list({(i["category"], i["product"], i["fabric"]): i for i in items}.values())
+    ai = len(styles) * 2 * len(poses)
+    print(f"{len(styles)} styles x 2 base colours x {len(poses)} poses = {ai} AI images; "
+          f"{len(items)} colours x {len(poses)} poses = {len(items) * len(poses)} recoloured images")
+    runner = L.LibraryRunner(None, models, out=args.out, negative=not args.no_negative, face_by=args.face_by)
+    if args.dry_run:
+        for st in styles:
+            for which in ("light", "dark"):
+                b = L.base_item(st, which, bases)
+                print(f"\n=== {st['category']}/{st['product']}/{st['fabric']} {which} base {b['hex']} ===")
+                for pose in poses:
+                    print(f"[{pose}] {runner.prompt(b, pose)}")
+        print("\nColours and the base each one is made from:")
+        for it in items:
+            print(f"  {it['category']}/{it['product']}/{it['fabric']}/{it['colour']} <- {L.base_for(it)} base")
+        return 0
+    failures = 0
+    if args.stage != "recolor":
+        runner.agent = _engine(args)
+        for st in styles:
+            for which in ("light", "dark"):
+                b = L.base_item(st, which, bases)
+                tag = f"{st['category']}/{st['product']}/{st['fabric']} {which} base"
+                try:
+                    for pose, path, status in runner.run(b, poses, stage=args.stage, force=args.force):
+                        print(f"{tag} [{pose}] {status} {path}")
+                except Exception as exc:
+                    failures += 1
+                    print(f"{tag} failed: {exc}", file=sys.stderr)
+    if args.stage in ("all", "poses", "recolor"):
+        for it in items:
+            sku = f"{it['category']}/{it['product']}/{it['fabric']}/{it['colour']}"
+            for pose, path, status, de in L.recolor_item(it, poses, out=args.out, bases=bases, mode=args.recolor_mode, force=args.force):
+                note = f" ΔE {de:.2f}" + ("" if de < 3 else " CHECK") if de is not None else ""
+                print(f"{sku} [{pose}] {status}{note} {path}")
+                if status.startswith("needs a mask") or (de is not None and de >= 3):
+                    failures += 1
     return 1 if failures else 0
 
 
@@ -162,8 +215,17 @@ def main(argv=None) -> int:
     lib.add_argument("--fabric", help="Comma-separated: PureCotton, CottonMix")
     lib.add_argument("--colour", help='Comma-separated colour names, e.g. "Navy Blue,Light Pink"')
     lib.add_argument("--poses", help="Comma-separated: front_main, front_main_white, threequarter, side, back, handpocket")
-    lib.add_argument("--stage", default="all", choices=["fronts", "poses", "all"],
-                     help="fronts = front_main(+white) only for review; poses = other poses from approved fronts")
+    lib.add_argument("--stage", default="all", choices=["fronts", "poses", "all", "recolor"],
+                     help="fronts = front_main(+white) only for review; poses = other poses from approved fronts; "
+                          "recolor = (with --bases) only recolour from existing base photos")
+    lib.add_argument("--provider", default="openai", choices=["openai", "gemini"], help="Image engine (default: openai)")
+    lib.add_argument("--gemini-size", default="2K", choices=["1K", "2K", "4K"], help="Gemini output resolution (default: 2K HD)")
+    lib.add_argument("--bases", action="store_true",
+                     help="AI makes each style in 2 base colours only; every palette colour is recoloured from them to its exact hex")
+    lib.add_argument("--base-light", default="#8FD3A8", help="Light base colour (default: mint #8FD3A8)")
+    lib.add_argument("--base-dark", default="#1E4636", help="Dark base colour (default: bottle green #1E4636)")
+    lib.add_argument("--recolor-mode", default="match", choices=["match", "hue", "scale"],
+                     help="match = exact hex on average; hue = keep lightness; scale = scale shading")
     lib.add_argument("--no-negative", action="store_true", help="Don't append the negative list as an 'Avoid:' line")
     lib.add_argument("--export", metavar="FILE", help="Write the whole library as prompts.json and exit")
     lib.add_argument("--model", help=f"Image model (default: $JAGIMAGE_MODEL or {DEFAULT_MODEL})")

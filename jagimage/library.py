@@ -145,7 +145,7 @@ def model_text(category: str, hairstyle: Optional[str] = None, look: Optional[st
     return text
 
 
-def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None, look=None, face=True) -> str:
+def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None, look=None, face=True, hex_=None) -> str:
     """Prompt for one cell of the library. Leaves {COLOUR}/{HEX} in place when colour is None.
     face=False: no face photo, so fronts invent a new model and poses copy it from the front."""
     kind = FABRIC_KIND[product]
@@ -168,7 +168,7 @@ def build_prompt(category, product, fabric, pose, colour=None, hairstyle=None, l
     if has_joggers(category, product):
         text += JOGGER_RULE
     if colour:
-        text = text.replace("{COLOUR}", colour).replace("{HEX}", COLOURS[fabric][colour])
+        text = text.replace("{COLOUR}", colour).replace("{HEX}", hex_ or COLOURS[fabric][colour])
     return text
 
 
@@ -242,7 +242,65 @@ def model_index(it: dict, face_by="sku") -> int:
 
 
 def folder_for(out: str, it: dict) -> Path:
-    return Path(out) / it["category"] / it["product"] / it["fabric"] / it["colour"].replace(" ", "_")
+    name = it.get("folder") or it["colour"].replace(" ", "_")
+    return Path(out) / it["category"] / it["product"] / it["fabric"] / name
+
+
+# ---- Two-base workflow: AI shoots each style in a light and a dark base colour, then every
+# palette colour is made from the nearer base with exact-hex recolouring (jagimage.recolor).
+# The bases are mid-saturation greens: easy to find in the photo (no green in skin, hair,
+# grey studio, denim or black trousers) while keeping all the fold and knit detail.
+BASES = {"light": ("Mint", "#8FD3A8"), "dark": ("Bottle Green", "#1E4636")}
+LIGHT_FROM = 0.55  # targets with OKLab lightness at or above this use the light base
+
+
+def base_item(it: dict, which: str, bases=None) -> dict:
+    name, hex_ = (bases or BASES)[which]
+    return {"category": it["category"], "product": it["product"], "fabric": it["fabric"],
+            "colour": name, "hex": hex_, "base": which, "folder": f"_base_{which}"}
+
+
+def base_for(it: dict) -> str:
+    from .recolor import lightness
+
+    return "light" if lightness(COLOURS[it["fabric"]][it["colour"]]) >= LIGHT_FROM else "dark"
+
+
+def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="match", force=False) -> Iterator[tuple]:
+    """Make one palette colour from its base photos. Yields (pose, path, status, ΔE or None).
+    A hand-corrected <pose>_mask.png in the base folder is used when present."""
+    from PIL import Image
+
+    from .recolor import MaskError, load_mask, recolor_image, save_mask, write_qc
+
+    which = base_for(it)
+    b = base_item(it, which, bases)
+    bfolder, folder = folder_for(out, b), folder_for(out, it)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = COLOURS[it["fabric"]][it["colour"]]
+    qc_path = folder / "qc.json"
+    qc = json.loads(qc_path.read_text()) if qc_path.exists() else {}
+    for pose in poses:
+        path, src = folder / f"{pose}.png", bfolder / f"{pose}.png"
+        if path.exists() and not force:
+            yield pose, path, "skipped", None
+            continue
+        if not src.exists():
+            yield pose, path, f"waiting for {which} base", None
+            continue
+        mpath = bfolder / f"{pose}_mask.png"
+        try:
+            img, de, mask = recolor_image(Image.open(src), b["hex"], target, mode,
+                                          mask=load_mask(mpath) if mpath.exists() else None)
+        except MaskError as exc:
+            yield pose, path, f"needs a mask: {exc}", None
+            continue
+        if not mpath.exists():
+            save_mask(mpath, mask)
+        img.save(path)
+        qc[pose] = {"from": f"{which} base {b['hex']}", "target": target, "deltaE": round(de, 2), "on_shade": de < 3}
+        write_qc(qc_path, qc)
+        yield pose, path, "made", de
 
 
 class LibraryRunner:
@@ -264,12 +322,14 @@ class LibraryRunner:
         if saved.exists():
             return json.loads(saved.read_text())
         pool = self.models.get(it["category"]) or [{}]
+        if it.get("base"):  # each base shoot gets its own model; light and dark differ
+            return pool[(model_index(it, "product") * 2 + (it["base"] == "dark")) % len(pool)]
         return pool[model_index(it, self.face_by) % len(pool)]
 
     def prompt(self, it, pose, ident=None) -> str:
         ident = ident if ident is not None else self.identity(it)
         text = build_prompt(it["category"], it["product"], it["fabric"], pose, it["colour"],
-                            ident.get("hairstyle"), ident.get("look"), face=bool(ident.get("face")))
+                            ident.get("hairstyle"), ident.get("look"), face=bool(ident.get("face")), hex_=it.get("hex"))
         if self.negative:  # the image API has no negative-prompt field, so it is appended as an instruction
             text += " Avoid: " + build_negative(it["category"], it["product"], pose) + "."
         return text
