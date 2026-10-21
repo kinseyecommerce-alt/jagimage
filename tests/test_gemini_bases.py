@@ -104,3 +104,22 @@ def test_cli_bases_dry_run(capsys):
     assert "1 styles x 2 base colours x 1 poses = 2 AI images; 17 colours" in out
     assert "plain mint green regular-fit pullover hoodie" in out and "Exact garment colour bottle green (#1E4636)" in out
     assert "Men/Hoodie/CottonMix/Beige <- light base" in out and "Men/Hoodie/CottonMix/Maroon <- dark base" in out
+
+
+def test_dark_base_copies_child_from_light_front(tmp_path):
+    out = str(tmp_path)
+    shooter = BaseShooter()
+    calls = []
+    orig = shooter._call
+    shooter._call = lambda prompt, refs: calls.append((prompt, list(refs))) or orig(prompt, refs)
+    runner = L.LibraryRunner(shooter, L.load_models(None), out=out)
+    style = {"category": "Kids_Boys", "product": "Shorts", "fabric": "CottonMix"}
+    assert {s for _, _, s in runner.run(L.base_item(style, "dark"), ["front_main"])} == {"waiting for the light base front"}
+    list(runner.run(L.base_item(style, "light"), ["front_main"]))
+    list(runner.run(L.base_item(style, "dark"), ["front_main", "back"]))
+    light_front = str(tmp_path / "Kids_Boys/Shorts/CottonMix/_base_light/front_main.png")
+    dark_front = str(tmp_path / "Kids_Boys/Shorts/CottonMix/_base_dark/front_main.png")
+    assert calls[0][1] == []                                    # light front: new child
+    assert calls[1][1] == [light_front]                         # dark front: same child as light
+    assert calls[1][0].startswith("Use the reference image ONLY for identity")
+    assert calls[2][1] == [light_front, dark_front]             # dark poses: face + approved dark front

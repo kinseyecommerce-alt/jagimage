@@ -313,12 +313,16 @@ class LibraryRunner:
     stage='poses' makes the other poses from approved fronts; stage='all' does both.
     Each SKU gets its own model from the category's pool (rotating), kept across its 6 poses."""
 
-    def __init__(self, agent, models: Dict[str, List[dict]], out="output", negative=True, face_by="sku"):
+    def __init__(self, agent, models: Dict[str, List[dict]], out="output", negative=True, face_by="sku", same_child=True):
         self.agent = agent  # anything with _call(prompt, refs) -> bytes (CatalogAgent)
         self.models = models
         self.out = out
         self.negative = negative
         self.face_by = face_by
+        self.same_child = same_child
+
+    def _light_front(self, it) -> Path:
+        return Path(self.out) / it["category"] / it["product"] / it["fabric"] / "_base_light" / "front_main.png"
 
     def identity(self, it) -> dict:
         """The model for this SKU. Once a front exists, the identity saved with it wins, so
@@ -327,8 +331,16 @@ class LibraryRunner:
         if saved.exists():
             return json.loads(saved.read_text())
         pool = self.models.get(it["category"]) or [{}]
-        if it.get("base"):  # each base shoot gets its own model; light and dark differ
-            return pool[(model_index(it, "product") * 2 + (it["base"] == "dark")) % len(pool)]
+        if it.get("base"):
+            light = pool[(model_index(it, "product") * 2) % len(pool)]
+            if it["base"] == "light" or not self.same_child:
+                return light if it["base"] == "light" else pool[(model_index(it, "product") * 2 + 1) % len(pool)]
+            # same child in both bases: the dark shoot copies the light shoot's model. With no
+            # face photo, the approved light-base front becomes the face reference.
+            ident = dict(light)
+            if not ident.get("face"):
+                ident["face"] = str(self._light_front(it))
+            return ident
         return pool[model_index(it, self.face_by) % len(pool)]
 
     def prompt(self, it, pose, ident=None) -> str:
@@ -345,6 +357,11 @@ class LibraryRunner:
         front = folder / "front_main.png"
         if force and front.exists() and "front_main" in poses:
             (folder / "model.json").unlink(missing_ok=True)  # remaking the front may pick a new model
+        if it.get("base") == "dark" and self.same_child and not (folder / "model.json").exists() \
+                and not self._light_front(it).exists() and not (self.models.get(it["category"]) or [{}])[0].get("face"):
+            for pose in poses:
+                yield pose, folder / f"{pose}.png", "waiting for the light base front"
+            return
         ident = self.identity(it)
         face = ident.get("face")
         for pose in poses:
