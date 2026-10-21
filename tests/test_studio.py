@@ -37,6 +37,27 @@ def test_300_models_are_all_different():
         assert faces.describe(category, 7) == faces.describe(category, 7)  # stable, so batches can resume
 
 
+def test_every_model_number_has_its_own_face():
+    for category in faces.FEATURES:
+        n = faces.capacity(category)
+        assert n > 10000
+        assert len({tuple(faces.look(category, i).values()) for i in range(1, n + 1)}) == n
+
+
+def test_ledger_never_gives_a_face_twice(tmp_path):
+    led = studio.ModelLedger(tmp_path)
+    assert led.next_free("Men") == 1
+    a = studio.Spec(category="Men", top_colours=["Red"], models=300, first_model=1, name="a")
+    led.reserve(a)
+    assert led.next_free("Men") == 301 and led.next_free("Women") == 1
+    assert led.clash(studio.Spec(category="Men", top_colours=["Red"], models=5, first_model=299, name="b"))["batch"] == "a"
+    assert led.clash(studio.Spec(category="Men", top_colours=["Red"], models=5, first_model=301, name="b")) is None
+    assert led.clash(a) is None  # re-running the same batch continues it
+    (tmp_path / "old").mkdir()  # a batch from before the ledger: read from its spec.json
+    (tmp_path / "old" / "spec.json").write_text(json.dumps({"category": "Men", "first_model": 301, "models": 10, "name": "old"}))
+    assert led.next_free("Men") == 311
+
+
 def test_plan_bases_and_pairs():
     s = studio.Spec(top_colours=["Yellow", "Navy", "White"], bottom_colours=["Black", "Light Pink"], pairing="each", models=300)
     assert len(s.pairs()) == 6 and s.bases()[0] in s.bases() and len(s.bases()) == 4
@@ -163,6 +184,10 @@ def test_studio_server_runs_a_batch(tmp_path):
             time.sleep(0.1)
         assert pv["counts"]["ai_done"] == 2 and pv["result"].endswith("wave.png") and not pv["error"]
         assert _get(f"{base}/thumbs/_previews/{pv['result']}")[0] == 200
+        code, plan2 = _post(base + "/api/plan", body)  # the next batch gets new faces automatically
+        assert plan2["first_model"] == 4 and plan2["auto"] and not plan2["clash"]
+        code, clash = _post(base + "/api/jobs", {**body, "first_model": 2, "name": "other"})
+        assert code == 400 and "already in batch" in clash["error"]
         z = zipfile.ZipFile(io.BytesIO(_get(f"{base}/api/batches/{st['name']}/zip?what=jpg")[1]))
         assert len(z.namelist()) == 6 and all(n.endswith(".jpg") for n in z.namelist())
         with pytest.raises(urllib.error.HTTPError):

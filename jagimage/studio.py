@@ -105,6 +105,9 @@ class Spec:
             raise ValueError("poses must include front_main and come from: " + ", ".join(L.POSES))
         if not 1 <= int(self.models) <= 5000:
             raise ValueError("models must be between 1 and 5000")
+        self.first_model = int(self.first_model)
+        if self.first_model < 1 or self.first_model + int(self.models) - 1 > faces.capacity(self.category):
+            raise ValueError(f"model numbers go from 1 to {faces.capacity(self.category)} for {self.category}")
         for c in self.top_colours + self.bottom_colours:
             colour_hex(c, self.fabric)
         if self.canvas:
@@ -187,6 +190,49 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     if spec.bottom == "Trackpants":
         text += L.JOGGER_RULE
     return text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + ", top and bottom in the same colour."
+
+
+class ModelLedger:
+    """Which model numbers each category has used, across every batch in the output folder, so a
+    face is never used twice: model n always has the same look, and each n belongs to one batch.
+    Kept in <out>/_models.json; batches made before the ledger existed are read from their spec.json."""
+
+    def __init__(self, out):
+        self.path = Path(out) / "_models.json"
+        self.out = Path(out)
+
+    def ranges(self, category: str) -> List[dict]:
+        rows = json.loads(self.path.read_text()) if self.path.exists() else []
+        seen = {(r["batch"], r["first"]) for r in rows}
+        for spec_file in self.out.glob("*/spec.json"):
+            if spec_file.parent.name.startswith("_"):
+                continue
+            sp = json.loads(spec_file.read_text())
+            key = (sp.get("name", spec_file.parent.name), sp["first_model"])
+            if key not in seen:
+                rows.append({"category": sp["category"], "batch": key[0], "first": sp["first_model"],
+                             "last": sp["first_model"] + int(sp["models"]) - 1})
+        return [r for r in rows if r["category"] == category]
+
+    def next_free(self, category: str) -> int:
+        return max([r["last"] for r in self.ranges(category)] + [0]) + 1
+
+    def clash(self, spec: "Spec") -> Optional[dict]:
+        """Another batch already using any of this spec's model numbers (re-running the same batch is fine)."""
+        first, last = spec.first_model, spec.first_model + int(spec.models) - 1
+        for r in self.ranges(spec.category):
+            if r["batch"] != spec.name and r["first"] <= last and first <= r["last"]:
+                return r
+        return None
+
+    def reserve(self, spec: "Spec"):
+        rows = json.loads(self.path.read_text()) if self.path.exists() else []
+        row = {"category": spec.category, "batch": spec.name, "first": spec.first_model,
+               "last": spec.first_model + int(spec.models) - 1}
+        if row not in rows:
+            rows.append(row)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(rows, indent=1))
 
 
 class Batch:

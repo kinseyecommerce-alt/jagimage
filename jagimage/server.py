@@ -43,6 +43,7 @@ def options(app=None) -> dict:
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
+        "next_model": {c: studio.ModelLedger(app.out).next_free(c) for c in L.CATEGORIES} if app else {},
     }
 
 
@@ -142,13 +143,22 @@ class Studio:
         export, export_what = (body.pop("export", None) or "").strip() or None, body.pop("export_what", "jpg")
         if export:
             Path(export).expanduser().mkdir(parents=True, exist_ok=True)  # fail now, not after the AI calls
+        ledger = studio.ModelLedger(self.out)
+        if not body.get("first_model"):  # automatic: the next faces this category has never used
+            body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
         spec = studio.Spec(**body)
+        hit = ledger.clash(spec)
+        if hit:
+            raise ValueError(f"Models {hit['first']}-{hit['last']} of {spec.category} are already in batch {hit['batch']}, "
+                             f"so those faces would repeat. Start at model no. {ledger.next_free(spec.category)} "
+                             "(or leave it empty for automatic).")
         if stage != "recolor" and self.engine is default_engine and not os.environ.get(KEY_ENV[spec.provider]):
             raise ValueError(f"Add your {spec.provider} API key first")
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
             job = Job(spec, self.out, self.engine, workers, stage, export, export_what)
+            ledger.reserve(spec)
             self.jobs[job.id] = job
         job.thread.start()
         return job
@@ -249,6 +259,7 @@ def make_handler(app: Studio):
                     pose, model_no = body.pop("preview_pose", "front_main"), int(body.pop("preview_model", 0) or 0)
                     for k in ("stage", "workers", "export", "export_what"):
                         body.pop(k, None)
+                    body["first_model"] = body.get("first_model") or studio.ModelLedger(app.out).next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)
                     if pose not in spec.pose_texts():
                         raise ValueError(f"unknown pose {pose}")
@@ -264,6 +275,7 @@ def make_handler(app: Studio):
                     pose, model_no = body.pop("preview_pose", "front_main"), body.pop("preview_model", None)
                     for k in ("stage", "workers", "export", "export_what"):
                         body.pop(k, None)
+                    body["first_model"] = body.get("first_model") or studio.ModelLedger(app.out).next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)
                     if pose not in spec.pose_texts():
                         raise ValueError(f"unknown pose {pose}")
@@ -276,8 +288,13 @@ def make_handler(app: Studio):
                 if parts == ["api", "plan"]:
                     for k in ("stage", "workers", "export", "export_what"):
                         body.pop(k, None)
+                    ledger = studio.ModelLedger(app.out)
+                    auto = not body.get("first_model")
+                    body["first_model"] = body.get("first_model") or ledger.next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)
-                    return self._json({**spec.plan(), "bases": [studio.base_dir(b) for b in spec.bases()],
+                    hit = ledger.clash(spec)
+                    return self._json({**spec.plan(), "first_model": spec.first_model, "auto": auto,
+                                       "clash": hit and f"Models {hit['first']}-{hit['last']} are already in batch {hit['batch']}: faces would repeat. Next free: {ledger.next_free(spec.category)}.", "bases": [studio.base_dir(b) for b in spec.bases()],
                                        "pairs": spec.pairs(), "name": spec.name})
                 if parts == ["api", "settings"]:
                     out = (body.get("out") or "").strip()

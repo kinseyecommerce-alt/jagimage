@@ -61,15 +61,31 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
 }
 
 
+def capacity(category: str) -> int:
+    """How many models of this category have a different combination of features."""
+    n = 1
+    for options in FEATURES[category].values():
+        n *= len(options)
+    return n
+
+
+# Features that change fastest from one model number to the next come first.
+ORDER = ["hair", "skin", "face", "eyes", "smile", "beard", "brows", "build"]
+
+
 def look(category: str, i: int) -> Dict[str, str]:
-    """Model i's features. Each feature list advances by a different step, so neighbouring models
-    differ in every feature and combinations only repeat after many models."""
+    """Model i's features. i-1 is written in mixed radix (hair fastest), and every digit is shifted by
+    the digits before it. That mapping is one-to-one, so every number up to capacity() gets its own
+    combination, and model i and i+1 differ in hair, skin, face shape and more, not just one feature."""
     feats = FEATURES[category]
-    out = {}
-    for k, (name, options) in enumerate(feats.items()):
-        step = 1 + k  # 1, 2, 3 ... with the list lengths chosen so the cycles don't line up
-        out[name] = options[(i * step + i // len(options)) % len(options)]
-    return out
+    names = [n for n in ORDER if n in feats] + [n for n in feats if n not in ORDER]
+    k, carry, pick = i - 1, 0, {}
+    for name in names:
+        options = feats[name]
+        k, d = divmod(k, len(options))
+        pick[name] = options[(d + carry) % len(options)]
+        carry += d
+    return {name: pick[name] for name in feats}
 
 
 def describe(category: str, i: int) -> str:

@@ -134,9 +134,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <h2>Models and poses</h2>
       <div class="row">
         <label class="field"><span>Different models</span><input type="number" id="models" min="1" max="5000" value="10"></label>
-        <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" value="1"></label>
+        <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" placeholder="Automatic"></label>
       </div>
-      <p class="hint">Every model is a different person (face, skin tone, hair, eyes). Start at 301 to add 300 more to an earlier batch.</p>
+      <p class="hint" id="modelHint">Every model is a different person, and a face is never used twice in this app: new batches start after the last model number used.</p>
       <div class="sub2">Poses (tap to include)</div>
       <div class="chips" id="poses"></div>
 
@@ -159,7 +159,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="sub2">Prompt preview</div>
       <div class="row">
         <label class="field"><span>Pose</span><select id="previewPose"></select></label>
-        <label class="field"><span>Model no.</span><input type="number" id="previewModel" min="1" value="1"></label>
+        <label class="field"><span>Model no.</span><input type="number" id="previewModel" min="1" placeholder="First of batch"></label>
       </div>
       <div class="row">
         <button class="btn" id="previewBtn">Preview prompt</button>
@@ -309,7 +309,7 @@ function spec() {
   const fixed = S.opts.fixed_bottoms.includes($("bottom").value);
   return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
-    models: +$("models").value || 1, first_model: +$("firstModel").value || 1, poses: [...S.poses],
+    models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value,
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
 }
@@ -318,7 +318,10 @@ function refreshPlan() {
   clearTimeout(planTimer);
   planTimer = setTimeout(async () => {
     try {
-      const p = await api("/api/plan", spec()); $("err").textContent = "";
+      const p = await api("/api/plan", spec()); $("err").textContent = p.clash || "";
+      const last = p.first_model + p.models - 1;
+      $("modelHint").textContent = `This batch uses models ${fmt(p.first_model)}–${fmt(last)} of ${label(S.category)}${p.auto ? " (automatic: faces never used before)" : ""}. A face is never used twice in this app.`;
+      $("start").disabled = !!p.clash || (S.job && $("stop").disabled === false);
       const per = p.bases_per_model;
       $("plan").innerHTML = `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
         + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b> = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
@@ -347,7 +350,7 @@ function showPoseText() {
   $("poseDelete").classList.toggle("hide", !custom);
 }
 async function preview() {
-  try { const r = await api("/api/prompt", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 1 });
+  try { const r = await api("/api/prompt", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 0 });
     $("previewOut").textContent = `Model ${r.model} · base ${r.base.replace("-", " top / ")}${r.base.includes("-") ? " bottom" : " top"}`
       + (r.reference_images.length ? ` · reference: ${r.reference_images.join(", ")}` : " · no reference image (new face from the text)") + "\n\n" + r.prompt;
     $("previewOut").classList.remove("hide"); $("err").textContent = ""; }
@@ -356,7 +359,7 @@ async function preview() {
 async function testPhoto() {
   $("err").textContent = "";
   try {
-    let st = await api("/api/preview", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 1 });
+    let st = await api("/api/preview", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 0 });
     $("testBtn").disabled = true; $("testOut").classList.remove("hide"); $("testImgs").innerHTML = "";
     const t0 = Date.now();
     while (!st.done) {
@@ -427,7 +430,7 @@ function exportOpts() {
 async function start() {
   $("err").textContent = "";
   try { const j = await api("/api/jobs", { ...spec(), stage: $("stage").value, workers: +$("workers").value || 4, ...exportOpts() });
-        S.job = j.id; openBatch(j.name); showJob(j); poll(); }
+        S.job = j.id; openBatch(j.name); showJob(j); poll(); $("firstModel").value = ""; refreshPlan(); }
   catch (e) { $("err").textContent = e.message; }
 }
 function poll() { clearInterval(S.poll); S.poll = setInterval(async () => { if (!S.job) return; const j = await api(`/api/jobs/${S.job}`); showJob(j); if (!j.running) { clearInterval(S.poll); loadGallery(true); loadJobs(); } else if (j.recent.length) loadGallery(true, true); }, 2000); }
