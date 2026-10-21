@@ -17,6 +17,8 @@ MODES = ("match", "hue", "scale")
 PHOTO_BLACK = 0.2  # darkest garment lightness rendered (~#1A1A1A); below it knit and folds can't show
 PHOTO_WHITE = 0.955  # lightest garment average rendered (~#F2F2F2); highlights roll up towards pure white
 KNIT_MIN = 0.85    # stitches and knit keep at least this much of their contrast on darker targets
+CLIPPED = 0.1      # lightness below this (RGB 0-3) is camera-crushed black with no texture in it
+KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
 
@@ -131,11 +133,30 @@ def fabric_layers(L: np.ndarray, mask: Optional[np.ndarray]):
     Ld = ndimage.median_filter(L, size=3)
     if mask is None:
         return Ld, Ld, L - Ld
-    m = (mask > 0.5).astype(np.float32)
+    # Clipped-black pixels (deep creases the camera crushed to 0,0,0) carry no fabric detail: leave
+    # them out of the shading and fill them with the surrounding shading, a little darker, so they
+    # don't turn into hard-edged blotches when the colour gets lighter.
+    g = mask > 0.5
+    clipped = ndimage.binary_dilation(L < CLIPPED, iterations=2) & g  # with the pixels it darkens
+    m = (g & ~clipped).astype(np.float32)
     num = ndimage.gaussian_filter(Ld * m, 3.0)
     den = ndimage.gaussian_filter(m, 3.0)
     Lb = np.where(den > 1e-3, num / np.maximum(den, 1e-3), Ld)
-    return Lb, Ld - Lb, L - Ld
+    if clipped.any() and m.any():
+        _, (iy, ix) = ndimage.distance_transform_edt(~(m > 0), return_indices=True)
+        fill = np.where(clipped, Lb[iy, ix], Lb)  # carry the surrounding shading inwards...
+        gm = g.astype(np.float32)                 # ...then smooth it into a soft deep crease
+        fill = ndimage.gaussian_filter(fill * gm, 6.0) / np.maximum(ndimage.gaussian_filter(gm, 6.0), 1e-3)
+        knit = Ld - Lb
+        # borrow knit texture by mirroring the real fabric next to the crushed area across its edge
+        ys, xs = np.nonzero(clipped)
+        ry = np.clip(2 * iy[ys, xs] - ys, 0, L.shape[0] - 1)
+        rx = np.clip(2 * ix[ys, xs] - xs, 0, L.shape[1] - 1)
+        borrowed = np.where(m[ry, rx] > 0, knit[ry, rx], 0.0)
+        Lb = np.where(clipped, fill, Lb)
+        Ld = Ld.copy()
+        Ld[ys, xs] = Lb[ys, xs] + borrowed
+    return Lb, Ld - Lb, np.where(clipped, 0.0, L - Ld)
 
 
 def _cleanup(m, lab, centre):
@@ -207,7 +228,7 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
         g = texture_gain(float(mean[0]), float(T[0]))
         Lb, knit, noise = fabric_layers(L, mask)
         fold = g * (Lb - mean[0])  # cap deep creases so boosted shadows don't read as dirt
-        L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + max(g, KNIT_MIN) * texture * knit + noise * min(1.0, 1.0 / g)
+        L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + KNIT_CAP * np.tanh(max(g, KNIT_MIN) * texture * knit / KNIT_CAP) + noise * min(1.0, 1.0 / g)
         # Light targets: roll highlights off below 1 instead of clipping them flat, then
         # re-centre so the garment still averages the exact target lightness.
         for _ in range(2):

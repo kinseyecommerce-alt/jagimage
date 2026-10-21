@@ -145,7 +145,8 @@ jagimage library --bases --provider gemini --category Kids_Boys --product HalfSl
 
 `web/recolor/index.html` is a browser tool for recolouring existing garment photos. Open the file in a browser; nothing is uploaded anywhere. `app.html` is the same page without the HTML wrapper (the published version).
 
-- **Pick the garment:** it detects colour regions; hover to see them, click to select. "Pick only the part I click" keeps black hair separate from a black tee. "Include similar shades" also pulls in folds and shadows.
+- **Pick the garment:** it detects colour regions; hover to see them, click to select. "Pick only the part I click" keeps black hair separate from a black tee. "Include similar shades" also pulls in folds and shadows. A coloured garment only grows into its own hue, so a pale shirt never takes the grey studio or skin with it.
+- **Clean edges and creases:** the garment's edge is unmixed from the photo, so it stays as smooth as the original, and deep creases the camera crushed to pure black are filled with soft shading instead of turning into blotches.
 - **Exact colour:** set a hex code or click a Pure Cotton / Cotton Mix swatch. Each region shows ΔE to the target (under 3 = on shade).
 - **Three modes:**
   - **Exact match:** lands on the hex on average.

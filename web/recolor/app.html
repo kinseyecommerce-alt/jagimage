@@ -393,23 +393,34 @@ function splitAt(doc, split, record) {
   const mask = new Uint8Array(W * H), stack = new Int32Array(W * H); let sp = 0, count = 0;
   const ok = (j) => !mask[j] && labels[j] !== 255 && (near[labels[j]] || (near[label2[j]] && ratio[j] > 150));
   mask[seed] = 1; stack[sp++] = seed;
-  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0, grown = 0;
   while (sp) { const i = stack[--sp]; count++; const x = i % W, y = (i / W) | 0;
     if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     if (x > 0 && ok(i - 1)) { mask[i - 1] = 1; stack[sp++] = i - 1; } if (x < W - 1 && ok(i + 1)) { mask[i + 1] = 1; stack[sp++] = i + 1; }
     if (y > 0 && ok(i - W)) { mask[i - W] = 1; stack[sp++] = i - W; } if (y < H - 1 && ok(i + W)) { mask[i + W] = 1; stack[sp++] = i + W; } }
   { // grow into connected deep folds/shadows of the same fabric that the region match missed
+    // A coloured garment (mint, green, red...) only grows into the same hue, as shadows keep their
+    // hue while losing colour. A pale garment is otherwise close to a light grey studio and skin.
+    // The studio backdrop itself (the photo's border colour) is never grown into.
     const lab = [0, 0, 0], wL = doc.wL, lim = Math.max(split.tol, 0.03) * 2.2, src = doc.src;
+    grown = 0;
+    const c0 = Math.hypot(f0[1], f0[2]), h0 = Math.atan2(f0[2], f0[1]), studio = studioLab(doc);
+    const awayFromStudio = Math.hypot(f0[0] / wL - studio[0], f0[1] - studio[1], f0[2] - studio[2]) > 0.06;
     const close = (j) => { if (mask[j] || labels[j] === 255) return false; const o = j * 4; rgbToLab(src[o], src[o+1], src[o+2], lab);
-      return Math.hypot(lab[0] * wL - f0[0], lab[1] - f0[1], lab[2] - f0[2]) < lim; };
+      if (Math.hypot(lab[0] * wL - f0[0], lab[1] - f0[1], lab[2] - f0[2]) >= lim) return false;
+      if (awayFromStudio && Math.hypot(lab[0] - studio[0], lab[1] - studio[1], lab[2] - studio[2]) < 0.04) return false;
+      if (c0 < 0.04) return true;
+      const c = Math.hypot(lab[1], lab[2]); let dh = Math.abs(Math.atan2(lab[2], lab[1]) - h0); if (dh > Math.PI) dh = 2 * Math.PI - dh;
+      return c > Math.max(0.012, 0.18 * c0) && dh < 0.7; };
     for (let i = 0; i < mask.length; i++) if (mask[i]) stack[sp++] = i;
     while (sp) { const i = stack[--sp]; const x = i % W, y = (i / W) | 0;
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
       for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1])
-        if (j >= 0 && close(j)) { mask[j] = 1; stack[sp++] = j; count++; } }
+        if (j >= 0 && close(j)) { mask[j] = 1; stack[sp++] = j; count++; grown++; } }
   }
   let nearTotal = 0; for (let i = 0; i < labels.length; i++) if (labels[i] !== 255 && near[labels[i]]) nearTotal++;
-  if (count > nearTotal * 0.97 && near.reduce((s, v) => s + v, 0) === 1) return L0; // already one piece
+  // already one piece, and no extra shadow was found: keep the region as it is
+  if (count - grown > nearTotal * 0.97 && grown < nearTotal * 0.005 && near.reduce((s, v) => s + v, 0) === 1) return L0;
   // close small holes (knit speckle, stitching) inside the part
   const R = 3, bw = x1 - x0 + 1, bh = y1 - y0 + 1, S = new Int32Array((bw + 1) * (bh + 1));
   for (let y = 0; y < bh; y++) { let row = 0; for (let x = 0; x < bw; x++) { row += mask[(y + y0) * W + x + x0]; S[(y + 1) * (bw + 1) + x + 1] = S[y * (bw + 1) + x + 1] + row; } }
@@ -420,7 +431,9 @@ function splitAt(doc, split, record) {
     if (!take) { const ax = Math.max(0, x - R), ay = Math.max(0, y - R), bx = Math.min(bw, x + R + 1), by = Math.min(bh, y + R + 1);
       const s = S[by * (bw + 1) + bx] - S[ay * (bw + 1) + bx] - S[by * (bw + 1) + ax] + S[ay * (bw + 1) + ax];
       take = s >= 0.7 * (bx - ax) * (by - ay); }
-    if (take) { if (near[label2[i]] || label2[i] === labels[i]) label2[i] = NL; labels[i] = NL;
+    // pixels pulled in from another region (deep creases, closed speckle) are fully garment;
+    // only real edges keep their soft blend with the neighbouring region
+    if (take) { if (!near[labels[i]] || near[label2[i]] || label2[i] === labels[i]) label2[i] = NL; labels[i] = NL;
       if ((i & 7) === 0) { const o = i * 4; rgbToLab(src[o], src[o + 1], src[o + 2], lab); sL += lab[0]; sa += lab[1]; sb += lab[2]; sc++; } }
   }
   const mL = sc ? sL / sc : doc.clusters[L0].L, ma = sc ? sa / sc : doc.clusters[L0].a, mb = sc ? sb / sc : doc.clusters[L0].b;
@@ -428,6 +441,15 @@ function splitAt(doc, split, record) {
   recountShares(doc);
   if (record) { (doc.splits = doc.splits || []).push(split); buildPreview(doc); }
   return NL;
+}
+function studioLab(doc) { // median colour of the photo's border = the studio backdrop
+  if (doc.studio) return doc.studio;
+  const { src, w, h } = doc, L = [], A = [], B = [], lab = [0, 0, 0];
+  const add = (x, y) => { const o = (y * w + x) * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); L.push(lab[0]); A.push(lab[1]); B.push(lab[2]); };
+  for (let x = 0; x < w; x += 2) { add(x, 0); add(x, h - 1); }
+  for (let y = 0; y < h; y += 2) { add(0, y); add(w - 1, y); }
+  const med = (v) => v.sort((p, q) => p - q)[v.length >> 1];
+  return (doc.studio = [med(L), med(A), med(B)]);
 }
 function recountShares(doc) {
   const cnt = new Float64Array(doc.clusters.length), lb = doc.maps.labels; let tot = 0;
@@ -442,6 +464,8 @@ function recountShares(doc) {
 const FOLD_CAP = 0.2;
 const PHOTO_BLACK = 0.2, PHOTO_WHITE = 0.955; // black and white as they photograph (~#1A1A1A, ~#F2F2F2), so knit and stitches show
 const KNIT_MIN = 0.85; // stitches and knit keep at least this much contrast on darker targets
+const CLIPPED = 0.1; // lightness below this (RGB 0-3) is camera-crushed black with no texture in it
+const KNIT_CAP = 0.08; // knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 const renderTarget = (hex, mode) => { const T = hexToLab(hex); if (mode === "match") T[0] = Math.min(PHOTO_WHITE, Math.max(PHOTO_BLACK, T[0])); return T; };
 const textureGain = (mL, tL) => Math.min(3.5, Math.max(0.35, ((tL + 0.08) / (mL + 0.08)) ** 0.8));
 function prepEdits(doc, edits) {
@@ -474,28 +498,49 @@ function maskedBlur(V, M, W, H, r) { // box blur (x2, ~gaussian) that only avera
 function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
   ensureMaps(doc);
   const { src, w: W, h: H } = doc, { labels, label2, ratio } = doc.maps, n = W * H, E = prepEdits(doc, edits);
-  const touched = new Uint8Array(n); let any = false;
-  for (let i = 0; i < n; i++) { const l = labels[i]; if (l !== 255 && (E[l] || E[label2[i]])) { touched[i] = 1; any = true; } }
+  const own = garmentLabels(doc, E), touched = new Uint8Array(n); let any = false;
+  for (let i = 0; i < n; i++) if (own[i] !== 255) { touched[i] = 1; any = true; }
   if (!any) { out.set(src); return; }
   const L = new Float32Array(n), A = new Float32Array(n), B = new Float32Array(n), lab = [0, 0, 0];
   for (let i = 0; i < n; i++) if (touched[i]) { const o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); L[i] = lab[0]; A[i] = lab[1]; B[i] = lab[2]; }
   let Ld = L, Lb = L;
   if (E.some((e) => e && e.mode === "match")) {
-    const M = new Uint8Array(n); for (let i = 0; i < n; i++) if (touched[i] && E[labels[i]] && E[labels[i]].mode === "match") M[i] = 1;
+    // clipped-black pixels (creases crushed to 0,0,0) carry no fabric detail: leave them out of the
+    // shading and fill them with the surrounding shading, a little darker, so they don't become blotches
+    const M = new Uint8Array(n), clip = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (touched[i] && E[own[i]].mode === "match") M[i] = 1;
+    for (let i = 0; i < n; i++) if (M[i] && L[i] < CLIPPED) { const x = i % W; // crushed pixel and the 2 px it darkens
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const j = i + dy * W + dx;
+        if (x + dx >= 0 && x + dx < W && j >= 0 && j < n && M[j]) clip[j] = 2; } }
+    for (let i = 0; i < n; i++) if (clip[i]) M[i] = 0;
     Ld = median5(L, touched, W, H); Lb = maskedBlur(Ld, M, W, H, 4);
+    if (clip.some((v) => v)) { // carry the surrounding shading inwards, smooth it, and borrow knit
+      const fill = Float32Array.from(Lb), from = new Int32Array(n).fill(-1), q = new Int32Array(n); let qh = 0, qt = 0;
+      for (let i = 0; i < n; i++) if (M[i]) { from[i] = i; q[qt++] = i; }
+      while (qh < qt) { const i = q[qh++], x = i % W;
+        for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W])
+          if (j >= 0 && j < n && clip[j] && from[j] < 0) { from[j] = from[i]; fill[j] = fill[i]; q[qt++] = j; } }
+      const G = new Uint8Array(n); for (let i = 0; i < n; i++) G[i] = M[i] | (clip[i] ? 1 : 0);
+      const soft = maskedBlur(fill, G, W, H, 8);
+      for (let i = 0; i < n; i++) if (clip[i]) {
+        let knit = 0; const f = from[i]; // mirror the real fabric next to the crushed area across its edge
+        if (f >= 0) { const rx = 2 * (f % W) - i % W, ry = 2 * ((f / W) | 0) - ((i / W) | 0);
+          if (rx >= 0 && rx < W && ry >= 0 && ry < H) { const r = ry * W + rx; if (M[r]) knit = Ld[r] - Lb[r]; } }
+        Lb[i] = soft[i]; Ld[i] = soft[i] + knit; L[i] = Ld[i]; }
+    }
   }
   const texL = (e, i) => {
     const T = e.lab, Mn = e.mean;
     if (e.mode === "hue") return L[i];
     if (e.mode === "scale") return L[i] * (Mn[0] > 0.02 ? T[0] / Mn[0] : 1);
     const fold = e.g * (Lb[i] - Mn[0]); // cap deep creases so boosted shadows don't read as dirt
-    let v = T[0] + FOLD_CAP * Math.tanh(fold / FOLD_CAP) + Math.max(e.g, KNIT_MIN) * (Ld[i] - Lb[i]) + (L[i] - Ld[i]) * Math.min(1, 1 / e.g);
+    let v = T[0] + FOLD_CAP * Math.tanh(fold / FOLD_CAP) + KNIT_CAP * Math.tanh(Math.max(e.g, KNIT_MIN) * (Ld[i] - Lb[i]) / KNIT_CAP) + (L[i] - Ld[i]) * Math.min(1, 1 / e.g);
     if (v > T[0]) { const hd = Math.max(1 - T[0], 1e-3); v = T[0] + hd * Math.tanh((v - T[0]) / hd); } // roll off highlights
     return v + e.delta;
   };
   // re-centre each region so it still averages the exact target lightness
   const sum = new Float64Array(256), cnt = new Float64Array(256);
-  for (let i = 0; i < n; i++) { const l = labels[i]; if (touched[i] && E[l] && E[l].mode === "match" && ratio[i] < 128) { sum[l] += Math.min(1, Math.max(0, texL(E[l], i))); cnt[l]++; } }
+  for (let i = 0; i < n; i++) { const l = own[i]; if (touched[i] && E[l].mode === "match" && ratio[i] < 128) { sum[l] += Math.min(1, Math.max(0, texL(E[l], i))); cnt[l]++; } }
   E.forEach((e, l) => { if (e && cnt[l]) e.delta = e.lab[0] - sum[l] / cnt[l]; });
   const p1 = [0, 0, 0], p2 = [0, 0, 0];
   const paint = (e, i, p, o) => { if (!e) { p[0] = src[o]; p[1] = src[o+1]; p[2] = src[o+2]; return; }
@@ -505,12 +550,87 @@ function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
   for (let i = 0; i < n; i++) {
     const o = i * 4;
     if (!touched[i]) { out[o] = src[o]; out[o+1] = src[o+1]; out[o+2] = src[o+2]; out[o+3] = src[o+3]; continue; }
-    const e1 = E[labels[i]], e2 = E[label2[i]];
-    const r = ratio[i] / 255, wgt = r < 0.6 ? 1 : Math.max(0.5, 1 - (r - 0.6) * 1.25);
+    // two edited regions meeting (e.g. tee and shorts in different colours) blend softly;
+    // the garment's outer edge is rebuilt from the photo below
+    const e1 = E[own[i]], e2 = label2[i] !== 255 && label2[i] !== own[i] ? E[label2[i]] : null;
+    const r = ratio[i] / 255, wgt = e2 && r >= 0.6 ? Math.max(0.5, 1 - (r - 0.6) * 1.25) : 1;
     paint(e1, i, p1, o);
     if (wgt < 1) { paint(e2, i, p2, o); out[o] = p1[0] * wgt + p2[0] * (1 - wgt); out[o+1] = p1[1] * wgt + p2[1] * (1 - wgt); out[o+2] = p1[2] * wgt + p2[2] * (1 - wgt); }
     else { out[o] = p1[0]; out[o+1] = p1[1]; out[o+2] = p1[2]; }
     out[o + 3] = src[o + 3];
+  }
+  unmixEdges(doc, own, E, out);
+}
+
+// The edited pixels (label per pixel, 255 = untouched). Small holes inside the garment (knit
+// speckle, a deep-shadow fleck of another region) join the garment around them; backdrop showing
+// through (between the legs, arm and body) never does.
+function garmentLabels(doc, E) {
+  const { w: W, h: H, src } = doc, { labels } = doc.maps, n = W * H, own = new Uint8Array(n).fill(255);
+  let count = 0;
+  for (let i = 0; i < n; i++) { const l = labels[i]; if (l !== 255 && E[l]) { own[i] = l; count++; } }
+  if (!count) return own;
+  const out = new Uint8Array(n), q = new Int32Array(n); let qh = 0, qt = 0; // reach non-garment from the border
+  const push = (i) => { if (own[i] === 255 && !out[i]) { out[i] = 1; q[qt++] = i; } };
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+  while (qh < qt) { const i = q[qh++], x = i % W;
+    if (x > 0) push(i - 1); if (x < W - 1) push(i + 1); if (i >= W) push(i - W); if (i + W < n) push(i + W); }
+  const studio = studioLab(doc), lab = [0, 0, 0], comp = new Uint8Array(n);
+  for (let s0 = 0; s0 < n; s0++) { if (own[s0] !== 255 || out[s0] || comp[s0]) continue;
+    qh = qt = 0; comp[s0] = 1; q[qt++] = s0; let sL = 0, sa = 0, sb = 0;
+    while (qh < qt) { const i = q[qh++], x = i % W, o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); sL += lab[0]; sa += lab[1]; sb += lab[2];
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W])
+        if (j >= 0 && j < n && own[j] === 255 && !out[j] && !comp[j]) { comp[j] = 1; q[qt++] = j; } }
+    const backdrop = Math.hypot(sL / qt - studio[0], sa / qt - studio[1], sb / qt - studio[2]) < 0.04;
+    if (qt <= 0.002 * count && !backdrop) { const hole = q.slice(0, qt); // take the label of a neighbouring garment pixel
+      let left = hole.length, guard = 0;
+      while (left && guard++ < 64) for (const i of hole) { if (own[i] !== 255) continue; const x = i % W;
+        for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W])
+          if (j >= 0 && j < n && own[j] !== 255 && comp[j] !== 2) { own[i] = own[j]; comp[i] = 2; left--; break; } } }
+  }
+  return own;
+}
+
+// Rebuild the garment's outer edge from the photo itself (as the Python tool does): each edge pixel
+// is unmixed into "how much garment vs how much backdrop", so the edge keeps the photo's own smooth
+// anti-aliasing and dark edge creases instead of following the regions' pixel staircase.
+function unmixEdges(doc, own, E, out) {
+  const { w: W, h: H, src } = doc, n = W * H, INSIDE = 2, OUTSIDE = 5;
+  const bfs = (seed) => { const d = new Uint8Array(n).fill(255), from = new Int32Array(n).fill(-1), q = new Int32Array(n); let qh = 0, qt = 0;
+    for (let i = 0; i < n; i++) if (seed(i)) { d[i] = 0; from[i] = i; q[qt++] = i; }
+    while (qh < qt) { const i = q[qh++], x = i % W; if (d[i] >= 12) continue;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W])
+        if (j >= 0 && j < n && d[j] === 255) { d[j] = d[i] + 1; from[j] = from[i]; q[qt++] = j; } }
+    return { d, from }; };
+  const toBack = bfs((i) => own[i] === 255), toGar = bfs((i) => own[i] !== 255);
+  const inner = toBack.d, nearIn = bfs((i) => own[i] !== 255 && inner[i] > INSIDE).from;
+  const nearOut = bfs((i) => toGar.d[i] > OUTSIDE).from;
+  const lp = [0, 0, 0], lf = [0, 0, 0], lb = [0, 0, 0], fg = [0, 0, 0], ln = [0, 0, 0], rgb = [0, 0, 0], wt = [1, 2, 2];
+  const byte = (v) => Math.round(Math.max(0, Math.min(255, v))); // rgbToLab takes whole 0-255 values
+  for (let i = 0; i < n; i++) {
+    const isIn = own[i] !== 255; if (isIn ? inner[i] > INSIDE : toGar.d[i] > OUTSIDE) continue;
+    const f = nearIn[i], b = nearOut[i]; if (f < 0 || b < 0) continue;
+    const o = i * 4, of = f * 4, ob = b * 4, e = E[own[f]];
+    rgbToLab(src[o], src[o+1], src[o+2], lp); rgbToLab(src[of], src[of+1], src[of+2], lf); rgbToLab(src[ob], src[ob+1], src[ob+2], lb);
+    let dd = 0, dot = 0; for (let c = 0; c < 3; c++) { const dc = (lf[c] - lb[c]) * wt[c]; dd += dc * dc; dot += (lp[c] - lb[c]) * wt[c] * dc; }
+    let a = dd > 0.0016 ? dot / dd : (isIn ? 1 : 0); a = Math.min(1, Math.max(0, a));
+    // the pure garment colour behind this pixel, recoloured: the neighbour's new colour with this
+    // pixel's own lightness difference (scaled like the texture), so edge creases survive
+    for (let c = 0; c < 3; c++) fg[c] = a > 0.05 ? src[ob+c] + (src[o+c] - src[ob+c]) / a : src[of+c];
+    rgbToLab(byte(fg[0]), byte(fg[1]), byte(fg[2]), fg);
+    rgbToLab(out[of], out[of+1], out[of+2], ln);
+    const gain = e && e.mode === "match" ? e.g : 1;
+    labToRgb(Math.max(0, Math.min(1, ln[0] + gain * (fg[0] - lf[0]))), ln[1], ln[2], rgb, 0);
+    const fgRgb = a > 0.05 ? [0, 1, 2].map((c) => src[ob+c] + (src[o+c] - src[ob+c]) / a) : [src[of], src[of+1], src[of+2]];
+    for (let c = 0; c < 3; c++) rgb[c] = src[o+c] + a * (rgb[c] - fgRgb[c]);
+    if (a <= 0.05) { // a rim pixel still tinted by the base colour (e.g. a light halo): take that tint out
+      rgbToLab(byte(rgb[0]), byte(rgb[1]), byte(rgb[2]), ln);
+      const da = lf[1] - lb[1], db = lf[2] - lb[2], len = Math.hypot(da, db) || 1, ua = da / len, ub = db / len;
+      const spill = (lp[1] - lb[1]) * ua + (lp[2] - lb[2]) * ub;
+      if (spill > 0) { ln[1] -= spill * ua; ln[2] -= spill * ub; }
+      labToRgb(ln[0], ln[1], ln[2], rgb, 0); }
+    out[o] = rgb[0]; out[o+1] = rgb[1]; out[o+2] = rgb[2];
   }
 }
 function deltaE(doc, out, lbl, hex, mode) { // mean OKLab distance x100 between recoloured region and target

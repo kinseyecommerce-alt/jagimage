@@ -78,6 +78,15 @@ def test_white_keeps_knit_and_stitches():
     assert L[300, 150] < L[290, 150] - 0.02              # the stitch still shows
 
 
+def test_crushed_black_creases_dont_become_blotches():
+    from jagimage.recolor import rgb_to_lab
+    img = fake_photo("#1A1A1A")
+    ImageDraw.Draw(img).rectangle((140, 220, 160, 260), fill="#000000")  # a crease the camera crushed to 0,0,0
+    out, _, mask = recolor_image(img, "#1A1A1A", "#FFE01B")
+    L = rgb_to_lab(np.asarray(out.convert("RGB")))[..., 0]
+    assert abs(L[240, 150] - L[240, 125]) < 0.08  # a soft crease, not a dark patch with hard edges
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)
