@@ -177,6 +177,14 @@ def render_target(target_hex: str) -> np.ndarray:
     return np.array([PHOTO_BLACK, T[1], T[2]]) if T[0] < PHOTO_BLACK else T
 
 
+def tint_carry(mean: np.ndarray, T: np.ndarray) -> float:
+    """How much of the base photo's colour variation to keep: 0.35 for a target as colourful as the
+    base, less for greyer targets (none for white, grey or black), so the base's green-to-grey
+    shading doesn't turn into a pink cast on neutrals."""
+    cb, ct = float(np.hypot(*mean[1:])), float(np.hypot(*T[1:]))
+    return 0.35 * min(1.0, ct / max(cb, 1e-3))
+
+
 def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = "match",
                 mask: Optional[np.ndarray] = None, texture: float = 1.0) -> np.ndarray:
     """Recolour in OKLab. The garment's own colour is discarded; only its texture is kept.
@@ -198,7 +206,7 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
         L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + g * texture * knit + noise * min(1.0, 1.0 / g)
         if T[0] > WHITE_FROM:  # near-white: highlights stay on the hex, folds show as shadow only
             return np.concatenate([np.clip(T[0] + np.minimum(L2 - T[0], 0), 0, 1)[..., None],
-                                   T[1:] + (ab - mean[1:]) * 0.35], axis=-1)
+                                   T[1:] + (ab - mean[1:]) * tint_carry(mean, T)], axis=-1)
         # Light targets: roll highlights off below 1 instead of clipping them flat, then
         # re-centre so the garment still averages the exact target lightness.
         for _ in range(2):
@@ -207,7 +215,7 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
             L2 = np.where(over, T[0] + head * np.tanh((L2 - T[0]) / head), L2)
             if mask is not None and (mask > 0.95).any():
                 L2 = L2 + (T[0] - L2[mask > 0.95].mean())
-    ab2 = T[1:] + (ab - mean[1:]) * (0.35 if mode != "scale" else 0.0)
+    ab2 = T[1:] + (ab - mean[1:]) * (tint_carry(mean, T) if mode != "scale" else 0.0)
     return np.concatenate([np.clip(L2, 0, 1)[..., None], ab2], axis=-1)
 
 
@@ -225,29 +233,51 @@ def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = 
             raise MaskError("The supplied mask is empty.")
         mean = lab[core].mean(axis=0)
     new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=mask, texture=texture)).astype(np.float32)
-    out = _composite(rgb.astype(np.float32), new, mask)
+    gain = texture_gain(float(mean[0]), float(render_target(target_hex)[0])) if mode == "match" else 1.0
+    out = _composite(rgb.astype(np.float32), new, mask, gain)
     core = mask > 0.95
     goal = render_target(target_hex) if mode == "match" else hex_to_lab(target_hex)
     de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - goal) * 100)
     return Image.fromarray(np.dstack([out, rgba[..., 3]]), "RGBA"), de, mask
 
 
-def _composite(rgb, new, mask):
-    """Inside the garment use the recoloured pixels. In a thin edge band, rebuild each pixel
-    as alpha * (nearest recoloured garment colour) + (1 - alpha) * (nearest clean surround),
-    so the old garment colour doesn't leave a dark or coloured outline."""
+def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):
+    """Inside the garment use the recoloured pixels. Near the edge, unmix each pixel from the photo
+    itself: alpha = how far it sits from the nearby background colour towards the nearby garment
+    colour. The edge then keeps the photo's own anti-aliasing and dark edge creases instead of
+    following the mask's pixel staircase, and the old colour leaves no outline."""
     m = mask > 0.5
-    inner = ndimage.binary_erosion(m, iterations=1)
-    outer = ndimage.binary_dilation(m, iterations=3)
+    inner = ndimage.binary_erosion(m, iterations=inside)
+    outer = ndimage.binary_dilation(m, iterations=outside)
     band = outer & ~inner
-    a = np.clip(ndimage.gaussian_filter(m.astype(np.float32), 0.9), 0, 1)[..., None]
     out = np.where(m[..., None], new, rgb)
     if inner.any() and (~outer).any() and band.any():
         _, fi = ndimage.distance_transform_edt(~inner, return_indices=True)
-        _, bi = ndimage.distance_transform_edt(ndimage.binary_dilation(outer, iterations=1), return_indices=True)
-        F = new[fi[0], fi[1]]
-        B = rgb[bi[0], bi[1]]
-        out = np.where(band[..., None], a * F + (1 - a) * B, out)
+        _, bi = ndimage.distance_transform_edt(outer, return_indices=True)
+        ys, xs = np.nonzero(band)
+        fy, fx, by, bx = fi[0][ys, xs], fi[1][ys, xs], bi[0][ys, xs], bi[1][ys, xs]
+        P, Fo, Fn, Bc = rgb[ys, xs], rgb[fy, fx], new[fy, fx], rgb[by, bx]
+        w = np.array([1.0, 2.0, 2.0])  # weight colour over lightness, so shadows on the backdrop stay out
+        lp, lf, lb = rgb_to_lab(P) * w, rgb_to_lab(Fo) * w, rgb_to_lab(Bc) * w
+        d = lf - lb
+        dd = (d * d).sum(-1)
+        a = ((lp - lb) * d).sum(-1) / np.maximum(dd, 1e-6)
+        soft = np.clip(ndimage.gaussian_filter(m.astype(np.float32), 0.9), 0, 1)[ys, xs]
+        a = np.clip(np.where(dd > 0.0016, a, soft), 0, 1)[:, None]  # too alike to unmix: use the mask
+        # The pure garment colour behind this pixel, recoloured: the neighbour's new colour with
+        # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
+        fg = np.where(a > 0.05, Bc + (P - Bc) / np.maximum(a, 0.05), Fo)
+        fgl, fol, fnl = rgb_to_lab(np.clip(fg, 0, 255)), rgb_to_lab(Fo), rgb_to_lab(Fn)
+        nl = np.concatenate([np.clip(fnl[:, :1] + gain * (fgl[:, :1] - fol[:, :1]), 0, 1), fnl[:, 1:]], -1)
+        res = rgb_to_lab(np.clip(P + a * (lab_to_rgb(nl).astype(np.float32) - fg), 0, 255))
+        # Spill: base colour left in a rim pixel beyond what alpha explains (e.g. a light mint halo
+        # the AI drew around the shirt). Take that tint out along the base colour's direction.
+        lp, lf, lb = lp / w, lf / w, lb / w
+        dab = lf[:, 1:] - lb[:, 1:]
+        u = dab / np.maximum(np.linalg.norm(dab, axis=1, keepdims=True), 1e-6)
+        spill = ((lp[:, 1:] - lb[:, 1:] - a * dab) * u).sum(-1, keepdims=True)
+        res[:, 1:] -= np.clip(spill, 0, None) * u * (a <= 0.05)  # larger alphas were already unmixed
+        out[ys, xs] = lab_to_rgb(res).astype(np.float32)
     return np.round(np.clip(out, 0, 255)).astype(np.uint8)
 
 

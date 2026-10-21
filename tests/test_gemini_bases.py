@@ -44,6 +44,20 @@ def test_pure_black_keeps_its_knit():
     assert de < 3 and 15 < o.mean() < 40 and o.std() > 2
 
 
+def test_white_edge_has_no_tint_and_follows_the_photo():
+    from scipy import ndimage
+    from jagimage.recolor import rgb_to_lab
+    out, _, mask = recolor_image(fake_photo("#8FD3A8"), "#8FD3A8", "#FFFFFF")
+    lab = rgb_to_lab(np.asarray(out.convert("RGB")))
+    m = mask > 0.5
+    edge = ndimage.binary_dilation(m, iterations=3) & ~ndimage.binary_erosion(m, iterations=3)
+    assert np.hypot(lab[..., 1], lab[..., 2])[edge].max() < 0.03  # no pink or mint outline
+    # the photo's own anti-aliased edge is kept: a soft step, not a hard on/off staircase
+    red, _, _ = recolor_image(fake_photo("#1E4636"), "#1E4636", "#CD001A")
+    a = rgb_to_lab(np.asarray(red.convert("RGB")))[250, :150, 1]
+    assert ((a > 0.01) & (a < 0.15)).any() and a.max() > 0.18
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)

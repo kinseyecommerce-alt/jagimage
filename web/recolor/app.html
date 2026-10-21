@@ -499,7 +499,8 @@ function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
   E.forEach((e, l) => { if (e && cnt[l] && e.lab[0] <= 0.93) e.delta = e.lab[0] - sum[l] / cnt[l]; });
   const p1 = [0, 0, 0], p2 = [0, 0, 0];
   const paint = (e, i, p, o) => { if (!e) { p[0] = src[o]; p[1] = src[o+1]; p[2] = src[o+2]; return; }
-    const sat = e.mode === "scale" ? 0 : 0.35;
+    // keep less of the base's colour variation on greyer targets, so white/grey/black get no tint
+    const sat = e.mode === "scale" ? 0 : 0.35 * Math.min(1, Math.hypot(e.lab[1], e.lab[2]) / Math.max(Math.hypot(e.mean[1], e.mean[2]), 1e-3));
     labToRgb(Math.max(0, Math.min(1, texL(e, i))), e.lab[1] + (A[i] - e.mean[1]) * sat, e.lab[2] + (B[i] - e.mean[2]) * sat, p, 0); };
   for (let i = 0; i < n; i++) {
     const o = i * 4;
