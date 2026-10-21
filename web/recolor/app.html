@@ -621,7 +621,7 @@ function unmixEdges(doc, own, E, out) {
     rgbToLab(byte(fg[0]), byte(fg[1]), byte(fg[2]), fg);
     rgbToLab(out[of], out[of+1], out[of+2], ln);
     const gain = e && e.mode === "match" ? e.g : 1;
-    labToRgb(Math.max(0, Math.min(1, ln[0] + gain * (fg[0] - lf[0]))), ln[1], ln[2], rgb, 0);
+    labToRgb(Math.max(0, Math.min(1, ln[0] + FOLD_CAP * Math.tanh(gain * (fg[0] - lf[0]) / FOLD_CAP))), ln[1], ln[2], rgb, 0);
     const fgRgb = a > 0.05 ? [0, 1, 2].map((c) => src[ob+c] + (src[o+c] - src[ob+c]) / a) : [src[of], src[of+1], src[of+2]];
     for (let c = 0; c < 3; c++) rgb[c] = src[o+c] + a * (rgb[c] - fgRgb[c]);
     if (a <= 0.05) { // a rim pixel still tinted by the base colour (e.g. a light halo): take that tint out

@@ -87,6 +87,16 @@ def test_crushed_black_creases_dont_become_blotches():
     assert abs(L[240, 150] - L[240, 125]) < 0.08  # a soft crease, not a dark patch with hard edges
 
 
+def test_thin_crease_joins_the_garment_but_hair_does_not():
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.line([(95, 331), (205, 331)], fill="#20302A", width=2)        # dark hem crease under the garment
+    d.rectangle((100, 112, 200, 119), fill="#151515")                # a big dark area touching the top (hair)
+    m, _ = garment_mask(rgb_to_lab(np.asarray(img)), "#8FD3A8")
+    assert m[331, 150] > 0.5 and m[114, 150] < 0.5
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)

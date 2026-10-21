@@ -95,6 +95,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <section class="panel">
       <h2>Category</h2>
       <div class="seg" id="category"></div>
+      <div class="sub2">Shot</div>
+      <div class="seg" id="shot"></div>
+      <p class="hint" id="shotHint"></p>
       <div class="row" style="margin-top:12px">
         <label class="field"><span>Top</span><select id="top"></select></label>
         <label class="field"><span>Bottom</span><select id="bottom"></select></label>
@@ -128,6 +131,10 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <p class="hint">Every top colour is made with every bottom colour.</p>
       </div>
       <p class="hint hide" id="fixedNote">Jeans stay as the AI makes them; only the top is recoloured.</p>
+      <div id="topOnlyBottom" class="hide">
+        <label class="field"><span>Bottom colour (made by the AI, not recoloured: it only completes the look above the knee)</span>
+          <select id="bottomColour"></select></label>
+      </div>
     </section>
 
     <section class="panel">
@@ -267,7 +274,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 const $ = (id) => document.getElementById(id);
 const S = { opts: null, category: "Kids_Boys", provider: "gemini", pairing: "match", top: new Set(["Navy"]), bottom: new Set(),
             topPal: "PureCotton", bottomPal: "PureCotton", custom: { top: [], bottom: [] }, poses: new Set(["front_main"]),
-            job: null, batch: null, shown: 0, poll: null, customPoses: {} };
+            job: null, batch: null, shown: 0, poll: null, customPoses: {}, shot: "outfit" };
 const api = async (path, body) => {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
@@ -310,7 +317,7 @@ function spec() {
   return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
-    custom_poses: S.customPoses, extra: $("extra").value,
+    custom_poses: S.customPoses, extra: $("extra").value, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
 }
 let planTimer = null;
@@ -373,9 +380,13 @@ async function testPhoto() {
   $("testBtn").disabled = false;
 }
 function syncBottom() {
-  const fixed = S.opts.fixed_bottoms.includes($("bottom").value);
+  const top = S.shot === "top", fixed = top || S.opts.fixed_bottoms.includes($("bottom").value), jeans = S.opts.fixed_bottoms.includes($("bottom").value);
+  $("topOnlyBottom").classList.toggle("hide", !top || jeans);
+  $("bottomPanel").querySelector("h2").firstChild.textContent = top ? "Bottom " : "Bottom colours ";
+  $("shotHint").textContent = top ? "Framed from the head to just above the knee. Only the top is recoloured; the bottom is made by the AI in one colour. 1-2 AI photos per model."
+    : "Full body, head to shoes. Top and bottom are each recoloured to your colours.";
   $("pairing").classList.toggle("hide", fixed); $("bottomPick").classList.toggle("hide", fixed || S.pairing === "match");
-  $("fixedNote").classList.toggle("hide", !fixed);
+  $("fixedNote").classList.toggle("hide", !jeans);
 }
 function keys(p) { for (const k of ["gemini", "openai"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
 
@@ -383,6 +394,10 @@ async function init() {
   S.opts = await api("/api/options");
   keys(S.opts.providers);
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });
+  seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
+  const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";
+    $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
+  bc(); $("fabric").addEventListener("input", bc); $("bottomColour").addEventListener("input", refreshPlan);
   $("top").innerHTML = S.opts.tops.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   $("bottom").innerHTML = S.opts.bottoms.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
@@ -476,6 +491,8 @@ function loadSettings(s) {
   $("top").value = s.top; $("bottom").value = s.bottom; $("fabric").value = s.fabric; S.topPal = S.bottomPal = s.fabric;
   S.top = new Set(s.top_colours); S.bottom = new Set(s.bottom_colours);
   for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
+  S.shot = s.shot || "outfit"; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
+  if (s.bottom_colour) $("bottomColour").value = s.bottom_colour;
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; renderPoses();

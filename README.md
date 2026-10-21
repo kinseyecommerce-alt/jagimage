@@ -155,12 +155,15 @@ jagimage serve            # then open http://127.0.0.1:8765
    - Top: half sleeve, full sleeve or sleeveless tee, hoodie, or sweatshirt.
    - Bottom: shorts, track pants, or jeans (jeans stay as the AI makes them).
    - Fabric: Pure Cotton or Cotton Mix.
-3. **Top colours and bottom colours:** pick from either palette, or add any `#RRGGBB`. Choose "Same colour as the top" for matching sets. Or pick bottom colours, and every top colour is made with every bottom colour.
-4. **Models:** e.g. 300. Every model is a different real-looking person, with a different face shape, skin tone, hair, eyes and smile.
+3. **Shot:**
+   - **Top and bottom:** full body, head to shoes, and both garments are recoloured.
+   - **Top only:** framed from the head to just above the knee. Only the top is recoloured, and the bottom is made by the AI in one colour you pick. That's 1–2 AI images per model.
+4. **Top colours and bottom colours:** pick from either palette, or add any `#RRGGBB`. Choose "Same colour as the top" for matching sets. Or pick bottom colours, and every top colour is made with every bottom colour.
+5. **Models:** e.g. 300. Every model is a different real-looking person, with a different face shape, skin tone, hair, eyes and smile.
    - **Faces never repeat in the app:** each model number has its own combination of features (over 11,000 per category), and neighbouring numbers differ in hair, skin and face shape.
    - **Ledger:** the Studio keeps a list of used numbers in `output/studio/_models.json`. "Start at model no." is automatic: a new batch begins after the last number used in that category.
    - **Overlap check:** typing a range another batch already used is refused, so you can't make the same faces twice. Re-running the same batch, with "Load settings", continues it.
-5. **Engine:** Gemini (1K/2K/4K) or OpenAI. Paste the API key in the app, or set `GEMINI_API_KEY` / `OPENAI_API_KEY`. The key stays in the app's memory on your computer.
+6. **Engine:** Gemini (1K/2K/4K) or OpenAI. Paste the API key in the app, or set `GEMINI_API_KEY` / `OPENAI_API_KEY`. The key stays in the app's memory on your computer.
 
 **How it works:**
 - **Base photos:** the AI shoots each model with the top in a green base colour and the bottom in a purple one. Each model needs at most 4 base photos (light/dark top × light/dark bottom), and only the ones your colours use.

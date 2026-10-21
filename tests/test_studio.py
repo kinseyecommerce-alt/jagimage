@@ -58,6 +58,28 @@ def test_ledger_never_gives_a_face_twice(tmp_path):
     assert led.next_free("Men") == 311
 
 
+def test_ledger_survives_batches_starting_together(tmp_path):
+    led = studio.ModelLedger(tmp_path)
+    specs = [studio.Spec(category=c, top_colours=["Red"], models=3, first_model=1, name=f"b{i}")
+             for i, c in enumerate(["Men", "Women", "Kids_Boys", "Kids_Girls"] * 5)]
+    ts = [threading.Thread(target=led.reserve, args=(s,)) for s in specs]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(json.loads((tmp_path / "_models.json").read_text())) == 20
+
+
+def test_top_only_shot_is_above_the_knee_and_recolours_only_the_top(tmp_path):
+    s = studio.Spec(top_colours=["Red", "White"], shot="top", bottom="Shorts", bottom_colour="Black", models=1)
+    assert s.pairs() == [("Red", None), ("White", None)] and s.name.endswith("_top_only")
+    p = studio.prompt(s, 1, s.bases()[0], "front_main", "none")
+    assert "just above the knees" in p and "Full body head to shoes" not in p and "plain black regular-fit knit shorts" in p
+    assert "sneakers" not in p.split("Avoid:")[0] and "feet or shoes in frame" in p.split("Avoid:")[1]
+    full = studio.prompt(studio.Spec(top_colours=["Red"]), 1, ("dark", "dark"), "front_main", "none")
+    assert "Full body head to shoes" in full and "sneakers" in full
+    counts = studio.Batch(s, out=tmp_path, generate=fake_generate).run()
+    assert counts["ai_done"] == 2 and counts["recoloured"] == 2 and counts["errors"] == 0
+
+
 def test_plan_bases_and_pairs():
     s = studio.Spec(top_colours=["Yellow", "Navy", "White"], bottom_colours=["Black", "Light Pink"], pairing="each", models=300)
     assert len(s.pairs()) == 6 and s.bases()[0] in s.bases() and len(s.bases()) == 4

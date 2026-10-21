@@ -19,6 +19,8 @@ PHOTO_WHITE = 0.955  # lightest garment average rendered (~#F2F2F2); highlights 
 KNIT_MIN = 0.85    # stitches and knit keep at least this much of their contrast on darker targets
 CLIPPED = 0.1      # lightness below this (RGB 0-3) is camera-crushed black with no texture in it
 CROP_MARGIN = 32   # px around the garment kept when recolouring (edge band + blur reach)
+CREASE_DROP = 0.15  # crease pixels are at least this much darker than the garment
+CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
@@ -160,6 +162,16 @@ def fabric_layers(L: np.ndarray, mask: Optional[np.ndarray]):
     return Lb, Ld - Lb, np.where(clipped, 0.0, L - Ld)
 
 
+def _with_creases(m, lab, centre):
+    """Add the garment's thin dark crease lines along its edge (where a sleeve hem or an armpit fold
+    meets the skin). They are too dark to carry the garment's colour, so the colour mask misses them
+    and they'd be blended with the skin as speckle. Only thin lines count: a large dark area beside
+    the garment (hair) fails the opening test and stays out."""
+    dark = lab[..., 0] < centre[0] - CREASE_DROP
+    thin = dark & ~ndimage.binary_opening(dark, structure=np.ones((CREASE_MAX, CREASE_MAX), bool))
+    return m | (thin & ndimage.binary_dilation(m, iterations=3))
+
+
 def _cleanup(m, lab, centre):
     """Keep the largest piece(s), close knit speckle, fill shadow holes, feather the edge."""
     lbl, n = ndimage.label(m)
@@ -192,7 +204,7 @@ def _hue_mask(lab, base, base_hex):
         m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
     m = ndimage.binary_propagation(m, mask=m | loose)
     centre = lab[m].mean(axis=0) if m.any() else base
-    return _cleanup(m, lab, centre)
+    return _cleanup(_with_creases(m, lab, centre), lab, centre)
 
 
 def render_target(target_hex: str) -> np.ndarray:
@@ -295,7 +307,7 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):
         # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
         fg = np.where(a > 0.05, Bc + (P - Bc) / np.maximum(a, 0.05), Fo)
         fgl, fol, fnl = rgb_to_lab(np.clip(fg, 0, 255)), rgb_to_lab(Fo), rgb_to_lab(Fn)
-        nl = np.concatenate([np.clip(fnl[:, :1] + gain * (fgl[:, :1] - fol[:, :1]), 0, 1), fnl[:, 1:]], -1)
+        nl = np.concatenate([np.clip(fnl[:, :1] + FOLD_CAP * np.tanh(gain * (fgl[:, :1] - fol[:, :1]) / FOLD_CAP), 0, 1), fnl[:, 1:]], -1)
         res = rgb_to_lab(np.clip(P + a * (lab_to_rgb(nl).astype(np.float32) - fg), 0, 255))
         # Spill: base colour left in a rim pixel beyond what alpha explains (e.g. a light mint halo
         # the AI drew around the shirt). Take that tint out along the base colour's direction.

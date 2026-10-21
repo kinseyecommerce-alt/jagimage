@@ -39,7 +39,7 @@ def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
-        "poses": list(L.POSES), "pose_texts": L.POSES, "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
+        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
