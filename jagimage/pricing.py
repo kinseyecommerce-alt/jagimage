@@ -18,6 +18,11 @@ OUTPUT = {
 INPUT = {"gemini-3-pro-image": 0.003, "gemini-3.1-flash-image": 0.001, "openai": 0.02}
 RETRY_ALLOWANCE = 0.10  # images the app re-asks for when the AI gets the base colours wrong, network errors
 BATCH_DISCOUNT = 0.5    # batch mode: half the standard price (Google and OpenAI list it this way)
+# RunPod: you rent the GPU by the hour, so an image costs (price per hour) x (seconds per image).
+# Defaults: H100 SXM Community Cloud list price and a guess at Qwen-Image-Edit at 40 steps; the pilot
+# measures the real seconds (pilot/runpod/compare.py), then set JAGIMAGE_RUNPOD_SECONDS to that.
+RUNPOD_USD_PER_HOUR = float(os.environ.get("JAGIMAGE_RUNPOD_USD_PER_HOUR", "2.69"))
+RUNPOD_SECONDS = float(os.environ.get("JAGIMAGE_RUNPOD_SECONDS", "45"))
 USD_INR = float(os.environ.get("JAGIMAGE_USD_INR", "96.5"))
 
 
@@ -30,6 +35,8 @@ def gemini_model() -> str:
 def per_image(provider: str, setting: str, model: Optional[str] = None) -> Optional[float]:
     """All-in USD estimate for one AI image (output + input), or None when no price is known
     (e.g. OpenAI xhigh/max, which OpenAI doesn't list per image)."""
+    if provider == "runpod":
+        return RUNPOD_USD_PER_HOUR * RUNPOD_SECONDS / 3600
     if provider == "gemini":
         model = model or gemini_model()
         out = OUTPUT.get(("gemini", model), {}).get(setting)
@@ -41,7 +48,7 @@ def per_image(provider: str, setting: str, model: Optional[str] = None) -> Optio
 def estimate(spec) -> dict:
     """Money for a batch: AI images x price, with an allowance for retries."""
     plan = spec.plan()
-    setting = spec.image_size if spec.provider == "gemini" else spec.quality
+    setting = {"gemini": spec.image_size, "openai": spec.quality}.get(spec.provider, "gpu")
     each = per_image(spec.provider, setting)
     if each is not None and getattr(spec, "batch", False):
         each *= BATCH_DISCOUNT  # Gemini batch mode: output and input both half price
@@ -53,7 +60,8 @@ def estimate(spec) -> dict:
     return {"per_image_usd": round(each, 4), "ai_cost_usd": round(base, 2), "with_retries_usd": round(total, 2),
             "per_photo_usd": round(total / photos, 4), "usd_inr": USD_INR, "with_retries_inr": round(total * USD_INR),
             "per_photo_inr": round(total / photos * USD_INR, 2), "retry_allowance": RETRY_ALLOWANCE,
-            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": gemini_model() if spec.provider == "gemini" else "openai"}
+            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": {"gemini": gemini_model(), "runpod": "qwen-image-edit-2511"}.get(spec.provider, "openai"),
+            **({"gpu_usd_per_hour": RUNPOD_USD_PER_HOUR, "gpu_seconds_per_image": RUNPOD_SECONDS} if spec.provider == "runpod" else {})}
 
 
 def sum_estimates(rows: list, photos: int) -> dict:

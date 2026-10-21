@@ -3,6 +3,8 @@
 - openai: gpt-image models via the OpenAI SDK (OPENAI_API_KEY).
 - gemini: Gemini image models ("Nano Banana") via the google-genai SDK (GEMINI_API_KEY),
   at 1K/2K/4K resolution with a fixed 3:4 aspect ratio.
+- runpod: your own GPU pod running pilot/runpod/qwen_server.py (Qwen-Image-Edit-2511, open model),
+  reached at JAGIMAGE_RUNPOD_URL with the token JAGIMAGE_RUNPOD_TOKEN. You pay RunPod by the hour.
 """
 
 import base64
@@ -210,7 +212,54 @@ class GeminiProvider:
         return out
 
 
+class RunPodProvider:
+    """Calls the Qwen server on a RunPod pod. 1104x1472 is 3:4 at about Qwen's native 1.6 megapixels."""
+    name = "runpod"
+
+    def __init__(self, url: Optional[str] = None, token: Optional[str] = None, size: Optional[str] = None,
+                 steps: Optional[int] = None, timeout=600, opener=None):
+        self.url = (url or os.environ.get("JAGIMAGE_RUNPOD_URL", "")).rstrip("/")
+        self.token = token or os.environ.get("JAGIMAGE_RUNPOD_TOKEN", "")
+        if not self.url or not self.token:
+            raise ValueError("Add your RunPod pod address and token first")
+        self.width, self.height = (int(v) for v in (size or os.environ.get("JAGIMAGE_RUNPOD_SIZE", "1104x1472")).split("x"))
+        self.steps = int(steps or os.environ.get("JAGIMAGE_RUNPOD_STEPS", "40"))
+        self.timeout = timeout
+        self.seconds: List[float] = []  # GPU time per image, for the pilot's cost figures
+        if opener is None:
+            from urllib.request import urlopen as opener
+        self.opener = opener
+
+    def generate(self, prompt: str, refs: List[str]) -> bytes:
+        import json
+        from urllib.error import HTTPError, URLError
+        from urllib.request import Request
+
+        images = []
+        for r in refs:
+            with open(r, "rb") as f:
+                images.append(base64.b64encode(f.read()).decode())
+        body = json.dumps({"prompt": prompt, "images": images, "width": self.width, "height": self.height,
+                           "steps": self.steps, "seed": int.from_bytes(os.urandom(4), "big")}).encode()
+        req = Request(self.url + "/generate", data=body, method="POST",
+                      headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
+        try:
+            with self.opener(req, timeout=self.timeout) as resp:
+                out = json.loads(resp.read())
+        except HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:300]
+            if exc.code == 401:
+                raise PermissionError(f"401 RunPod token not accepted: {detail}") from exc
+            raise RuntimeError(f"RunPod pod error {exc.code}: {detail}") from exc
+        except URLError as exc:
+            raise ConnectionError(f"RunPod pod unreachable at {self.url}: {exc.reason}") from exc
+        self.seconds.append(float(out.get("seconds", 0)))
+        return to_png(base64.b64decode(out["png"]))
+
+
 def make_provider(name: str = "openai", **kw):
+    if name == "runpod":
+        return RunPodProvider(url=kw.get("url"), token=kw.get("api_key"))
     if name == "gemini":
         return GeminiProvider(model=kw.get("model"), image_size=kw.get("image_size", "2K"), api_key=kw.get("api_key"))
     return OpenAIProvider(model=kw.get("model"), quality=kw.get("quality", "high"),

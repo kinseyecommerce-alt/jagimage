@@ -19,7 +19,14 @@ from . import library as L
 from . import studio
 
 PAGE = Path(__file__).with_name("static") / "studio.html"
-KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "runpod": "JAGIMAGE_RUNPOD_TOKEN"}
+RUNPOD_URL_ENV = "JAGIMAGE_RUNPOD_URL"
+
+
+def ready() -> dict:
+    """Which engines can make images now: a key saved (RunPod also needs the pod address)."""
+    return {p: bool(os.environ.get(env)) and (p != "runpod" or bool(os.environ.get(RUNPOD_URL_ENV)))
+            for p, env in KEY_ENV.items()}
 
 
 def drive_folders() -> list:
@@ -39,7 +46,7 @@ def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
-        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
+        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
@@ -51,7 +58,7 @@ def default_engine(spec: studio.Spec):
     from .providers import make_provider
 
     provider = make_provider(spec.provider, quality=spec.quality, image_size=spec.image_size,
-                             api_key=os.environ.get(KEY_ENV[spec.provider]))
+                             api_key=os.environ.get(KEY_ENV[spec.provider]), url=os.environ.get(RUNPOD_URL_ENV))
 
     def generate(prompt, refs):
         return provider.generate(prompt, refs)
@@ -199,8 +206,8 @@ class Studio:
             raise ValueError(f"Models {hit['first']}-{hit['last']} of {spec.category} are already in batch {hit['batch']}, "
                              f"so those faces would repeat. Start at model no. {ledger.next_free(spec.category)} "
                              "(or leave it empty for automatic).")
-        if stage != "recolor" and self.engine is default_engine and not os.environ.get(KEY_ENV[spec.provider]):
-            raise ValueError(f"Add your {spec.provider} API key first")
+        if stage != "recolor" and self.engine is default_engine and not ready()[spec.provider]:
+            raise ValueError("Add your RunPod pod address and token first" if spec.provider == "runpod" else f"Add your {spec.provider} API key first")
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
@@ -311,8 +318,8 @@ def make_handler(app: Studio):
                     spec = studio.Spec(**body)
                     if pose not in spec.pose_texts():
                         raise ValueError(f"unknown pose {pose}")
-                    if app.engine is default_engine and not os.environ.get(KEY_ENV[spec.provider]):
-                        raise ValueError(f"Add your {spec.provider} API key first")
+                    if app.engine is default_engine and not ready()[spec.provider]:
+                        raise ValueError("Add your RunPod pod address and token first" if spec.provider == "runpod" else f"Add your {spec.provider} API key first")
                     if any(not p.done for p in app.previews.values()):
                         raise ValueError("A test photo is already being made")
                     pv = Preview(spec, pose, model_no or spec.first_model, app.out, app.engine)
@@ -360,7 +367,12 @@ def make_handler(app: Studio):
                     for p, env in KEY_ENV.items():
                         if body.get(p):
                             os.environ[env] = body[p].strip()
-                    return self._json(options()["providers"])
+                    url = (body.get("runpod_url") or "").strip().rstrip("/")
+                    if url:
+                        if not url.startswith(("https://", "http://")):
+                            raise ValueError("The RunPod address starts with https://, e.g. https://abc123-8000.proxy.runpod.net")
+                        os.environ[RUNPOD_URL_ENV] = url
+                    return self._json(ready())
                 if parts == ["api", "jobs"]:
                     return self._json(app.start(body).status())
                 if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "stop":

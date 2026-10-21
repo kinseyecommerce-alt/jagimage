@@ -89,7 +89,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span></div>
+  <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <main>
   <div>
@@ -189,13 +189,17 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 
     <section class="panel">
       <h2>Engine</h2>
-      <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button></div>
+      <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="runpod">RunPod (own GPU)</button></div>
       <div class="row">
         <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
         <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
         <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
       </div>
       <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, Google returns the photos within 24 hours (usually much sooner)</label>
+      <p class="hint hide" id="runpodHint">Your own GPU pod running the open Qwen-Image-Edit model (pilot/runpod/README.md). You pay RunPod per hour, so stop the pod when the batch is done. Set parallel requests to 1: the pod's web address gives up on a request after about 100 s, and extra requests only queue on the one GPU.</p>
+      <div class="row hide" id="runpodUrlRow">
+        <input type="text" id="runpodUrl" placeholder="Pod address, e.g. https://abc123-8000.proxy.runpod.net" style="flex:1" autocomplete="off">
+      </div>
       <div class="row">
         <input type="password" id="key" placeholder="API key (kept on this computer only)" style="flex:1" autocomplete="off">
         <button class="btn" id="saveKey">Save key</button>
@@ -296,6 +300,15 @@ const nice = (v) => NAMES[v] || label(v);
 const hexOf = (name) => { if (/^#[0-9a-f]{6}$/i.test(name)) return name; for (const f of [S.fabric(), ...Object.keys(S.opts.palettes)]) if (S.opts.palettes[f][name]) return S.opts.palettes[f][name]; return "#888"; };
 S.fabric = () => $("fabric").value;
 
+const engineName = (v) => ({ gemini: "Gemini", openai: "OpenAI", runpod: "RunPod (own GPU)" })[v] || v;
+function engineFields() {
+  const v = S.provider;
+  $("sizeField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini");
+  $("qualityField").classList.toggle("hide", v !== "openai");
+  $("runpodHint").classList.toggle("hide", v !== "runpod"); $("runpodUrlRow").classList.toggle("hide", v !== "runpod");
+  if (v === "runpod") $("workers").value = 1;
+  $("key").placeholder = v === "runpod" ? "Pod token (JAGIMAGE_RUNPOD_TOKEN you started the pod with)" : "API key (kept on this computer only)";
+}
 function seg(el, values, current, onPick, text = label) {
   el.innerHTML = values.map((v) => `<button data-v="${esc(v)}" class="${v === current ? "on" : ""}">${esc(text(v))}</button>`).join("");
   el.onclick = (e) => { const b = e.target.closest("button"); if (!b) return; [...el.children].forEach((c) => c.classList.toggle("on", c === b)); onPick(b.dataset.v); };
@@ -345,7 +358,7 @@ function refreshPlan() {
         + (p.styles > 1 ? ` Made in ${p.styles} styles with the same faces.` : "");
       $("start").disabled = !!p.clash || (S.job && $("stop").disabled === false);
       const per = p.bases_per_model;
-      $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
+      $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${({ gemini: "Gemini " + $("imageSize").value, openai: "OpenAI " + $("quality").value })[S.provider] || "RunPod GPU"})<br>`
         + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b>${p.styles > 1 ? ` × <b>${p.styles}</b>` : ""} = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
         + costLine(p.cost) + `<div class="bases">Disk space needed: about <b>${fmt(p.disk_gb)} GB</b>${$("keepPng").checked ? " (with full-size PNGs)" : ""}.</div>`
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
@@ -386,7 +399,7 @@ async function testPhoto() {
     $("testBtn").disabled = true; $("testOut").classList.remove("hide"); $("testImgs").innerHTML = "";
     const t0 = Date.now();
     while (!st.done) {
-      $("testStatus").textContent = `Making a test photo of model ${st.model} in "${label(st.pose)}" with ${S.provider === "gemini" ? "Gemini" : "OpenAI"}… ${Math.round((Date.now() - t0) / 1000)} s`;
+      $("testStatus").textContent = `Making a test photo of model ${st.model} in "${label(st.pose)}" with ${engineName(S.provider)}… ${Math.round((Date.now() - t0) / 1000)} s`;
       await new Promise((r) => setTimeout(r, 1500)); st = await api(`/api/preview/${st.id}`);
     }
     const v = `?v=${Date.now()}`, img = (path, cap) => path ? `<a class="card" href="/files/_previews/${path.split("/").map(encodeURIComponent).join("/")}" target="_blank" rel="noopener"><img src="/thumbs/_previews/${path.split("/").map(encodeURIComponent).join("/")}${v}" alt=""><span class="cap"><b>${esc(cap)}</b></span></a>` : "";
@@ -401,7 +414,9 @@ function costLine(c) {
   return `<div class="cost">Estimated AI cost: <b>${usd(c.with_retries_usd)}</b> (about <b>₹${fmt(c.with_retries_inr)}</b>)`
     + ` · $${Number(c.per_image_usd).toFixed(3)} per AI image${c.batch ? " (batch, half price)" : ""}, +${Math.round(c.retry_allowance * 100)}% for retries`
     + ` · <b>₹${c.per_photo_inr}</b> per finished photo</div>`
-    + `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`;
+    + (c.gpu_usd_per_hour != null
+      ? `<div class="bases">GPU estimate: $${c.gpu_usd_per_hour}/hour × ${c.gpu_seconds_per_image} s per image (a guess until the pilot measures it), plus the minutes the pod sits idle. 1 USD = ₹${c.usd_inr}.</div>`
+      : `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`);
 }
 function syncBottom() {
   const top = S.shot === "top", fixed = top || S.opts.fixed_bottoms.includes($("bottom").value), jeans = S.opts.fixed_bottoms.includes($("bottom").value);
@@ -412,7 +427,7 @@ function syncBottom() {
   $("pairing").classList.toggle("hide", fixed); $("bottomPick").classList.toggle("hide", fixed || S.pairing === "match");
   $("fixedNote").classList.toggle("hide", !jeans);
 }
-function keys(p) { for (const k of ["gemini", "openai"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
+function keys(p) { for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
 
 async function init() {
   S.opts = await api("/api/options");
@@ -448,9 +463,14 @@ async function init() {
   $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
-  seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
+  seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
+  $("runpodUrl").value = S.opts.runpod_url || "";
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
-  $("saveKey").onclick = async () => { const k = $("key").value.trim(); if (!k) return; keys(await api("/api/keys", { [S.provider]: k })); $("key").value = ""; $("err").textContent = ""; };
+  $("saveKey").onclick = async () => {
+    const k = $("key").value.trim(), url = S.provider === "runpod" ? $("runpodUrl").value.trim() : "";
+    if (!k && !url) return;
+    try { keys(await api("/api/keys", { [S.provider]: k, runpod_url: url })); $("key").value = ""; $("err").textContent = ""; } catch (e) { $("err").textContent = e.message; }
+  };
   setupSave();
   $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };
   $("more").onclick = () => loadGallery(false);
@@ -527,7 +547,7 @@ function loadSettings(s) {
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
-  S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
+  S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider)); engineFields();
   $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false; $("oneBase").checked = !!s.one_base;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
 }

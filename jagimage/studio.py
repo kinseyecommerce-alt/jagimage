@@ -90,7 +90,7 @@ class Spec:
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
     same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
     one_base: bool = False   # one light base shoot per model; dark colours are recoloured from it too (half the AI images)
-    provider: str = "gemini"
+    provider: str = "gemini"  # gemini, openai, or runpod (your own GPU pod with an open model)
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
     canvas: Optional[Tuple[int, int]] = (1500, 1500)
@@ -109,6 +109,8 @@ class Spec:
             raise ValueError("pick at least one top colour")
         if self.pairing not in ("match", "each"):
             raise ValueError("pairing must be match or each")
+        if self.provider not in ("gemini", "openai", "runpod"):
+            raise ValueError("provider must be gemini, openai or runpod")
         if self.batch and self.provider != "gemini":
             raise ValueError("Batch mode (half price) is available with Gemini")
         if self.shot not in SHOTS:
@@ -246,6 +248,11 @@ def account_problem(exc: Exception) -> Optional[str]:
     if code in (401, 403) or "api key not valid" in text or "invalid_api_key" in text or "incorrect api key" in text \
             or "permission_denied" in text:
         return "The API key was refused (wrong, expired or without access to this model). Save a working key and start again."
+    if "runpod token not accepted" in text:
+        return "The RunPod pod refused the token. Save the same token the pod was started with, then start again."
+    if "runpod pod unreachable" in text:
+        return ("The RunPod pod isn't answering: check it is running in the RunPod console (Pods) and the address "
+                "ends in -8000.proxy.runpod.net, then start again: finished photos are kept.")
     return None
 
 
