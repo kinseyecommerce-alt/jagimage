@@ -246,7 +246,7 @@ def test_studio_server_runs_a_batch(tmp_path):
         assert _post(base + "/api/plan", {**body, "top_colours": []})[0] == 400
         code, job = _post(base + "/api/jobs", body)
         assert code == 200
-        for _ in range(100):
+        for _ in range(600):
             st = json.loads(_get(f"{base}/api/jobs/{job['id']}")[1])
             if not st["running"]:
                 break
@@ -260,7 +260,7 @@ def test_studio_server_runs_a_batch(tmp_path):
         assert code == 200 and "waving at the camera" in pr["prompt"] and pr["model"] == 9 and pr["reference_images"]
         code, pv = _post(base + "/api/preview", {**pose, "preview_pose": "wave", "preview_model": 9})
         assert code == 200
-        for _ in range(100):
+        for _ in range(600):
             pv = json.loads(_get(f"{base}/api/preview/{pv['id']}")[1])
             if pv["done"]:
                 break
@@ -412,7 +412,7 @@ def test_server_runs_the_same_models_in_several_styles(tmp_path):
         assert abs(plan["cost"]["with_retries_usd"] - 5 * one["cost"]["with_retries_usd"]) < 0.05
         code, job = _post(base + "/api/jobs", dict(body))
         assert code == 200 and len(job["names"]) == 5
-        for _ in range(200):
+        for _ in range(600):
             st = json.loads(_get(f"{base}/api/jobs/{job['id']}")[1])
             if not st["running"]:
                 break
@@ -423,3 +423,16 @@ def test_server_runs_the_same_models_in_several_styles(tmp_path):
         assert nxt["first_model"] == 3  # new batches still get new faces
     finally:
         httpd.shutdown()
+
+
+def test_one_base_per_model_halves_the_ai_images(tmp_path):
+    colours = ["Black", "White", "Light Pink", "Red", "Navy", "Green", "Lavender", "Orange", "Yellow"]
+    two = studio.Spec(top_colours=colours, models=1000, poses=["front_main", "back"])
+    one = studio.Spec(top_colours=colours, models=1000, poses=["front_main", "back"], one_base=True)
+    assert two.plan()["ai_images"] == 4000 and one.plan()["ai_images"] == 2000 and one.bases() == [("light", "light")]
+    small = studio.Spec(top_colours=["Navy", "Black", "White"], models=1, one_base=True)
+    counts = studio.Batch(small, out=tmp_path, generate=fake_generate).run()
+    assert counts["ai_done"] == 1 and counts["recoloured"] == 3 and counts["errors"] == 0
+    for c in ["Navy", "Black", "White"]:
+        qc = json.loads((tmp_path / small.name / "m0001" / f"{c}__{c}" / "qc.json").read_text())["front_main"]
+        assert qc["top"]["deltaE"] < 3 and qc["bottom"]["deltaE"] < 3

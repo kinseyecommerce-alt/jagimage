@@ -89,6 +89,7 @@ class Spec:
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
     same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
+    one_base: bool = False   # one light base shoot per model; dark colours are recoloured from it too (half the AI images)
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -153,6 +154,8 @@ class Spec:
         return [(t, b) for t in self.top_colours for b in self.bottom_colours]
 
     def base_key(self, top: str, bottom: Optional[str]) -> Tuple[str, Optional[str]]:
+        if self.one_base:
+            return ("light", "light" if bottom else None)
         return (base_of(colour_hex(top, self.fabric)),
                 base_of(colour_hex(bottom, self.fabric)) if bottom else None)
 

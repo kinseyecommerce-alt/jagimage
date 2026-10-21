@@ -147,6 +147,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field"><span>Different models</span><input type="number" id="models" min="1" max="5000" value="10"></label>
         <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" placeholder="Automatic"></label>
       </div>
+      <label class="check"><input type="checkbox" id="oneBase"> One base shoot per model (light): dark colours are recoloured from it too. Half the AI cost; necklines on dark colours may be a touch softer</label>
       <label class="check"><input type="checkbox" id="sameModels"> Reuse models made earlier in this category (type their first model no. above): same faces, new style or colours</label>
       <p class="hint" id="modelHint">Every model is a different person, and a face is never used twice in this app: new batches start after the last model number used.</p>
       <label class="check" style="margin-top:12px"><input type="checkbox" id="handsFree" checked> Hands free: hands never touch the clothes, arms a little away from the body (not for the hand-in-pocket pose)</label>
@@ -328,7 +329,8 @@ function spec() {
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value,
     batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked,
-    tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked };
+    tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
+    one_base: $("oneBase").checked };
 }
 let planTimer = null;
 function refreshPlan() {
@@ -426,7 +428,7 @@ async function init() {
   moreTops(); $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); });
   $("moreTops").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; const t = c.dataset.t;
     S.moreTops.has(t) ? S.moreTops.delete(t) : S.moreTops.add(t); moreTops(); refreshPlan(); };
-  $("sameModels").addEventListener("change", refreshPlan);
+  $("sameModels").addEventListener("change", refreshPlan); $("oneBase").addEventListener("change", refreshPlan);
   $("bottom").innerHTML = S.opts.bottoms.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
   $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");
@@ -526,7 +528,7 @@ function loadSettings(s) {
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
-  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false;
+  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false; $("oneBase").checked = !!s.one_base;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
 }
 init().catch((e) => { $("err").textContent = "Couldn't reach the Studio server: " + e.message; });

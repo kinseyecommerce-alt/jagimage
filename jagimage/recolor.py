@@ -21,6 +21,7 @@ CLIPPED = 0.1      # lightness below this (RGB 0-3) is camera-crushed black with
 CROP_MARGIN = 32   # px around the garment kept when recolouring (edge band + blur reach)
 CREASE_DROP = 0.15  # crease pixels are at least this much darker than the garment
 CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
+EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
@@ -302,7 +303,13 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):
         dd = (d * d).sum(-1)
         a = ((lp - lb) * d).sum(-1) / np.maximum(dd, 1e-6)
         soft = np.clip(ndimage.gaussian_filter(m.astype(np.float32), 0.9), 0, 1)[ys, xs]
-        a = np.clip(np.where(dd > 0.0016, a, soft), 0, 1)[:, None]  # too alike to unmix: use the mask
+        a = np.clip(np.where(dd > 0.0016, a, soft), 0, 1)  # too alike to unmix: use the mask
+        # A soft blend between garment and surround that were close in lightness (a mint collar on skin)
+        # turns into a blur once the garment is much darker or lighter (navy on skin). Steepen it by
+        # how much the lightness contrast grows, so the new edge is as crisp as the AI drew it.
+        grow = np.abs(rgb_to_lab(Fn)[:, 0] - lb[:, 0]) / np.maximum(np.abs(lf[:, 0] - lb[:, 0]), 0.04)
+        k = np.clip(grow, 1.0, EDGE_SHARPEN_MAX)
+        a = np.clip((a - 0.5) * k + 0.5, 0, 1)[:, None]
         # The pure garment colour behind this pixel, recoloured: the neighbour's new colour with
         # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
         fg = np.where(a > 0.05, Bc + (P - Bc) / np.maximum(a, 0.05), Fo)

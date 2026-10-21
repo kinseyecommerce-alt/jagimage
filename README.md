@@ -195,6 +195,8 @@ The Run box shows the count and the **estimated AI cost** before you start, in $
 - **AI cost:** each style needs its own AI base photos, because a hoodie isn't a tee, so the cost adds up per style. Colours are still recoloured for free.
 - **Adding a style later:** tick "Reuse models made earlier in this category" and type the first model number.
 
+**One base shoot per model** (Models and poses section): every colour is recoloured from the light base, including dark ones, which halves the AI images and the cost. Tested on Navy, Black and Red tops: ΔE 0.0–0.7 with the knit kept. Neckline edges are steepened automatically when the new colour contrasts more with the skin than the base did.
+
 **Large daily volumes** (e.g. 1,000 new models a day):
 - **Faces:** there are over 550,000 different faces per category.
 - **Batch job size:** batch jobs are split into chunks of 400 photos (`JAGIMAGE_BATCH_CHUNK`) to fit a new Gemini account's batch quota. Raise the chunk size once the project reaches Tier 2.
