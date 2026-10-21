@@ -212,6 +212,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
           </select></label>
       </div>
       <p class="hint" id="driveHint"></p>
+      <label class="check"><input type="checkbox" id="keepPng" checked> Also keep a full-size PNG of every photo (about 4 MB each; turn off for big batches)</label>
       <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Working folder (bases, masks, all files)</summary>
         <div class="row" style="margin-top:8px"><input type="text" id="outDir" style="flex:1"><button class="btn" id="outSave">Use folder</button></div>
       </details>
@@ -322,7 +323,7 @@ function spec() {
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value,
-    batch: S.provider === "gemini" && $("batchMode").checked };
+    batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked };
 }
 let planTimer = null;
 function refreshPlan() {
@@ -336,7 +337,7 @@ function refreshPlan() {
       const per = p.bases_per_model;
       $("plan").innerHTML = `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
         + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b> = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
-        + costLine(p.cost)
+        + costLine(p.cost) + `<div class="bases">Disk space needed: about <b>${fmt(p.disk_gb)} GB</b>${$("keepPng").checked ? " (with full-size PNGs)" : ""}.</div>`
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
     } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
   }, 150);
@@ -426,7 +427,7 @@ async function init() {
     S.customPoses[name] = text; S.poses.add(name); $("err").textContent = ""; renderPoses(name); refreshPlan(); };
   $("poseReset").onclick = () => { delete S.customPoses[$("poseEdit").value]; renderPoses($("poseEdit").value); refreshPlan(); };
   $("poseDelete").onclick = () => { const p = $("poseEdit").value; delete S.customPoses[p]; S.poses.delete(p); renderPoses(); refreshPlan(); };
-  $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan); $("batchMode").addEventListener("change", refreshPlan);
+  $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan); $("batchMode").addEventListener("change", refreshPlan); $("keepPng").addEventListener("change", refreshPlan);
   $("previewBtn").onclick = preview;
   $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
@@ -485,7 +486,7 @@ async function loadGallery(reset, quiet) {
     if (reset) { if (!quiet) $("gallery").innerHTML = ""; S.shown = quiet ? 0 : 0; }
     const lim = reset ? Math.max(60, quiet ? S.shownMax || 60 : 60) : 60;
     const r = await api(`/api/batches/${encodeURIComponent(S.batch)}/results?offset=${reset ? 0 : S.shown}&limit=${lim}`);
-    const html = r.rows.map((x) => { const src = `/thumbs/${encodeURIComponent(S.batch)}/${x.png}`, full = `/files/${encodeURIComponent(S.batch)}/${x.jpg || x.png}`;
+    const html = r.rows.map((x) => { const src = `/thumbs/${encodeURIComponent(S.batch)}/${x.png || x.jpg}`, full = `/files/${encodeURIComponent(S.batch)}/${x.jpg || x.png}`;
       return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}${x.bottom ? " / " + esc(label(x.bottom)) : ""}</b><span>${esc(x.model)} · ${esc(label(x.pose))}</span></span></a>`; }).join("");
     if (reset) $("gallery").innerHTML = html; else $("gallery").insertAdjacentHTML("beforeend", html);
     S.shown = (reset ? 0 : S.shown) + r.rows.length; S.shownMax = Math.max(S.shownMax || 0, S.shown);
@@ -511,7 +512,7 @@ function loadSettings(s) {
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
-  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch;
+  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
 }
 init().catch((e) => { $("err").textContent = "Couldn't reach the Studio server: " + e.message; });

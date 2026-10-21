@@ -8,14 +8,19 @@ from typing import Dict, List
 PEOPLE = {
     "Men": "an Indian man aged 22-32, natural friendly expression",
     "Women": "an Indian woman aged 21-30, natural fresh makeup, nude lip, small stud earrings only",
-    "Kids_Boys": ("a small 4-5 year old Indian boy, toddler proportions: baby face, soft small nose, large head relative "
+    "Kids_Boys": ("a small 4-5 year old Indian boy, toddler proportions: baby face, large head relative "
                   "to a small short body (head about one fifth of body height), short chubby limbs"),
-    "Kids_Girls": ("a small 4-5 year old Indian girl, toddler proportions: baby face, soft small nose, large head relative "
+    "Kids_Girls": ("a small 4-5 year old Indian girl, toddler proportions: baby face, large head relative "
                    "to a small short body (head about one fifth of body height), short chubby limbs"),
 }
 
 SKIN = ["fair even skin", "light wheatish even skin", "wheatish even skin", "warm medium-brown even skin",
         "dusky even skin", "olive-toned even skin"]
+NOSE = ["small button nose", "soft rounded nose", "slightly upturned nose", "small straight nose"]
+KID_CHEEKS = ["rosy cheeks", "deep dimples", "a few light freckles across the nose", "smooth plain cheeks"]
+KID_LIPS = ["full little lips", "thin lips", "cupid's-bow lips"]
+ADULT_NOSE = ["straight nose", "slightly rounded nose", "narrow high-bridged nose", "broad soft nose"]
+ADULT_LIPS = ["full lips", "medium lips", "thin lips"]
 EYES = ["big round dark-brown eyes", "almond-shaped dark eyes", "large bright eyes with long lashes",
         "deep-set brown eyes", "wide-set expressive eyes"]
 
@@ -29,6 +34,9 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
         "eyes": EYES,
         "brows": ["thick dark eyebrows", "soft thin eyebrows", "naturally arched eyebrows"],
         "smile": ["wide toothy grin", "shy closed-mouth smile", "big dimpled smile", "playful half smile"],
+        "nose": NOSE,
+        "cheeks": KID_CHEEKS,
+        "lips": KID_LIPS,
     },
     "Kids_Girls": {
         "face": ["round face with chubby cheeks", "oval face with soft cheeks", "heart-shaped face with a small pointed chin",
@@ -39,6 +47,9 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
         "eyes": EYES,
         "brows": ["thick dark eyebrows", "soft thin eyebrows", "naturally arched eyebrows"],
         "smile": ["wide toothy grin", "shy closed-mouth smile", "big dimpled smile", "playful half smile"],
+        "nose": NOSE,
+        "cheeks": KID_CHEEKS,
+        "lips": KID_LIPS,
     },
     "Men": {
         "face": ["oval face", "square jaw", "round face", "long face with high cheekbones", "diamond-shaped face"],
@@ -48,6 +59,9 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
         "beard": ["clean-shaven", "light stubble", "short trimmed beard", "full neat beard", "moustache with light stubble"],
         "eyes": EYES,
         "build": ["lean-athletic build", "regular build", "slim build", "broad athletic build"],
+        "nose": ADULT_NOSE,
+        "lips": ADULT_LIPS,
+        "age": ["looks about 23", "looks about 26", "looks about 29", "looks about 32"],
     },
     "Women": {
         "face": ["oval face", "heart-shaped face", "round face", "long face with high cheekbones", "soft square face"],
@@ -57,6 +71,9 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
         "eyes": EYES,
         "brows": ["thick defined eyebrows", "soft natural eyebrows", "arched eyebrows"],
         "build": ["regular slim build", "petite build", "athletic build", "regular build"],
+        "nose": ADULT_NOSE,
+        "lips": ADULT_LIPS,
+        "age": ["looks about 22", "looks about 25", "looks about 28", "looks about 30"],
     },
 }
 

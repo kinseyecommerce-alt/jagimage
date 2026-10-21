@@ -103,7 +103,36 @@ class GeminiProvider:
     TERMINAL = {"JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED", "JOB_STATE_FAILED",
                 "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
 
-    def run_batch(self, jobs, on_status=None, stop=None, state_file=None, poll=30):
+    def run_batch(self, jobs, on_status=None, stop=None, state_file=None, poll=30, chunk=None):
+        """Sends jobs in batch jobs of at most `chunk` photos (JAGIMAGE_BATCH_CHUNK, default 400), one
+        after another, so each stays under a new Gemini account's batch quota (Tier 1: about 2 million
+        enqueued tokens per model). Raise it once the project reaches Tier 2."""
+        import time
+
+        chunk = int(chunk or os.environ.get("JAGIMAGE_BATCH_CHUNK", "400"))
+        say = on_status or (lambda s: None)
+        out = {}
+        parts = [jobs[i:i + chunk] for i in range(0, len(jobs), chunk)]
+        for n, part in enumerate(parts, 1):
+            if n > 1 and stop is not None and stop.is_set():
+                break
+            label = (lambda st, n=n: say(f"{st} (job {n} of {len(parts)})")) if len(parts) > 1 else say
+            for attempt in range(6):
+                try:
+                    out.update(self._run_batch_job(part, label, stop, state_file, poll))
+                    break
+                except Exception as exc:  # quota full or too many jobs queued: wait, then send again
+                    text = str(exc).lower()
+                    if "429" not in text and "resource_exhausted" not in text or "credits" in text or attempt == 5:
+                        raise
+                    label("waiting for Google's batch quota")
+                    if stop is not None and stop.wait(min(600, 60 * (attempt + 1))):
+                        return out
+                    if stop is None:
+                        time.sleep(min(600, 60 * (attempt + 1)))
+        return out
+
+    def _run_batch_job(self, jobs, on_status=None, stop=None, state_file=None, poll=30):
         """jobs: [(key, prompt, reference paths)]. Sends them as one Gemini batch job and returns
         {key: PNG bytes or Exception}. The job's name is kept in state_file until its results are
         read, so if the app stops, the next start collects that job instead of paying for it twice.

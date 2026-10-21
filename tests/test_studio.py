@@ -41,8 +41,9 @@ def test_300_models_are_all_different():
 def test_every_model_number_has_its_own_face():
     for category in faces.FEATURES:
         n = faces.capacity(category)
-        assert n > 10000
-        assert len({tuple(faces.look(category, i).values()) for i in range(1, n + 1)}) == n
+        assert n > 500000  # 1,000 new models a day for over a year
+        sample = list(range(1, 20001)) + list(range(n - 5000, n + 1))
+        assert len({tuple(faces.look(category, i).values()) for i in sample}) == len(sample)
 
 
 def test_ledger_never_gives_a_face_twice(tmp_path):
@@ -85,7 +86,7 @@ def test_plan_bases_and_pairs():
     s = studio.Spec(top_colours=["Yellow", "Navy", "White"], bottom_colours=["Black", "Light Pink"], pairing="each", models=300)
     assert len(s.pairs()) == 6 and s.bases()[0] in s.bases() and len(s.bases()) == 4
     assert s.plan() == {"models": 300, "bases_per_model": 4, "colour_pairs": 6, "poses": 1,
-                        "ai_images": 1200, "recoloured_images": 1800}
+                        "ai_images": 1200, "recoloured_images": 1800, "disk_gb": 13.1}
     same = studio.Spec(top_colours=["Yellow", "Navy"], models=300)  # bottom = top colour
     assert same.pairs() == [("Yellow", "Yellow"), ("Navy", "Navy")] and sorted(same.bases()) == [("dark", "dark"), ("light", "light")]
     jeans = studio.Spec(bottom="Jeans", top_colours=["Yellow", "Navy", "White"], models=2)
@@ -154,6 +155,18 @@ def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     assert Image.open(tmp_path / s.name / "m0001" / "Yellow__Light_Pink" / "front_main_1500x1500.jpg").size == (1500, 1500)
     again = studio.Batch(s, out=tmp_path, generate=gen).run()  # resumable: nothing is made twice
     assert again["ai_done"] == 0 and again["ai_skipped"] == 8 and again["recolour_skipped"] == 8
+
+
+def test_jpg_only_saves_disk_and_still_resumes(tmp_path):
+    s = studio.Spec(top_colours=["Red", "White"], models=1, keep_png=False)
+    b = studio.Batch(s, out=tmp_path, generate=fake_generate)
+    assert b.run()["recoloured"] == 2
+    rows = b.results()
+    assert len(rows) == 2 and all(r["png"] is None and r["jpg"] for r in rows)
+    assert not list((tmp_path / s.name).glob("m0001/Red__Red/*.png"))
+    assert studio.Batch(s, out=tmp_path, generate=fake_generate).run()["recolour_skipped"] == 2
+    big = studio.Spec(top_colours=["Red", "White"], models=1000, poses=["front_main", "back"], keep_png=False).plan()
+    assert big["ai_images"] == 4000 and big["disk_gb"] == 17.4  # 4,000 bases x 4.1 MB + 4,000 JPGs x 0.25 MB
 
 
 def test_finished_photos_are_copied_to_a_drive_folder(tmp_path):
@@ -349,6 +362,16 @@ def test_batch_job_is_collected_after_a_restart(tmp_path):
     got = provider.run_batch(jobs, state_file=state, poll=0)  # next start: same job, not a new one
     assert client.created == 1 and got["m0001|dark-dark|front_main"][:8] == b"\x89PNG\r\n\x1a\n"
     assert json.loads(state.read_text()) == {}
+
+
+def test_big_rounds_are_split_into_jobs_under_the_quota(tmp_path):
+    from jagimage.providers import GeminiProvider
+    client = FakeGenai()
+    provider = GeminiProvider(client=client, model="gemini-3-pro-image")
+    sp = studio.Spec(top_colours=["Navy"])
+    jobs = [(f"m{i:04d}|dark-dark|front_main", studio.prompt(sp, i, ("dark", "dark"), "front_main", "none"), []) for i in range(1, 8)]
+    got = provider.run_batch(jobs, state_file=tmp_path / "s.json", poll=0, chunk=3)
+    assert client.created == 3 and [j["n"] for j in client.jobs.values()] == [3, 3, 1] and len(got) == 7
 
 
 def test_batch_mode_is_half_price_and_gemini_only():

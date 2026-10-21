@@ -193,7 +193,7 @@ class Studio:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
             for r in b.results():
-                rel = r["jpg"] if what == "jpg" and r["jpg"] else r["png"]
+                rel = r["jpg"] if (what == "jpg" or not r["png"]) and r["jpg"] else r["png"]
                 ext = Path(rel).suffix
                 label = f"{r['model']}_{r['top']}" + (f"__{r['bottom']}" if r["bottom"] else "") + f"_{r['pose']}{ext}"
                 z.write(b.root / rel, f"{name}/{label}")

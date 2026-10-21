@@ -44,6 +44,7 @@ TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just 
                     "out of frame, small margin above the head, the whole top fully visible, model fills about 90% of frame height")
 FULL_FRAMING = "Full body head to shoes in frame with small margins, model about 85-90% of frame height"
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
+BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -86,6 +87,7 @@ class Spec:
     extra: str = ""          # extra instructions added to every photo's prompt
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
+    keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -132,6 +134,8 @@ class Spec:
             colour_hex(c, self.fabric)
         if self.canvas:
             self.canvas = tuple(int(v) for v in self.canvas)
+        else:
+            self.keep_png = True  # without a marketplace JPG the PNG is the only copy
         if not self.name:
             self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else ""))
 
@@ -164,9 +168,10 @@ class Spec:
 
     def plan(self) -> dict:
         n, poses = int(self.models), len(self.poses)
+        ai, photos = n * len(self.bases()) * poses, n * len(self.pairs()) * poses
+        mb = ai * BASE_MB + photos * (JPG_MB + (PNG_MB if self.keep_png else 0))
         return {"models": n, "bases_per_model": len(self.bases()), "colour_pairs": len(self.pairs()),
-                "poses": poses, "ai_images": n * len(self.bases()) * poses,
-                "recoloured_images": n * len(self.pairs()) * poses}
+                "poses": poses, "ai_images": ai, "recoloured_images": photos, "disk_gb": round(mb / 1000, 1)}
 
 
 def base_dir(name) -> str:
@@ -582,7 +587,7 @@ class Batch:
             if self.stop.is_set():
                 return
             path = self.out_path(m, t, b, pose)
-            if path.exists():
+            if self.made(path, pose):
                 self._event("recolour_skipped", model=m, path=str(path))
                 continue
             try:
@@ -603,7 +608,8 @@ class Batch:
             out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bmask)
             qc["bottom"] = {"colour": bottom, "hex": bhex, "deltaE": round(de_b, 2), "on_shade": de_b < 3}
         path.parent.mkdir(parents=True, exist_ok=True)
-        out.save(path)
+        if spec.keep_png:
+            out.save(path)
         if spec.canvas:
             fit_canvas(out, *spec.canvas).save(path.with_name(f"{pose}_{spec.canvas[0]}x{spec.canvas[1]}.jpg"), quality=95)
         qc_path = path.parent / "qc.json"
@@ -623,22 +629,32 @@ class Batch:
         files = []
         if self.export_what in ("jpg", "both") and self.spec.canvas:
             files.append(path.with_name(f"{pose}_{self.spec.canvas[0]}x{self.spec.canvas[1]}.jpg"))
-        if self.export_what in ("png", "both") or not self.spec.canvas:
+        if (self.export_what in ("png", "both") or not self.spec.canvas) and path.exists():
             files.append(path)
         for f in files:
             if f.exists():
                 shutil.copy2(f, dest / f"{model}_{pose}{f.suffix}")
 
     # ---- results
+    def made(self, path: Path, pose: str) -> bool:
+        """A recoloured photo exists: its PNG, or only its marketplace JPG when PNGs aren't kept."""
+        c = self.spec.canvas
+        return path.exists() or bool(c and path.with_name(f"{pose}_{c[0]}x{c[1]}.jpg").exists())
+
     def results(self) -> List[dict]:
-        """Every finished photo: model, top, bottom, pose, paths (relative to the batch folder)."""
+        """Every finished photo: model, top, bottom, pose, paths (relative to the batch folder; png is
+        None when only the 1500x1500 JPG was kept)."""
         rows = []
+        size = re.compile(r"^(.*)_\d+x\d+$")
         for md in sorted(self.root.glob("m[0-9][0-9][0-9][0-9]")):
             for pd in sorted(p for p in md.iterdir() if p.is_dir() and not p.name.startswith("_")):
                 top, _, bottom = pd.name.partition("__")
-                for img in sorted(pd.glob("*.png")):
-                    canvas = sorted(pd.glob(f"{img.stem}_*x*.jpg"))
-                    rows.append({"model": md.name, "top": top, "bottom": bottom or None, "pose": img.stem,
-                                 "png": str(img.relative_to(self.root)),
+                poses = {f.stem for f in pd.glob("*.png") if not f.name.startswith(".")}
+                poses |= {size.match(f.stem).group(1) for f in pd.glob("*_*x*.jpg") if size.match(f.stem) and not f.name.startswith(".")}
+                for pose in sorted(poses):
+                    png = pd / f"{pose}.png"
+                    canvas = sorted(pd.glob(f"{pose}_*x*.jpg"))
+                    rows.append({"model": md.name, "top": top, "bottom": bottom or None, "pose": pose,
+                                 "png": str(png.relative_to(self.root)) if png.exists() else None,
                                  "jpg": str(canvas[0].relative_to(self.root)) if canvas else None})
         return rows

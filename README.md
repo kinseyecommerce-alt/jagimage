@@ -189,6 +189,11 @@ The Run box shows the count and the **estimated AI cost** before you start, in $
 
 **Batch mode** (Gemini, Engine section): half price. The app sends the base photos as Google batch jobs in up to 3 rounds (each model's first front; then the other fronts and the first base's poses; then the remaining poses, because each round uses photos from the one before as references). Google promises each job within 24 hours and is usually much faster. The job IDs are saved in the batch folder (`_batch_jobs.json`), so if the app is closed while Google is working, the next start collects that job instead of paying for it again. Photos the AI gets wrong are sent again in the next round.
 
+**Large daily volumes** (e.g. 1,000 new models a day):
+- **Faces:** there are over 550,000 different faces per category.
+- **Batch job size:** batch jobs are split into chunks of 400 photos (`JAGIMAGE_BATCH_CHUNK`) to fit a new Gemini account's batch quota. Raise the chunk size once the project reaches Tier 2.
+- **Disk space:** turn off "Also keep a full-size PNG" to save about 4 MB per photo. The Run box shows the disk space a batch needs.
+
 The Run box shows the count before you start. For example, 300 models × 9 colours (matching sets) needs 600 AI images and gives 2,700 photos.
 
 **Other features:**
