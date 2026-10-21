@@ -441,8 +441,9 @@ function recountShares(doc) {
 // fabric's folds/shading and knit grain are rebuilt around the exact hex, with their contrast
 // scaled for the new lightness (black -> yellow needs ~2.5x stronger texture to look real).
 const FOLD_CAP = 0.2;
-const PHOTO_BLACK = 0.2; // darkest garment rendered (~#1A1A1A): below it knit and folds can't show
-const renderTarget = (hex, mode) => { const T = hexToLab(hex); if (mode === "match" && T[0] < PHOTO_BLACK) T[0] = PHOTO_BLACK; return T; };
+const PHOTO_BLACK = 0.2, PHOTO_WHITE = 0.955; // black and white as they photograph (~#1A1A1A, ~#F2F2F2), so knit and stitches show
+const KNIT_MIN = 0.85; // stitches and knit keep at least this much contrast on darker targets
+const renderTarget = (hex, mode) => { const T = hexToLab(hex); if (mode === "match") T[0] = Math.min(PHOTO_WHITE, Math.max(PHOTO_BLACK, T[0])); return T; };
 const textureGain = (mL, tL) => Math.min(3.5, Math.max(0.35, ((tL + 0.08) / (mL + 0.08)) ** 0.8));
 function prepEdits(doc, edits) {
   const E = new Array(256).fill(null);
@@ -489,15 +490,14 @@ function render(doc, edits, out) { // out: Uint8ClampedArray length w*h*4
     if (e.mode === "hue") return L[i];
     if (e.mode === "scale") return L[i] * (Mn[0] > 0.02 ? T[0] / Mn[0] : 1);
     const fold = e.g * (Lb[i] - Mn[0]); // cap deep creases so boosted shadows don't read as dirt
-    let v = T[0] + FOLD_CAP * Math.tanh(fold / FOLD_CAP) + e.g * (Ld[i] - Lb[i]) + (L[i] - Ld[i]) * Math.min(1, 1 / e.g);
-    if (T[0] > 0.93) return Math.min(v, T[0]); // near-white: highlights on the hex, folds as shadow only
+    let v = T[0] + FOLD_CAP * Math.tanh(fold / FOLD_CAP) + Math.max(e.g, KNIT_MIN) * (Ld[i] - Lb[i]) + (L[i] - Ld[i]) * Math.min(1, 1 / e.g);
     if (v > T[0]) { const hd = Math.max(1 - T[0], 1e-3); v = T[0] + hd * Math.tanh((v - T[0]) / hd); } // roll off highlights
     return v + e.delta;
   };
   // re-centre each region so it still averages the exact target lightness
   const sum = new Float64Array(256), cnt = new Float64Array(256);
   for (let i = 0; i < n; i++) { const l = labels[i]; if (touched[i] && E[l] && E[l].mode === "match" && ratio[i] < 128) { sum[l] += Math.min(1, Math.max(0, texL(E[l], i))); cnt[l]++; } }
-  E.forEach((e, l) => { if (e && cnt[l] && e.lab[0] <= 0.93) e.delta = e.lab[0] - sum[l] / cnt[l]; });
+  E.forEach((e, l) => { if (e && cnt[l]) e.delta = e.lab[0] - sum[l] / cnt[l]; });
   const p1 = [0, 0, 0], p2 = [0, 0, 0];
   const paint = (e, i, p, o) => { if (!e) { p[0] = src[o]; p[1] = src[o+1]; p[2] = src[o+2]; return; }
     // keep less of the base's colour variation on greyer targets, so white/grey/black get no tint

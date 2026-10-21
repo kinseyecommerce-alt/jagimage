@@ -272,7 +272,7 @@ def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="mat
     A hand-corrected <pose>_mask.png in the base folder is used when present."""
     from PIL import Image
 
-    from .recolor import PHOTO_BLACK, WHITE_FROM, MaskError, fit_canvas, lightness, load_mask, recolor_image, save_mask, write_qc
+    from .recolor import PHOTO_BLACK, PHOTO_WHITE, MaskError, fit_canvas, lightness, load_mask, recolor_image, save_mask, write_qc
 
     which = base_for(it)
     b = base_item(it, which, bases)
@@ -302,8 +302,8 @@ def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="mat
         if canvas:  # marketplace copy, e.g. front_main_1500x1500.jpg
             fit_canvas(img, *canvas).save(folder / f"{pose}_{canvas[0]}x{canvas[1]}.jpg", quality=95)
         qc[pose] = {"from": f"{which} base {b['hex']}", "target": target, "deltaE": round(de, 2), "on_shade": de < 3}
-        if lightness(target) > WHITE_FROM:
-            qc[pose]["note"] = "near-white: highlights are on the hex; folds show as shadow, so the average is slightly darker"
+        if mode == "match" and lightness(target) > PHOTO_WHITE:
+            qc[pose]["note"] = "near-white: shown as photographed white (~#F2F2F2, highlights up to the hex) so the knit and stitches show; deltaE is measured against that"
         if mode == "match" and lightness(target) < PHOTO_BLACK:
             qc[pose]["note"] = "near-black: shown as photographed black (~#1A1A1A) so the knit is visible; deltaE is measured against that"
         write_qc(qc_path, qc)

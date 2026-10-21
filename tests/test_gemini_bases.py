@@ -58,6 +58,26 @@ def test_white_edge_has_no_tint_and_follows_the_photo():
     assert ((a > 0.01) & (a < 0.15)).any() and a.max() > 0.18
 
 
+def test_backdrop_between_legs_is_not_recoloured():
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.polygon([(150, 250), (147, 330), (153, 330)], fill="#EDEDED")  # thin backdrop gap between the legs
+    d.line([(95, 330), (205, 330)], fill="#8FD3A8", width=3)           # legs touch below it: an enclosed hole
+    out, _, mask = recolor_image(img, "#8FD3A8", "#FFE01B")
+    assert mask[300, 150] < 0.5 and mask[270, 150] < 0.5
+    assert (np.asarray(out.convert("RGB"))[300, 150] == np.asarray(img)[300, 150]).all()
+
+
+def test_white_keeps_knit_and_stitches():
+    from jagimage.recolor import rgb_to_lab
+    img = fake_photo("#8FD3A8")
+    ImageDraw.Draw(img).line([(100, 300), (200, 300)], fill="#6FA888", width=1)  # a stitch line
+    out, de, mask = recolor_image(img, "#8FD3A8", "#FFFFFF")
+    L = rgb_to_lab(np.asarray(out.convert("RGB")))[..., 0]
+    assert de < 3 and L[mask > 0.95].std() > 0.005      # texture, not a flat white shape
+    assert L[300, 150] < L[290, 150] - 0.02              # the stitch still shows
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)

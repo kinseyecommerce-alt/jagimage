@@ -136,7 +136,8 @@ jagimage library --bases --provider gemini --category Kids_Boys --product HalfSl
 - Light colours (OKLab lightness 0.55 and up, e.g. White, Yellow, Lavender) come from the light base; darker ones (Black, Navy, Red, Maroon) from the dark base.
 - The bases are greens because no skin, hair, grey studio, denim or black trousers is green, so the garment can be found reliably. Change them with `--base-light` / `--base-dark`.
 - Every recoloured photo gets a `qc.json` entry with its ΔE to the target hex (under 3 is on shade). The garment mask is saved as `_base_*/<pose>_mask.png`; edit it (white = garment) and re-run with `--stage recolor --force` to fix a bad edge.
-- Pure black (`#000000`) is shown as photographed black (about `#1A1A1A`) so the knit and folds stay visible; at true `#000000` the shirt would be a flat black shape. Its `qc.json` notes this, and the ΔE is measured against that shade.
+- Pure black and pure white are shown the way they photograph: black at about `#1A1A1A`, white at about `#F2F2F2` with highlights up to `#FFFFFF`. At the exact hex there's no room left for the knit, rib and stitches, so the shirt would be a flat shape. Their `qc.json` notes this, and the ΔE is measured against that shade.
+- Edges are unmixed from the photo itself, so they stay as smooth as the AI drew them. Backdrop showing between the legs or between arm and body is never recoloured.
 - Base photos live in `_base_light/` and `_base_dark/` next to the colour folders.
 - Full library: 336 styles×poses ×2 = 672 AI images instead of 4,368.
 

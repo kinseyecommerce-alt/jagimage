@@ -14,8 +14,9 @@ from scipy import ndimage
 
 W_L = 0.35  # weight of lightness vs colour when matching the garment (shadows stay in)
 MODES = ("match", "hue", "scale")
-WHITE_FROM = 0.93  # targets this light keep texture as shadow below the hex (white can't go brighter)
 PHOTO_BLACK = 0.2  # darkest garment lightness rendered (~#1A1A1A); below it knit and folds can't show
+PHOTO_WHITE = 0.955  # lightest garment average rendered (~#F2F2F2); highlights roll up towards pure white
+KNIT_MIN = 0.85    # stitches and knit keep at least this much of their contrast on darker targets
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
 
@@ -88,16 +89,29 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
     # grow into connected deep folds/shadows of the same fabric that the strict match missed
     loose = np.linalg.norm((lab - centre) * w, axis=-1) < tol * 2.2
     m = ndimage.binary_propagation(m, mask=m | loose)
-    m = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
-    # fill only small holes (knit speckle, stitching); keep real gaps like arm-to-body background
+    return _feather(_fill_holes(m, lab, centre), lab, centre)
+
+
+def _fill_holes(m, lab, centre):
+    """Close knit speckle, fill small holes (stitching) and larger ones that are just deep shadow of
+    the same fabric. Never fill backdrop showing through, e.g. between the legs or arm and body."""
+    studio = np.median(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]), axis=0)
+    closed = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
+    # closing bridges narrow gaps too (the thin top of the gap between the legs): undo it there
+    m = closed & ~(~m & (np.linalg.norm(lab - studio, axis=-1) < 0.04))
     holes = ndimage.binary_fill_holes(m) & ~m
     hl, hn = ndimage.label(holes)
-    if hn:  # fill small holes, and larger ones that are just deep shadow of the same fabric
+    if hn:
         idx = np.arange(1, hn + 1)
         hs = ndimage.sum(holes, hl, index=idx)
         hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
         same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
-        m |= np.isin(hl, idx[(hs <= 0.002 * m.sum()) | same])
+        backdrop = np.linalg.norm(hm - studio, axis=1) < 0.04
+        m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same) & ~backdrop])
+    return m
+
+
+def _feather(m, lab, centre):
     soft = ndimage.gaussian_filter(m.astype(np.float32), 0.8)
     core = soft > 0.95
     return soft, lab[core].mean(axis=0) if core.any() else centre
@@ -131,18 +145,7 @@ def _cleanup(m, lab, centre):
         raise MaskError("Couldn't find the garment in this photo.")
     sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
     m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
-    m = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
-    holes = ndimage.binary_fill_holes(m) & ~m
-    hl, hn = ndimage.label(holes)
-    if hn:
-        idx = np.arange(1, hn + 1)
-        hs = ndimage.sum(holes, hl, index=idx)
-        hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
-        same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
-        m |= np.isin(hl, idx[(hs <= 0.002 * m.sum()) | same])
-    soft = ndimage.gaussian_filter(m.astype(np.float32), 0.8)
-    core = soft > 0.95
-    return soft, lab[core].mean(axis=0) if core.any() else centre
+    return _feather(_fill_holes(m, lab, centre), lab, centre)
 
 
 def _hue_mask(lab, base, base_hex):
@@ -171,10 +174,11 @@ def _hue_mask(lab, base, base_hex):
 
 
 def render_target(target_hex: str) -> np.ndarray:
-    """The OKLab colour a garment is rendered at: the hex itself, except that targets darker than
-    PHOTO_BLACK (e.g. #000000) are lifted to it, as black fabric photographs, so the knit stays visible."""
+    """The OKLab colour a garment is rendered at: the hex itself, except that very dark and very light
+    targets (#000000, #FFFFFF) are kept between PHOTO_BLACK and PHOTO_WHITE, the way black and white
+    fabric photograph, so the knit, rib and stitches still have room to show."""
     T = hex_to_lab(target_hex)
-    return np.array([PHOTO_BLACK, T[1], T[2]]) if T[0] < PHOTO_BLACK else T
+    return np.array([float(np.clip(T[0], PHOTO_BLACK, PHOTO_WHITE)), T[1], T[2]])
 
 
 def tint_carry(mean: np.ndarray, T: np.ndarray) -> float:
@@ -203,10 +207,7 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
         g = texture_gain(float(mean[0]), float(T[0]))
         Lb, knit, noise = fabric_layers(L, mask)
         fold = g * (Lb - mean[0])  # cap deep creases so boosted shadows don't read as dirt
-        L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + g * texture * knit + noise * min(1.0, 1.0 / g)
-        if T[0] > WHITE_FROM:  # near-white: highlights stay on the hex, folds show as shadow only
-            return np.concatenate([np.clip(T[0] + np.minimum(L2 - T[0], 0), 0, 1)[..., None],
-                                   T[1:] + (ab - mean[1:]) * tint_carry(mean, T)], axis=-1)
+        L2 = T[0] + FOLD_CAP * np.tanh(fold / FOLD_CAP) + max(g, KNIT_MIN) * texture * knit + noise * min(1.0, 1.0 / g)
         # Light targets: roll highlights off below 1 instead of clipping them flat, then
         # re-centre so the garment still averages the exact target lightness.
         for _ in range(2):
