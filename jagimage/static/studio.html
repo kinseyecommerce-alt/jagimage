@@ -144,6 +144,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" placeholder="Automatic"></label>
       </div>
       <p class="hint" id="modelHint">Every model is a different person, and a face is never used twice in this app: new batches start after the last model number used.</p>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="handsFree" checked> Hands free: hands never touch the clothes, arms a little away from the body (not for the hand-in-pocket pose)</label>
       <div class="sub2">Poses (tap to include)</div>
       <div class="chips" id="poses"></div>
 
@@ -317,7 +318,7 @@ function spec() {
   return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
-    custom_poses: S.customPoses, extra: $("extra").value, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
+    custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
 }
 let planTimer = null;
@@ -413,7 +414,7 @@ async function init() {
     S.customPoses[name] = text; S.poses.add(name); $("err").textContent = ""; renderPoses(name); refreshPlan(); };
   $("poseReset").onclick = () => { delete S.customPoses[$("poseEdit").value]; renderPoses($("poseEdit").value); refreshPlan(); };
   $("poseDelete").onclick = () => { const p = $("poseEdit").value; delete S.customPoses[p]; S.poses.delete(p); renderPoses(); refreshPlan(); };
-  $("extra").addEventListener("input", refreshPlan);
+  $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan);
   $("previewBtn").onclick = preview;
   $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
@@ -495,7 +496,7 @@ function loadSettings(s) {
   if (s.bottom_colour) $("bottomColour").value = s.bottom_colour;
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
-  S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; renderPoses();
+  S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
   $("imageSize").value = s.image_size; $("quality").value = s.quality;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();

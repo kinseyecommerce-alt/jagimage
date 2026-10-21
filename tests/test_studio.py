@@ -117,6 +117,17 @@ def test_custom_poses_and_extra_instructions():
         studio.Spec(top_colours=["Red"], custom_poses={"empty": "  "})
 
 
+def test_hands_free_pose():
+    s = studio.Spec(top_colours=["Red"], poses=["front_main", "back", "handpocket"])
+    front = studio.prompt(s, 1, ("dark", "dark"), "front_main", "none")
+    assert studio.HANDS_FREE in front and "hands in pockets" in front.split("Avoid:")[1]
+    assert studio.HANDS_FREE in studio.prompt(s, 1, ("dark", "dark"), "back", "front")
+    pocket = studio.prompt(s, 1, ("dark", "dark"), "handpocket", "front")
+    assert studio.HANDS_FREE not in pocket and "hands in pockets" not in pocket  # that pose needs the pocket
+    off = studio.Spec(top_colours=["Red"], hands_free=False)
+    assert studio.HANDS_FREE not in studio.prompt(off, 1, ("dark", "dark"), "front_main", "none")
+
+
 def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     s = studio.Spec(top_colours=["Yellow", "Navy"], bottom_colours=["Black", "Light Pink"], pairing="each", models=2)
     calls = []

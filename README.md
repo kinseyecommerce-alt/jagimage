@@ -171,6 +171,8 @@ jagimage serve            # then open http://127.0.0.1:8765
 - **Colour check:** a base photo where the AI got the colours wrong is retried.
 - **Recolouring:** every top/bottom pair is recoloured to the exact hex on your computer, at no API cost. You also get a 1500×1500 marketplace JPG and a `qc.json` with the ΔE of the top and the bottom.
 
+**Hands free** (on by default): the prompt asks for hands that never touch the clothes, nothing in the pockets or hands, and arms a little away from the body, so the whole garment shows. It applies to every pose except the hand-in-pocket pose.
+
 **Your own poses and a test photo first:**
 - Under **Write a pose**, pick "+ New pose…". Give it a name and describe what the model does, e.g. "sitting cross-legged on the studio floor, one hand waving at the camera". You can also change the wording of any built-in pose, and reset it later.
 - **Extra instructions for every photo** adds a line to every prompt, e.g. "big laughing expression".

@@ -33,6 +33,11 @@ BOTTOMS = ["Shorts", "Trackpants", "Jeans"]
 FIXED_BOTTOMS = {"Jeans": "straight-leg light-wash blue denim jeans"}  # not recoloured
 TOP_BASES = {"light": ("mint green", "#8FD3A8"), "dark": ("bottle green", "#1E4636")}
 BOTTOM_BASES = {"light": ("lilac", "#C4A3EE"), "dark": ("deep purple", "#3B1F66")}
+HANDS_FREE = ("Hands free: both hands relaxed and open, never touching the clothes or the body, not in pockets, "
+              "not holding anything, arms kept a little away from the body so the whole garment is visible, "
+              "including its side seams and hem")
+HANDS_FREE_AVOID = "hands on the clothes, hands in pockets, hands tucked in, arms covering the garment, holding an object"
+NO_HANDS_FREE = {"handpocket"}  # poses that need the hands on the clothes
 NOT_MANNEQUIN = "mannequin, dummy, doll, ghost mannequin, faceless figure, plastic or wax figure, CGI character"
 SHOTS = {"outfit": "Top and bottom (full body, both recoloured)", "top": "Top only (head to just above the knee)"}
 TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just above the knees: knees, shins and feet are "
@@ -79,6 +84,7 @@ class Spec:
     # Your own poses (name -> description), or new wording for a library pose such as front_main.
     custom_poses: Dict[str, str] = field(default_factory=dict)
     extra: str = ""          # extra instructions added to every photo's prompt
+    hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -199,6 +205,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
             ("" if top_only else f"; and {shoes}") +
             (". The top and the bottom are two clearly different colours, exactly as stated. " if bcol else ". ") +
             f"{L.BACKGROUNDS.get(pose, L.GREY)} {rules}")
+    hands = spec.hands_free and pose not in NO_HANDS_FREE
+    if hands:
+        text += f" {HANDS_FREE}."
     if spec.extra:
         text += f" Also: {spec.extra.rstrip('.')}."
     if kids:
@@ -207,6 +216,8 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     negative = L.build_negative(spec.category, product, pose)
     if spec.bottom == "Trackpants":
         text += L.JOGGER_RULE
+    if hands:
+        negative += ", " + HANDS_FREE_AVOID
     if top_only:
         negative = negative.replace("cut-off feet, ", "") + ", full body shot, feet or shoes in frame, knees in frame"
     return text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + (", top and bottom in the same colour." if bcol else ".")
