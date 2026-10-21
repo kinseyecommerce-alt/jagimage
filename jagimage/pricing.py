@@ -54,3 +54,16 @@ def estimate(spec) -> dict:
             "per_photo_usd": round(total / photos, 4), "usd_inr": USD_INR, "with_retries_inr": round(total * USD_INR),
             "per_photo_inr": round(total / photos * USD_INR, 2), "retry_allowance": RETRY_ALLOWANCE,
             "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": gemini_model() if spec.provider == "gemini" else "openai"}
+
+
+def sum_estimates(rows: list, photos: int) -> dict:
+    """One estimate for several batches (e.g. the same models in several top styles)."""
+    if len(rows) == 1 or any(r.get("per_image_usd") is None for r in rows):
+        return rows[0]
+    out = dict(rows[0])
+    for k in ("ai_cost_usd", "with_retries_usd"):
+        out[k] = round(sum(r[k] for r in rows), 2)
+    out["with_retries_inr"] = round(out["with_retries_usd"] * out["usd_inr"])
+    out["per_photo_usd"] = round(out["with_retries_usd"] / max(1, photos), 4)
+    out["per_photo_inr"] = round(out["with_retries_usd"] * out["usd_inr"] / max(1, photos), 2)
+    return out

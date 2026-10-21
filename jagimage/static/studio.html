@@ -104,6 +104,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field"><span>Bottom</span><select id="bottom"></select></label>
         <label class="field"><span>Fabric</span><select id="fabric"></select></label>
       </div>
+      <div class="sub2">Same models in more styles</div>
+      <div class="chips" id="moreTops"></div>
+      <p class="hint">Each style gets its own AI base photos (a hoodie isn't a tee), so the AI cost adds up per style. The models keep the same faces in every style.</p>
     </section>
 
     <section class="panel">
@@ -144,6 +147,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field"><span>Different models</span><input type="number" id="models" min="1" max="5000" value="10"></label>
         <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" placeholder="Automatic"></label>
       </div>
+      <label class="check"><input type="checkbox" id="sameModels"> Reuse models made earlier in this category (type their first model no. above): same faces, new style or colours</label>
       <p class="hint" id="modelHint">Every model is a different person, and a face is never used twice in this app: new batches start after the last model number used.</p>
       <label class="check" style="margin-top:12px"><input type="checkbox" id="handsFree" checked> Hands free: hands never touch the clothes, arms a little away from the body (not for the hand-in-pocket pose)</label>
       <div class="sub2">Poses (tap to include)</div>
@@ -278,7 +282,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 const $ = (id) => document.getElementById(id);
 const S = { opts: null, category: "Kids_Boys", provider: "gemini", pairing: "match", top: new Set(["Navy"]), bottom: new Set(),
             topPal: "PureCotton", bottomPal: "PureCotton", custom: { top: [], bottom: [] }, poses: new Set(["front_main"]),
-            job: null, batch: null, shown: 0, poll: null, customPoses: {}, shot: "outfit" };
+            job: null, batch: null, shown: 0, poll: null, customPoses: {}, shot: "outfit", moreTops: new Set() };
 const api = async (path, body) => {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
@@ -323,7 +327,8 @@ function spec() {
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value,
-    batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked };
+    batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked,
+    tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked };
 }
 let planTimer = null;
 function refreshPlan() {
@@ -332,11 +337,14 @@ function refreshPlan() {
     try {
       const p = await api("/api/plan", spec()); $("err").textContent = p.clash || "";
       const last = p.first_model + p.models - 1;
-      $("modelHint").textContent = `This batch uses models ${fmt(p.first_model)}–${fmt(last)} of ${label(S.category)}${p.auto ? " (automatic: faces never used before)" : ""}. A face is never used twice in this app.`;
+      $("modelHint").textContent = `This batch uses models ${fmt(p.first_model)}–${fmt(last)} of ${label(S.category)}`
+        + (p.auto ? " (automatic: faces never used before)." : ".")
+        + (p.faces_ready ? ` ${fmt(p.faces_ready)} of them already have a face from earlier photos, so they keep it.` : "")
+        + (p.styles > 1 ? ` Made in ${p.styles} styles with the same faces.` : "");
       $("start").disabled = !!p.clash || (S.job && $("stop").disabled === false);
       const per = p.bases_per_model;
-      $("plan").innerHTML = `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
-        + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b> = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
+      $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
+        + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b>${p.styles > 1 ? ` × <b>${p.styles}</b>` : ""} = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
         + costLine(p.cost) + `<div class="bases">Disk space needed: about <b>${fmt(p.disk_gb)} GB</b>${$("keepPng").checked ? " (with full-size PNGs)" : ""}.</div>`
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
     } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
@@ -413,6 +421,12 @@ async function init() {
     $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
   bc(); $("fabric").addEventListener("input", bc); $("bottomColour").addEventListener("input", refreshPlan);
   $("top").innerHTML = S.opts.tops.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
+  const moreTops = () => { $("moreTops").innerHTML = S.opts.tops.filter((t) => t !== $("top").value).map((t) =>
+    `<button class="chip ${S.moreTops.has(t) ? "on" : ""}" data-t="${t}"><i style="background:var(--soft)"></i>${esc(nice(t))}</button>`).join(""); };
+  moreTops(); $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); });
+  $("moreTops").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; const t = c.dataset.t;
+    S.moreTops.has(t) ? S.moreTops.delete(t) : S.moreTops.add(t); moreTops(); refreshPlan(); };
+  $("sameModels").addEventListener("change", refreshPlan);
   $("bottom").innerHTML = S.opts.bottoms.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
   $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");

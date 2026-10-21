@@ -88,6 +88,7 @@ class Spec:
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
+    same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -281,6 +282,8 @@ class ModelLedger:
 
     def clash(self, spec: "Spec") -> Optional[dict]:
         """Another batch already using any of this spec's model numbers (re-running the same batch is fine)."""
+        if spec.same_models:
+            return None  # reusing faces on purpose (e.g. the same models in another top style)
         first, last = spec.first_model, spec.first_model + int(spec.models) - 1
         for r in self.ranges(spec.category):
             if r["batch"] != spec.name and r["first"] <= last and first <= r["last"]:
@@ -435,14 +438,36 @@ class Batch:
                 if stage != "bases" and path.exists():
                     self._recolour_base(m, base, pose)
 
+    def face_file(self, m: int) -> Path:
+        """Model m's face for the whole category: the first front ever made for this model in any
+        batch, so the same person can wear every top style (half sleeve, hoodie, ...)."""
+        return self.root.parent / "_faces" / self.spec.category / f"m{m:04d}.png"
+
     def identity_front(self, m: int, bases) -> Path:
-        """The photo that defines model m's face: the first base front ever made for this model (so
-        adding colours later, which may need a new base, keeps the same person), else the front of
-        the base this run makes first."""
+        """The photo that defines model m's face: the first base front made for this model in this
+        batch (adding colours later keeps the same person), else the model's face from another style
+        of the same category, else the front of the base this run makes first (made from the text)."""
         made = [p for p in (self.model_dir(m) / "_base").glob("*/front_main.png")]
+        face = self.face_file(m)
         if made:
-            return min(made, key=lambda p: p.stat().st_mtime)
+            first = min(made, key=lambda p: p.stat().st_mtime)
+            if not face.exists():
+                self._register_face(m, first)
+            return first
+        if face.exists():
+            return face
         return self.base_path(m, bases[0], "front_main")
+
+    def _register_face(self, m: int, front: Path):
+        face = self.face_file(m)
+        if face.exists():
+            return
+        import shutil
+
+        face.parent.mkdir(parents=True, exist_ok=True)
+        tmp = face.with_name(f".{face.name}.{threading.get_ident()}.tmp")
+        shutil.copy2(front, tmp)
+        tmp.replace(face)
 
     def _request(self, m, base, pose, path: Path, first_front: Path):
         """(prompt, reference paths) for one base photo, or None while a reference isn't made yet."""
@@ -467,6 +492,8 @@ class Batch:
             tmp.unlink(missing_ok=True)
             raise
         tmp.replace(path)
+        if pose == "front_main":
+            self._register_face(m, path)  # no-op once the model has a face in this category
         self._event("ai_done", model=m, path=str(path), base=base_dir(base), pose=pose)
 
     def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:

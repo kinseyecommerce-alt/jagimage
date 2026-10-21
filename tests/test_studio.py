@@ -381,3 +381,45 @@ def test_batch_mode_is_half_price_and_gemini_only():
     assert half["per_image_usd"] == round(full["per_image_usd"] / 2, 4) and half["batch"]
     with pytest.raises(ValueError):
         studio.Spec(top_colours=["Navy"], provider="openai", batch=True)
+
+
+def test_same_models_in_another_style_keep_their_face(tmp_path):
+    tee = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Navy"], models=2)
+    studio.Batch(tee, out=tmp_path, generate=fake_generate).run()
+    face = tmp_path / "_faces" / "Men" / "m0001.png"
+    assert face.exists()  # the first front ever made for model 1 is now his face for every style
+    calls = []
+    gen = lambda p, refs: (calls.append((p, refs)), fake_generate(p, refs))[1]
+    hoodie = studio.Spec(category="Men", top="Hoodie", bottom="Trackpants", top_colours=["Navy"], models=2, same_models=True)
+    assert studio.ModelLedger(tmp_path).clash(hoodie) is None
+    counts = studio.Batch(hoodie, out=tmp_path, generate=gen).run()
+    assert counts["ai_done"] == 2 and counts["recoloured"] == 2
+    fronts = [(p, r) for p, r in calls]
+    assert [r for _, r in fronts] == [[str(face)], [str(tmp_path / "_faces" / "Men" / "m0002.png")]]
+    assert all(p.startswith("Use the reference image ONLY for identity") and "pullover hoodie" in p for p, _ in fronts)
+
+
+def test_server_runs_the_same_models_in_several_styles(tmp_path):
+    app, httpd = serve(port=0, out=str(tmp_path), engine=lambda spec: fake_generate)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        body = {"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy", "White"],
+                "models": 2, "tops": ["FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]}
+        code, plan = _post(base + "/api/plan", dict(body))
+        one = _post(base + "/api/plan", {k: v for k, v in body.items() if k != "tops"})[1]
+        assert code == 200 and plan["styles"] == 5 and plan["ai_images"] == 5 * one["ai_images"]
+        assert abs(plan["cost"]["with_retries_usd"] - 5 * one["cost"]["with_retries_usd"]) < 0.05
+        code, job = _post(base + "/api/jobs", dict(body))
+        assert code == 200 and len(job["names"]) == 5
+        for _ in range(200):
+            st = json.loads(_get(f"{base}/api/jobs/{job['id']}")[1])
+            if not st["running"]:
+                break
+            time.sleep(0.1)
+        assert st["counts"]["recoloured"] == 5 * 2 * 2 and st["counts"]["errors"] == 0
+        assert sorted(p.name for p in (tmp_path / "_faces" / "Men").glob("*.png")) == ["m0001.png", "m0002.png"]
+        nxt = _post(base + "/api/plan", {k: v for k, v in body.items() if k != "tops"})[1]
+        assert nxt["first_model"] == 3  # new batches still get new faces
+    finally:
+        httpd.shutdown()

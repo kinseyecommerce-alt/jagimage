@@ -62,21 +62,27 @@ def default_engine(spec: studio.Spec):
 
 
 class Job:
-    def __init__(self, spec: studio.Spec, out: str, engine, workers: int, stage: str, export=None, export_what="jpg"):
+    """One or more batches run one after another, e.g. the same models in several top styles."""
+
+    def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg"):
+        specs = specs if isinstance(specs, list) else [specs]
         self.id = uuid.uuid4().hex[:8]
-        self.spec, self.stage, self.plan = spec, stage, spec.plan()
+        self.specs, self.spec, self.stage = specs, specs[0], stage
+        self.plan = sum_plans([sp.plan() for sp in specs])
         self.started, self.finished, self.error = time.time(), None, None
         self.log = deque(maxlen=200)
         self.batch_state = None
         self.recent = deque(maxlen=48)
-        self.batch = studio.Batch(spec, out=out, generate=engine(spec) if stage != "recolor" else None,
-                                  workers=workers, on_event=self.event, export=export, export_what=export_what)
+        self.batches = [studio.Batch(sp, out=out, generate=engine(sp) if stage != "recolor" else None,
+                                     workers=workers, on_event=self.event, export=export, export_what=export_what)
+                        for sp in specs]
+        self.batch = self.batches[0]
         self.export = str(self.batch.export) if self.batch.export else None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def event(self, e: dict):
-        e = {**e, "t": round(time.time() - self.started, 1)}
-        if e["kind"] == "recoloured":
+        e = {**e, "t": round(time.time() - self.started, 1), "style": self.batch.spec.top}
+        if e["kind"] == "recoloured" and self.batch is self.batches[0]:
             self.recent.appendleft(str(Path(e["path"]).relative_to(self.batch.root)))
         if e["kind"] in ("ai_done", "recoloured", "errors", "batch"):
             self.log.appendleft(e)
@@ -85,19 +91,50 @@ class Job:
 
     def _run(self):
         try:
-            self.batch.run(self.stage)
+            for b in self.batches:
+                self.batch = b
+                b.run(self.stage)
+                if b.stop.is_set():
+                    break
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
         self.finished = time.time()
 
+    def stop(self):
+        for b in self.batches:
+            b.stop.set()
+
     def status(self) -> dict:
-        c = self.batch.counts
-        return {"id": self.id, "name": self.spec.name, "spec": asdict(self.spec), "stage": self.stage, "plan": self.plan,
+        c = {k: sum(b.counts[k] for b in self.batches) for k in self.batches[0].counts}
+        fatal = next((b.fatal for b in self.batches if b.fatal), None)
+        return {"id": self.id, "name": self.spec.name, "names": [sp.name for sp in self.specs],
+                "styles": [sp.top for sp in self.specs], "current": self.batch.spec.name,
+                "spec": asdict(self.spec), "stage": self.stage, "plan": self.plan,
                 "counts": c, "running": self.finished is None, "stopping": self.batch.stop.is_set(),
-                "error": self.error or self.batch.fatal, "elapsed": round((self.finished or time.time()) - self.started),
+                "error": self.error or fatal, "elapsed": round((self.finished or time.time()) - self.started),
                 "ai_progress": c["ai_done"] + c["ai_skipped"], "recolour_progress": c["recoloured"] + c["recolour_skipped"],
                 "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export,
                 "batch": self.batch_state}
+
+
+def sum_plans(plans):
+    out = dict(plans[0])
+    for p in plans[1:]:
+        for k in ("ai_images", "recoloured_images", "disk_gb"):
+            out[k] = round(out[k] + p[k], 1) if k == "disk_gb" else out[k] + p[k]
+    out["styles"] = len(plans)
+    return out
+
+
+def specs_from(body: dict, ledger) -> list:
+    """The batches one request makes: its top style plus any extra styles (body["tops"]), all with the
+    same models. Model numbers are automatic (faces never used before) unless given."""
+    tops = [t for t in (body.pop("tops", None) or []) if t]
+    tops = [body.get("top", "HalfSleeveTee")] + [t for t in tops if t != body.get("top", "HalfSleeveTee")]
+    if not body.get("first_model"):
+        body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
+    first = studio.Spec(**body)
+    return [first] + [studio.Spec(**{**body, "top": t, "name": "", "same_models": True}) for t in tops[1:]]
 
 
 class Preview:
@@ -155,9 +192,8 @@ class Studio:
         if export:
             Path(export).expanduser().mkdir(parents=True, exist_ok=True)  # fail now, not after the AI calls
         ledger = studio.ModelLedger(self.out)
-        if not body.get("first_model"):  # automatic: the next faces this category has never used
-            body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
-        spec = studio.Spec(**body)
+        specs = specs_from(body, ledger)
+        spec = specs[0]
         hit = ledger.clash(spec)
         if hit:
             raise ValueError(f"Models {hit['first']}-{hit['last']} of {spec.category} are already in batch {hit['batch']}, "
@@ -168,8 +204,9 @@ class Studio:
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
-            job = Job(spec, self.out, self.engine, workers, stage, export, export_what)
-            ledger.reserve(spec)
+            job = Job(specs, self.out, self.engine, workers, stage, export, export_what)
+            for sp in specs:
+                ledger.reserve(sp)
             self.jobs[job.id] = job
         job.thread.start()
         return job
@@ -301,11 +338,14 @@ def make_handler(app: Studio):
                         body.pop(k, None)
                     ledger = studio.ModelLedger(app.out)
                     auto = not body.get("first_model")
-                    body["first_model"] = body.get("first_model") or ledger.next_free(body.get("category", "Kids_Boys"))
-                    spec = studio.Spec(**body)
+                    specs = specs_from(body, ledger)
+                    spec = specs[0]
                     hit = ledger.clash(spec)
-                    from .pricing import estimate
-                    return self._json({**spec.plan(), "first_model": spec.first_model, "auto": auto, "cost": estimate(spec),
+                    from .pricing import estimate, sum_estimates
+                    total = sum_plans([sp.plan() for sp in specs])
+                    return self._json({**total, "first_model": spec.first_model, "auto": auto,
+                                       "cost": sum_estimates([estimate(sp) for sp in specs], total["recoloured_images"]),
+                                       "faces_ready": sum(1 for m in spec.model_numbers() if studio.Batch(spec, out=app.out).face_file(m).exists()),
                                        "clash": hit and f"Models {hit['first']}-{hit['last']} are already in batch {hit['batch']}: faces would repeat. Next free: {ledger.next_free(spec.category)}.", "bases": [studio.base_dir(b) for b in spec.bases()],
                                        "pairs": spec.pairs(), "name": spec.name})
                 if parts == ["api", "settings"]:
@@ -327,7 +367,7 @@ def make_handler(app: Studio):
                     job = app.jobs.get(parts[2])
                     if not job:
                         return self._json({"error": "no such job"}, 404)
-                    job.batch.stop.set()
+                    job.stop()
                     return self._json(job.status())
                 return self._json({"error": "not found"}, 404)
             except (TypeError, ValueError, OSError) as exc:

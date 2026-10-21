@@ -189,6 +189,12 @@ The Run box shows the count and the **estimated AI cost** before you start, in $
 
 **Batch mode** (Gemini, Engine section): half price. The app sends the base photos as Google batch jobs in up to 3 rounds (each model's first front; then the other fronts and the first base's poses; then the remaining poses, because each round uses photos from the one before as references). Google promises each job within 24 hours and is usually much faster. The job IDs are saved in the batch folder (`_batch_jobs.json`), so if the app is closed while Google is working, the next start collects that job instead of paying for it again. Photos the AI gets wrong are sent again in the next round.
 
+**Same models in every style:** pick extra styles under "Same models in more styles", e.g. Men's half sleeve, full sleeve and sleeveless tees, hoodies and sweatshirts.
+- **Order:** the styles run one after another with the same model numbers.
+- **Same face:** each model's first front photo is saved in `output/studio/_faces/<Category>/m0001.png` and used as the face reference in every other style.
+- **AI cost:** each style needs its own AI base photos, because a hoodie isn't a tee, so the cost adds up per style. Colours are still recoloured for free.
+- **Adding a style later:** tick "Reuse models made earlier in this category" and type the first model number.
+
 **Large daily volumes** (e.g. 1,000 new models a day):
 - **Faces:** there are over 550,000 different faces per category.
 - **Batch job size:** batch jobs are split into chunks of 400 photos (`JAGIMAGE_BATCH_CHUNK`) to fit a new Gemini account's batch quota. Raise the chunk size once the project reaches Tier 2.
