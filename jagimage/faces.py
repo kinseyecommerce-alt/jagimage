@@ -105,8 +105,12 @@ def look(category: str, i: int) -> Dict[str, str]:
     return {name: pick[name] for name in feats}
 
 
-def describe(category: str, i: int) -> str:
+def describe(category: str, i: int, hair=True) -> str:
+    """hair=False when a reference photo sets the hair: a written hairstyle that differs from the photo
+    makes some models (Gemini Flash) switch hairstyles between shots of the same person."""
     f = look(category, i)
+    if not hair:
+        f["hair"] = "hairstyle exactly as in the reference photo"
     return PEOPLE[category] + ", " + ", ".join(f.values())
 
 

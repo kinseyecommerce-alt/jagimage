@@ -68,6 +68,18 @@ def test_backdrop_between_legs_is_not_recoloured():
     assert (np.asarray(out.convert("RGB"))[300, 150] == np.asarray(img)[300, 150]).all()
 
 
+def test_pale_tinted_halo_and_shoes_beside_a_deep_base_stay_out():
+    """Gemini Flash leaves a faint purple tint in the bright backdrop along the trousers and in the
+    shoe shadows: same hue, pale. It must not join the mask (it showed as a ragged dark fringe)."""
+    img = fake_photo("#3B1F66")
+    d = ImageDraw.Draw(img)
+    d.rectangle((206, 150, 214, 330), fill="#E4DCEC")   # pale lilac halo touching the garment's side
+    d.rectangle((100, 331, 200, 362), fill="#D9CFE3")   # tinted shoe shadow under the hem, joined to the shoes
+    out, _, mask = recolor_image(img, "#3B1F66", "#000000")
+    assert mask[250, 210] < 0.5 and mask[345, 150] < 0.5
+    assert mask[250, 150] > 0.95  # the garment itself is still all in
+
+
 def test_white_keeps_knit_and_stitches():
     from jagimage.recolor import rgb_to_lab
     img = fake_photo("#8FD3A8")

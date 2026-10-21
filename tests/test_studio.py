@@ -102,7 +102,10 @@ def test_prompt_asks_for_a_real_person_in_both_base_colours():
     assert "real, living human model (not a mannequin" in p and "mannequin, dummy" in p.split("Avoid:")[1]
     assert "bottle green (#1E4636)" in p and "lilac (#C4A3EE)" in p and faces.describe("Women", 12) in p
     assert "trackpants" in p and "Joggers end in a plain straight hem" in p
-    assert studio.prompt(s, 12, ("dark", "light"), "front_main", "face").startswith("Use the reference image ONLY for identity")
+    ref = studio.prompt(s, 12, ("dark", "light"), "front_main", "face")
+    assert ref.startswith("Use the reference image ONLY for identity")
+    # with a reference photo the hair comes from the photo only, never from a written hairstyle that may differ
+    assert faces.hairstyle("Women", 12) not in ref and "hairstyle exactly as in the reference photo" in ref
 
 
 def test_custom_poses_and_extra_instructions():

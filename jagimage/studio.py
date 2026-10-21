@@ -213,7 +213,7 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     if top_only:
         rules = rules.replace(FULL_FRAMING, TOP_ONLY_FRAMING)
     text = (f"{lines[reference]}Real photograph of a real, living human model (not a mannequin, dummy, doll or 3D figure): "
-            f"{faces.describe(spec.category, model_no)}, {spec.pose_texts()[pose]}. "
+            f"{faces.describe(spec.category, model_no, hair=reference == 'none')}, {spec.pose_texts()[pose]}. "
             f"Wearing {top_text}, fabric: {L.FABRIC_TEXT[spec.fabric][L.FABRIC_KIND[spec.top]]}; "
             f"with {bottom_text}" + (f", fabric: {L.FABRIC_TEXT[spec.fabric]['bottom']}" if bcol else "") +
             ("" if top_only else f"; and {shoes}") +

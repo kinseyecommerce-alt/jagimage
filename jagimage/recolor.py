@@ -24,6 +24,7 @@ CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
+GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
 
 
 class MaskError(RuntimeError):
@@ -203,6 +204,8 @@ def _hue_mask(lab, base, base_hex):
     if n:
         sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
         m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
+    if m.any():  # shadows are darker than the lit fabric: a pale tinted halo or white shoe beside a deep base is not
+        loose &= lab[..., 0] < np.percentile(lab[..., 0][m], 99) + GROW_LIGHTER
     m = ndimage.binary_propagation(m, mask=m | loose)
     centre = lab[m].mean(axis=0) if m.any() else base
     return _cleanup(_with_creases(m, lab, centre), lab, centre)
