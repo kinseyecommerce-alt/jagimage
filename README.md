@@ -141,6 +141,40 @@ jagimage library --bases --provider gemini --category Kids_Boys --product HalfSl
 - Base photos live in `_base_light/` and `_base_dark/` next to the colour folders.
 - Full library: 336 styles×poses ×2 = 672 AI images instead of 4,368.
 
+## Studio app: hundreds of models, any top and bottom colours
+
+`jagimage serve` opens the Studio on your computer (http://127.0.0.1:8765). It makes catalogue photos of real-looking models in batch:
+
+```bash
+pip install -e ".[gemini]"
+jagimage serve            # then open http://127.0.0.1:8765
+```
+
+1. **Category:** Men, Women, Kids Boys or Kids Girls.
+2. **Outfit:**
+   - Top: half sleeve, full sleeve or sleeveless tee, hoodie, or sweatshirt.
+   - Bottom: shorts, track pants, or jeans (jeans stay as the AI makes them).
+   - Fabric: Pure Cotton or Cotton Mix.
+3. **Top colours and bottom colours:** pick from either palette, or add any `#RRGGBB`. Choose "Same colour as the top" for matching sets. Or pick bottom colours, and every top colour is made with every bottom colour.
+4. **Models:** e.g. 300. Every model is a different real-looking person, with a different face shape, skin tone, hair, eyes and smile. Model 7 always looks the same, so set "Start at model no." to 301 to add more later.
+5. **Engine:** Gemini (1K/2K/4K) or OpenAI. Paste the API key in the app, or set `GEMINI_API_KEY` / `OPENAI_API_KEY`. The key stays in the app's memory on your computer.
+
+**How it works:**
+- **Base photos:** the AI shoots each model with the top in a green base colour and the bottom in a purple one. Each model needs at most 4 base photos (light/dark top × light/dark bottom), and only the ones your colours use.
+- **Same person in every photo:** the model's first photo is the face reference for their other base photos.
+- **Colour check:** a base photo where the AI got the colours wrong is retried.
+- **Recolouring:** every top/bottom pair is recoloured to the exact hex on your computer, at no API cost. You also get a 1500×1500 marketplace JPG and a `qc.json` with the ΔE of the top and the bottom.
+
+The Run box shows the count before you start. For example, 300 models × 9 colours (matching sets) needs 600 AI images and gives 2,700 photos.
+
+**Other features:**
+- **Resuming:** stopping and starting again skips everything already made.
+- **Recolour only:** add colours later without new AI calls.
+- **Downloads:** the gallery downloads all photos as a ZIP of JPGs or full-size PNGs.
+- **Output layout:**
+  - `output/studio/<batch>/m0001/<Top>__<Bottom>/` for each outfit.
+  - `output/studio/<batch>/m0001/_base/` for the AI base photos and their editable masks.
+
 ## Recolor web app
 
 `web/recolor/index.html` is a browser tool for recolouring existing garment photos. Open the file in a browser; nothing is uploaded anywhere. `app.html` is the same page without the HTML wrapper (the published version).

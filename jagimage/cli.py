@@ -240,7 +240,24 @@ def main(argv=None) -> int:
     lib.add_argument("--force", action="store_true", help="Regenerate images that already exist")
     lib.add_argument("--dry-run", action="store_true", help="Print the prompts without calling the API")
 
+    srv = sub.add_parser("serve", help="Studio web app: N models x top/bottom colours, AI bases in batch + recolour")
+    srv.add_argument("--port", type=int, default=8765)
+    srv.add_argument("--host", default="127.0.0.1", help="Keep 127.0.0.1 unless you trust your network")
+    srv.add_argument("--out", default="output/studio")
+    srv.add_argument("--workers", type=int, default=4, help="Parallel AI requests per batch")
+
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        from .server import serve
+
+        _, httpd = serve(args.host, args.port, args.out, args.workers)
+        print(f"Jag Studio: open http://{args.host}:{args.port} (Ctrl+C to stop)")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        return 0
 
     if args.command == "shots":
         for s in SHOTS.values():

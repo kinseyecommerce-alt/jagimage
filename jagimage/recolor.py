@@ -18,6 +18,7 @@ PHOTO_BLACK = 0.2  # darkest garment lightness rendered (~#1A1A1A); below it kni
 PHOTO_WHITE = 0.955  # lightest garment average rendered (~#F2F2F2); highlights roll up towards pure white
 KNIT_MIN = 0.85    # stitches and knit keep at least this much of their contrast on darker targets
 CLIPPED = 0.1      # lightness below this (RGB 0-3) is camera-crushed black with no texture in it
+CROP_MARGIN = 32   # px around the garment kept when recolouring (edge band + blur reach)
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
@@ -244,23 +245,27 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
 def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = "match",
                   mask: Optional[np.ndarray] = None, texture: float = 1.0) -> Tuple[Image.Image, float, np.ndarray]:
     """Returns (recoloured image, ΔE x100 of the garment vs target, soft mask used)."""
-    rgba = np.asarray(img.convert("RGBA"))
-    rgb = rgba[..., :3]
-    lab = rgb_to_lab(rgb)
+    rgba = np.array(img.convert("RGBA"))
     if mask is None:
-        mask, mean = garment_mask(lab, base_hex)
-    else:
-        core = mask > 0.95
-        if not core.any():
-            raise MaskError("The supplied mask is empty.")
-        mean = lab[core].mean(axis=0)
-    new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=mask, texture=texture)).astype(np.float32)
+        mask, _ = garment_mask(rgb_to_lab(rgba[..., :3]), base_hex)
+    if not (mask > 0.95).any():
+        raise MaskError("The supplied mask is empty.")
+    # Work on the garment's box only (plus room for the edge and blurs): same result, much faster.
+    ys, xs = np.nonzero(mask > 0.01)
+    m = CROP_MARGIN
+    y0, y1 = max(0, ys.min() - m), min(mask.shape[0], ys.max() + m + 1)
+    x0, x1 = max(0, xs.min() - m), min(mask.shape[1], xs.max() + m + 1)
+    rgb, cm = rgba[y0:y1, x0:x1, :3], mask[y0:y1, x0:x1]
+    lab = rgb_to_lab(rgb)
+    core = cm > 0.95
+    mean = lab[core].mean(axis=0)
+    new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=cm, texture=texture)).astype(np.float32)
     gain = texture_gain(float(mean[0]), float(render_target(target_hex)[0])) if mode == "match" else 1.0
-    out = _composite(rgb.astype(np.float32), new, mask, gain)
-    core = mask > 0.95
+    out = _composite(rgb.astype(np.float32), new, cm, gain)
     goal = render_target(target_hex) if mode == "match" else hex_to_lab(target_hex)
     de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - goal) * 100)
-    return Image.fromarray(np.dstack([out, rgba[..., 3]]), "RGBA"), de, mask
+    rgba[y0:y1, x0:x1, :3] = out
+    return Image.fromarray(rgba, "RGBA"), de, mask
 
 
 def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):

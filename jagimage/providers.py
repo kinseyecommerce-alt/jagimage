@@ -30,13 +30,14 @@ def to_png(data: bytes) -> bytes:
 class OpenAIProvider:
     name = "openai"
 
-    def __init__(self, client=None, model: Optional[str] = None, quality="high", size="1024x1536", fidelity=None):
+    def __init__(self, client=None, model: Optional[str] = None, quality="high", size="1024x1536", fidelity=None,
+                 api_key: Optional[str] = None):
         from .agent import DEFAULT_MODEL
 
         if client is None:
             from openai import OpenAI
 
-            client = OpenAI()
+            client = OpenAI(api_key=api_key) if api_key else OpenAI()
         self.client = client
         self.model = model or os.environ.get("JAGIMAGE_MODEL", DEFAULT_MODEL)
         self.quality = quality
@@ -60,13 +61,14 @@ class OpenAIProvider:
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, client=None, model: Optional[str] = None, image_size="2K", aspect_ratio="3:4"):
+    def __init__(self, client=None, model: Optional[str] = None, image_size="2K", aspect_ratio="3:4",
+                 api_key: Optional[str] = None):
         if image_size not in GEMINI_SIZES:
             raise ValueError(f"Gemini image size must be one of {', '.join(GEMINI_SIZES)}")
         if client is None:
             from google import genai
 
-            client = genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY
+            client = genai.Client(api_key=api_key) if api_key else genai.Client()  # else GEMINI_API_KEY / GOOGLE_API_KEY
         self.client = client
         self.model = model or os.environ.get("JAGIMAGE_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
         self.image_size = image_size
@@ -99,6 +101,6 @@ class GeminiProvider:
 
 def make_provider(name: str = "openai", **kw):
     if name == "gemini":
-        return GeminiProvider(model=kw.get("model"), image_size=kw.get("image_size", "2K"))
+        return GeminiProvider(model=kw.get("model"), image_size=kw.get("image_size", "2K"), api_key=kw.get("api_key"))
     return OpenAIProvider(model=kw.get("model"), quality=kw.get("quality", "high"),
-                          size=kw.get("size", "1024x1536"), fidelity=kw.get("fidelity"))
+                          size=kw.get("size", "1024x1536"), fidelity=kw.get("fidelity"), api_key=kw.get("api_key"))

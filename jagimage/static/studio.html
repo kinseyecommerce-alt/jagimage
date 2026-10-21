@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jag Studio</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1f24; --muted: #646a73; --line: #e2e2de; --soft: #f0f0ec;
+  --accent: #2f5bd3; --accent-ink: #ffffff; --ok: #2e7d4f; --warn: #b4441f; --chip: #ffffff;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --panel: #1d2026; --ink: #e9eaee; --muted: #9aa0aa; --line: #2e323a; --soft: #23272e;
+    --accent: #6d90ff; --accent-ink: #0d1020; --ok: #5fc58c; --warn: #ff8a65; --chip: #23272e;
+    --shadow: none; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+header .sub { color: var(--muted); font-size: 13px; }
+header .keys { margin-left: auto; display: flex; gap: 10px; font-size: 13px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 5px; vertical-align: 1px; }
+.dot.on { background: var(--ok); }
+main { display: grid; grid-template-columns: minmax(340px, 430px) 1fr; gap: 18px; padding: 18px 20px; max-width: 1600px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } header { flex-wrap: wrap; } header .keys { margin-left: 0; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+.panel + .panel { margin-top: 14px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+h2 .n { color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row + .row, .row + .field, .field + .row, .field + .field { margin-top: 10px; }
+.field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 120px; }
+.field > span { font-size: 12px; color: var(--muted); }
+select, input[type=number], input[type=text], input[type=password] {
+  font: inherit; color: var(--ink); background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
+.seg { display: inline-flex; background: var(--soft); border: 1px solid var(--line); border-radius: 9px; padding: 3px; flex-wrap: wrap; }
+.seg button { font: inherit; border: 0; background: transparent; color: var(--ink); padding: 6px 11px; border-radius: 7px; cursor: pointer; }
+.seg button.on { background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.15); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  border-radius: 999px; padding: 4px 10px 4px 4px; cursor: pointer; font: inherit; font-size: 13px; }
+.chip i { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
+.chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.chip .x { margin-left: 2px; color: var(--muted); }
+.mini { font: inherit; font-size: 12px; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; }
+a.btn { text-decoration: none; display: inline-block; }
+.btn { font: inherit; font-weight: 600; border-radius: 9px; padding: 9px 16px; border: 1px solid var(--line); background: var(--soft); color: var(--ink); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: default; }
+.plan { background: var(--soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.plan b { font-variant-numeric: tabular-nums; }
+.plan .bases { color: var(--muted); margin-top: 4px; }
+.err { color: var(--warn); font-size: 13px; min-height: 1em; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.bar { height: 8px; background: var(--soft); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.stat { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
+.stat .v { font-variant-numeric: tabular-nums; color: var(--muted); }
+.log { max-height: 140px; overflow: auto; font-size: 12px; color: var(--muted); margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.log .e { color: var(--warn); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--soft); color: inherit; text-decoration: none; }
+.card:hover { border-color: var(--accent); }
+.card img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; background: var(--line); }
+.card .cap { padding: 6px 8px; font-size: 12px; display: flex; flex-direction: column; }
+.card .cap b { font-weight: 600; }
+.card .cap span { color: var(--muted); }
+.batches { display: flex; flex-direction: column; gap: 6px; }
+.batch { display: flex; gap: 8px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+.batch .nm { font-weight: 600; font-size: 13px; word-break: break-all; }
+.batch .meta { font-size: 12px; color: var(--muted); }
+.hide { display: none !important; }
+.hint { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jag Studio</h1>
+  <span class="sub">AI base photos in batch, recoloured to exact colours</span>
+  <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span></div>
+</header>
+<main>
+  <div>
+    <section class="panel">
+      <h2>Category</h2>
+      <div class="seg" id="category"></div>
+      <div class="row" style="margin-top:12px">
+        <label class="field"><span>Top</span><select id="top"></select></label>
+        <label class="field"><span>Bottom</span><select id="bottom"></select></label>
+        <label class="field"><span>Fabric</span><select id="fabric"></select></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Top colours <span class="n" id="topCount"></span></h2>
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <div class="seg" id="topPal"></div>
+        <span><button class="mini" data-all="top">All</button> · <button class="mini" data-none="top">None</button></span>
+      </div>
+      <div class="chips" id="topChips"></div>
+      <div class="row"><input type="text" id="topHex" placeholder="Custom colour, e.g. #3A7D44" style="flex:1"><button class="btn" id="topAdd">Add</button></div>
+    </section>
+
+    <section class="panel" id="bottomPanel">
+      <h2>Bottom colours <span class="n" id="bottomCount"></span></h2>
+      <div class="seg" id="pairing">
+        <button data-v="match" class="on">Same colour as the top</button>
+        <button data-v="each">Choose bottom colours</button>
+      </div>
+      <div id="bottomPick" class="hide" style="margin-top:10px">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <div class="seg" id="bottomPal"></div>
+          <span><button class="mini" data-all="bottom">All</button> · <button class="mini" data-none="bottom">None</button></span>
+        </div>
+        <div class="chips" id="bottomChips"></div>
+        <div class="row"><input type="text" id="bottomHex" placeholder="Custom colour, e.g. #1F3A5F" style="flex:1"><button class="btn" id="bottomAdd">Add</button></div>
+        <p class="hint">Every top colour is made with every bottom colour.</p>
+      </div>
+      <p class="hint hide" id="fixedNote">Jeans stay as the AI makes them; only the top is recoloured.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Models and poses</h2>
+      <div class="row">
+        <label class="field"><span>Different models</span><input type="number" id="models" min="1" max="5000" value="10"></label>
+        <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" value="1"></label>
+      </div>
+      <p class="hint">Every model is a different person (face, skin tone, hair, eyes). Start at 301 to add 300 more to an earlier batch.</p>
+      <div class="chips" id="poses"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Engine</h2>
+      <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button></div>
+      <div class="row">
+        <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
+        <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
+        <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
+      </div>
+      <div class="row">
+        <input type="password" id="key" placeholder="API key (kept on this computer only)" style="flex:1" autocomplete="off">
+        <button class="btn" id="saveKey">Save key</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Run</h2>
+      <div class="plan" id="plan">…</div>
+      <div class="row">
+        <label class="field"><span>What to do</span>
+          <select id="stage">
+            <option value="all">Generate base photos, then recolour</option>
+            <option value="bases">Generate base photos only</option>
+            <option value="recolor">Recolour only (no AI, uses existing bases)</option>
+          </select></label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="start">Start batch</button>
+        <button class="btn" id="stop" disabled>Stop</button>
+      </div>
+      <div class="err" id="err"></div>
+    </section>
+  </div>
+
+  <div>
+    <section class="panel" id="progress">
+      <h2>Progress <span class="n" id="jobName"></span></h2>
+      <div class="stat">
+        <span>AI base photos</span><span class="v" id="aiTxt">–</span>
+      </div>
+      <div class="bar"><i id="aiBar"></i></div>
+      <div class="stat" style="margin-top:10px">
+        <span>Recoloured photos</span><span class="v" id="rcTxt">–</span>
+      </div>
+      <div class="bar"><i id="rcBar"></i></div>
+      <div class="stat" style="margin-top:10px">
+        <span>Errors</span><span class="v" id="errTxt">0</span>
+        <span>Time</span><span class="v" id="timeTxt">–</span>
+      </div>
+      <div class="log" id="log"></div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <h2 style="margin:0">Photos <span class="n" id="galTotal"></span></h2>
+        <span class="row">
+          <a class="btn" id="zipJpg" href="#">Download 1500×1500 JPG (ZIP)</a>
+          <a class="btn" id="zipPng" href="#">Full-size PNG (ZIP)</a>
+        </span>
+      </div>
+      <div class="gallery" id="gallery"></div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button class="btn" id="more">Load more</button></div>
+    </section>
+
+    <section class="panel">
+      <h2>Batches on this computer</h2>
+      <div class="batches" id="batches"></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const S = { opts: null, category: "Kids_Boys", provider: "gemini", pairing: "match", top: new Set(["Navy"]), bottom: new Set(),
+            topPal: "PureCotton", bottomPal: "PureCotton", custom: { top: [], bottom: [] }, poses: new Set(["front_main"]),
+            job: null, batch: null, shown: 0, poll: null };
+const api = async (path, body) => {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+};
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n) => Number(n).toLocaleString();
+const label = (c) => c.replace(/_/g, " ");
+const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", Trackpants: "Track pants" };
+const nice = (v) => NAMES[v] || label(v);
+const hexOf = (name) => { if (/^#[0-9a-f]{6}$/i.test(name)) return name; for (const f of [S.fabric(), ...Object.keys(S.opts.palettes)]) if (S.opts.palettes[f][name]) return S.opts.palettes[f][name]; return "#888"; };
+S.fabric = () => $("fabric").value;
+
+function seg(el, values, current, onPick, text = label) {
+  el.innerHTML = values.map((v) => `<button data-v="${esc(v)}" class="${v === current ? "on" : ""}">${esc(text(v))}</button>`).join("");
+  el.onclick = (e) => { const b = e.target.closest("button"); if (!b) return; [...el.children].forEach((c) => c.classList.toggle("on", c === b)); onPick(b.dataset.v); };
+}
+function chips(which) {
+  const pal = S.opts.palettes[S[which + "Pal"]], set = S[which];
+  const names = [...Object.keys(pal), ...S.custom[which]];
+  $(which + "Chips").innerHTML = names.map((n) => `<button class="chip ${set.has(n) ? "on" : ""}" data-n="${esc(n)}"><i style="background:${esc(pal[n] || n)}"></i>${esc(n)}${S.custom[which].includes(n) ? '<span class="x" title="Remove">×</span>' : ""}</button>`).join("");
+  $(which + "Count").textContent = set.size ? `${set.size} selected` : "";
+}
+function wireChips(which) {
+  $(which + "Chips").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; const n = c.dataset.n;
+    if (e.target.classList.contains("x")) { S.custom[which] = S.custom[which].filter((x) => x !== n); S[which].delete(n); }
+    else S[which].has(n) ? S[which].delete(n) : S[which].add(n);
+    chips(which); refreshPlan(); };
+  $(which + "Add").onclick = () => { const v = $(which + "Hex").value.trim(); if (!/^#[0-9a-f]{6}$/i.test(v)) { $("err").textContent = "Use a colour like #3A7D44"; return; }
+    const h = v.toUpperCase(); if (!S.custom[which].includes(h)) S.custom[which].push(h); S[which].add(h); $(which + "Hex").value = ""; chips(which); refreshPlan(); };
+  seg($(which + "Pal"), Object.keys(S.opts.palettes), S[which + "Pal"], (v) => { S[which + "Pal"] = v; chips(which); }, (f) => S.opts.fabrics[f].split(" (")[0]);
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.dataset.all, n = e.target.dataset.none;
+  if (a) { Object.keys(S.opts.palettes[S[a + "Pal"]]).forEach((c) => S[a].add(c)); chips(a); refreshPlan(); }
+  if (n) { S[n].clear(); chips(n); refreshPlan(); }
+});
+
+function spec() {
+  const fixed = S.opts.fixed_bottoms.includes($("bottom").value);
+  return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
+    top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
+    models: +$("models").value || 1, first_model: +$("firstModel").value || 1, poses: [...S.poses],
+    provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
+}
+let planTimer = null;
+function refreshPlan() {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(async () => {
+    try {
+      const p = await api("/api/plan", spec()); $("err").textContent = "";
+      const per = p.bases_per_model;
+      $("plan").innerHTML = `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
+        + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b> = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
+        + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
+    } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
+  }, 150);
+}
+function syncBottom() {
+  const fixed = S.opts.fixed_bottoms.includes($("bottom").value);
+  $("pairing").classList.toggle("hide", fixed); $("bottomPick").classList.toggle("hide", fixed || S.pairing === "match");
+  $("fixedNote").classList.toggle("hide", !fixed);
+}
+function keys(p) { for (const k of ["gemini", "openai"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
+
+async function init() {
+  S.opts = await api("/api/options");
+  keys(S.opts.providers);
+  seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });
+  $("top").innerHTML = S.opts.tops.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
+  $("bottom").innerHTML = S.opts.bottoms.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
+  $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
+  $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");
+  $("quality").innerHTML = S.opts.openai_qualities.map((s) => `<option ${s === "high" ? "selected" : ""}>${s}</option>`).join("");
+  $("poses").innerHTML = S.opts.poses.map((p) => `<button class="chip ${S.poses.has(p) ? "on" : ""}" data-p="${p}" ${p === "front_main" ? 'title="Always made: other poses are made from it"' : ""}><i style="background:var(--soft)"></i>${label(p)}</button>`).join("");
+  $("poses").onclick = (e) => { const c = e.target.closest(".chip"); if (!c || c.dataset.p === "front_main") return;
+    S.poses.has(c.dataset.p) ? S.poses.delete(c.dataset.p) : S.poses.add(c.dataset.p); c.classList.toggle("on"); refreshPlan(); };
+  wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
+  seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
+  seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
+  for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
+  $("saveKey").onclick = async () => { const k = $("key").value.trim(); if (!k) return; keys(await api("/api/keys", { [S.provider]: k })); $("key").value = ""; $("err").textContent = ""; };
+  $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };
+  $("more").onclick = () => loadGallery(false);
+  syncBottom(); refreshPlan(); loadJobs();
+}
+async function start() {
+  $("err").textContent = "";
+  try { const j = await api("/api/jobs", { ...spec(), stage: $("stage").value, workers: +$("workers").value || 4 });
+        S.job = j.id; openBatch(j.name); showJob(j); poll(); }
+  catch (e) { $("err").textContent = e.message; }
+}
+function poll() { clearInterval(S.poll); S.poll = setInterval(async () => { if (!S.job) return; const j = await api(`/api/jobs/${S.job}`); showJob(j); if (!j.running) { clearInterval(S.poll); loadGallery(true); loadJobs(); } else if (j.recent.length) loadGallery(true, true); }, 2000); }
+function showJob(j) {
+  $("jobName").textContent = j.name; const p = j.plan, c = j.counts;
+  $("aiTxt").textContent = j.stage === "recolor" ? "not used" : `${fmt(j.ai_progress)} / ${fmt(p.ai_images)} (${fmt(c.ai_done)} new)`;
+  $("rcTxt").textContent = j.stage === "bases" ? "not used" : `${fmt(j.recolour_progress)} / ${fmt(p.recoloured_images)}`;
+  $("aiBar").style.width = (j.stage === "recolor" ? 0 : 100 * j.ai_progress / Math.max(1, p.ai_images)) + "%";
+  $("rcBar").style.width = (100 * j.recolour_progress / Math.max(1, p.recoloured_images)) + "%";
+  $("errTxt").textContent = c.errors; const m = Math.floor(j.elapsed / 60);
+  $("timeTxt").textContent = `${m} min ${j.elapsed % 60} s` + (j.running ? (j.stopping ? " · stopping…" : " · running") : " · finished") + (j.error ? " · " + j.error : "");
+  $("start").disabled = j.running; $("stop").disabled = !j.running;
+  $("log").innerHTML = j.log.map((e) => e.kind === "errors" ? `<div class="e">m${String(e.model).padStart(4, "0")}: ${esc(e.error)}</div>`
+    : e.kind === "ai_done" ? `<div>m${String(e.model).padStart(4, "0")}: AI base ${esc(e.base)} ${esc(label(e.pose))}</div>`
+    : `<div>m${String(e.model).padStart(4, "0")}: ${esc(label(e.top))}${e.bottom ? " / " + esc(label(e.bottom)) : ""} ${esc(label(e.pose))}</div>`).join("");
+}
+function openBatch(name) { S.batch = name; $("zipJpg").href = `/api/batches/${encodeURIComponent(name)}/zip?what=jpg`; $("zipPng").href = `/api/batches/${encodeURIComponent(name)}/zip?what=png`; loadGallery(true); }
+let galBusy = false;
+async function loadGallery(reset, quiet) {
+  if (!S.batch || galBusy) return; galBusy = true;
+  try {
+    if (reset) { if (!quiet) $("gallery").innerHTML = ""; S.shown = quiet ? 0 : 0; }
+    const lim = reset ? Math.max(60, quiet ? S.shownMax || 60 : 60) : 60;
+    const r = await api(`/api/batches/${encodeURIComponent(S.batch)}/results?offset=${reset ? 0 : S.shown}&limit=${lim}`);
+    const html = r.rows.map((x) => { const src = `/thumbs/${encodeURIComponent(S.batch)}/${x.png}`, full = `/files/${encodeURIComponent(S.batch)}/${x.jpg || x.png}`;
+      return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}${x.bottom ? " / " + esc(label(x.bottom)) : ""}</b><span>${esc(x.model)} · ${esc(label(x.pose))}</span></span></a>`; }).join("");
+    if (reset) $("gallery").innerHTML = html; else $("gallery").insertAdjacentHTML("beforeend", html);
+    S.shown = (reset ? 0 : S.shown) + r.rows.length; S.shownMax = Math.max(S.shownMax || 0, S.shown);
+    $("galTotal").textContent = `${fmt(r.total)} made`; $("more").classList.toggle("hide", S.shown >= r.total);
+  } catch (e) { /* batch folder not created yet */ } finally { galBusy = false; }
+}
+async function loadJobs() {
+  const r = await api("/api/jobs");
+  const running = r.jobs.find((j) => j.running);
+  if (running && !S.job) { S.job = running.id; openBatch(running.name); showJob(running); poll(); }
+  $("batches").innerHTML = r.folders.map((f) => `<div class="batch"><div><div class="nm">${esc(f.name)}</div><div class="meta">${esc(f.spec.models)} models from no. ${esc(f.spec.first_model)} · ${esc(f.spec.top_colours.length)} top colour(s) · ${esc(f.spec.provider)}</div></div>
+    <span class="row"><button class="btn" data-open="${esc(f.name)}">Open</button><button class="btn" data-load="${esc(f.name)}">Load settings</button></span></div>`).join("") || '<p class="hint">None yet.</p>';
+  $("batches").onclick = (e) => { const o = e.target.dataset.open, l = e.target.dataset.load; if (o) openBatch(o); if (l) loadSettings(r.folders.find((f) => f.name === l).spec); };
+}
+function loadSettings(s) {
+  S.category = s.category; [...$("category").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.category));
+  $("top").value = s.top; $("bottom").value = s.bottom; $("fabric").value = s.fabric; S.topPal = S.bottomPal = s.fabric;
+  S.top = new Set(s.top_colours); S.bottom = new Set(s.bottom_colours);
+  for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
+  S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
+  $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
+  [...$("poses").children].forEach((c) => c.classList.toggle("on", S.poses.has(c.dataset.p)));
+  S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
+  $("imageSize").value = s.image_size; $("quality").value = s.quality;
+  wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
+}
+init().catch((e) => { $("err").textContent = "Couldn't reach the Studio server: " + e.message; });
+</script>
+</body>
+</html>
