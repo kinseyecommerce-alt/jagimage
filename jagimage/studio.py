@@ -179,8 +179,15 @@ class Batch:
     that exist are skipped, so an interrupted batch continues where it stopped."""
 
     def __init__(self, spec: Spec, out="output/studio", generate: Optional[Callable[[str, List[str]], bytes]] = None,
-                 workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None):
+                 workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
+                 export: Optional[str] = None, export_what="jpg"):
+        """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
+        photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
+        self.export = Path(export).expanduser() if export else None
+        if export_what not in ("jpg", "png", "both"):
+            raise ValueError("export_what must be jpg, png or both")
+        self.export_what = export_what
         self.root = Path(out) / spec.name
         self.generate = generate          # (prompt, reference paths) -> image bytes
         self.workers = workers
@@ -350,6 +357,24 @@ class Batch:
         rows = json.loads(qc_path.read_text()) if qc_path.exists() else {}
         rows[pose] = qc
         write_qc(qc_path, rows)
+        self._export(path, pose)
+
+    def _export(self, path: Path, pose: str):
+        if not self.export:
+            return
+        import shutil
+
+        model = path.parent.parent.name
+        dest = self.export / self.spec.name / path.parent.name
+        dest.mkdir(parents=True, exist_ok=True)
+        files = []
+        if self.export_what in ("jpg", "both") and self.spec.canvas:
+            files.append(path.with_name(f"{pose}_{self.spec.canvas[0]}x{self.spec.canvas[1]}.jpg"))
+        if self.export_what in ("png", "both") or not self.spec.canvas:
+            files.append(path)
+        for f in files:
+            if f.exists():
+                shutil.copy2(f, dest / f"{model}_{pose}{f.suffix}")
 
     # ---- results
     def results(self) -> List[dict]:

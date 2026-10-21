@@ -150,6 +150,26 @@ a.btn { text-decoration: none; display: inline-block; }
     </section>
 
     <section class="panel">
+      <h2>Save to</h2>
+      <label class="field"><span>Also save finished photos to</span>
+        <select id="exportSel"></select></label>
+      <label class="field hide" id="exportPathField"><span>Folder</span>
+        <input type="text" id="exportPath" placeholder="e.g. G:\My Drive\Jag Studio"></label>
+      <div class="row">
+        <label class="field"><span>Which files</span>
+          <select id="exportWhat">
+            <option value="jpg">1500×1500 marketplace JPG</option>
+            <option value="png">Full-size PNG</option>
+            <option value="both">Both</option>
+          </select></label>
+      </div>
+      <p class="hint" id="driveHint"></p>
+      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Working folder (bases, masks, all files)</summary>
+        <div class="row" style="margin-top:8px"><input type="text" id="outDir" style="flex:1"><button class="btn" id="outSave">Use folder</button></div>
+      </details>
+    </section>
+
+    <section class="panel">
       <h2>Run</h2>
       <div class="plan" id="plan">…</div>
       <div class="row">
@@ -182,6 +202,7 @@ a.btn { text-decoration: none; display: inline-block; }
       <div class="stat" style="margin-top:10px">
         <span>Errors</span><span class="v" id="errTxt">0</span>
         <span>Time</span><span class="v" id="timeTxt">–</span>
+        <span>Copying finished photos to</span><span class="v" id="exportTxt" style="word-break:break-all">–</span>
       </div>
       <div class="log" id="log"></div>
     </section>
@@ -290,13 +311,30 @@ async function init() {
   seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   $("saveKey").onclick = async () => { const k = $("key").value.trim(); if (!k) return; keys(await api("/api/keys", { [S.provider]: k })); $("key").value = ""; $("err").textContent = ""; };
+  setupSave();
   $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };
   $("more").onclick = () => loadGallery(false);
   syncBottom(); refreshPlan(); loadJobs();
 }
+function setupSave() {
+  const drives = S.opts.drive_folders || [], sep = (p) => (p.includes("\\") ? "\\" : "/");
+  $("exportSel").innerHTML = `<option value="">Don't copy (working folder only)</option>`
+    + drives.map((d) => `<option value="${esc(d + sep(d) + "Jag Studio")}">Google Drive: ${esc(d)}</option>`).join("")
+    + `<option value="__other">Another folder…</option>`;
+  $("driveHint").textContent = drives.length
+    ? "Photos copied into your Google Drive folder upload to Drive automatically (Google Drive for desktop)."
+    : "To save straight to Google Drive, install Google Drive for desktop, then pick its \"My Drive\" folder with \"Another folder…\". Files saved there upload automatically.";
+  $("exportSel").onchange = () => $("exportPathField").classList.toggle("hide", $("exportSel").value !== "__other");
+  $("outDir").value = S.opts.out || "";
+  $("outSave").onclick = async () => { try { S.opts = { ...S.opts, ...(await api("/api/settings", { out: $("outDir").value })) }; $("outDir").value = S.opts.out; $("err").textContent = ""; loadJobs(); } catch (e) { $("err").textContent = e.message; } };
+}
+function exportOpts() {
+  const v = $("exportSel").value, path = v === "__other" ? $("exportPath").value.trim() : v;
+  return path ? { export: path, export_what: $("exportWhat").value } : {};
+}
 async function start() {
   $("err").textContent = "";
-  try { const j = await api("/api/jobs", { ...spec(), stage: $("stage").value, workers: +$("workers").value || 4 });
+  try { const j = await api("/api/jobs", { ...spec(), stage: $("stage").value, workers: +$("workers").value || 4, ...exportOpts() });
         S.job = j.id; openBatch(j.name); showJob(j); poll(); }
   catch (e) { $("err").textContent = e.message; }
 }
@@ -309,6 +347,7 @@ function showJob(j) {
   $("rcBar").style.width = (100 * j.recolour_progress / Math.max(1, p.recoloured_images)) + "%";
   $("errTxt").textContent = c.errors; const m = Math.floor(j.elapsed / 60);
   $("timeTxt").textContent = `${m} min ${j.elapsed % 60} s` + (j.running ? (j.stopping ? " · stopping…" : " · running") : " · finished") + (j.error ? " · " + j.error : "");
+  $("exportTxt").textContent = j.export || "–";
   $("start").disabled = j.running; $("stop").disabled = !j.running;
   $("log").innerHTML = j.log.map((e) => e.kind === "errors" ? `<div class="e">m${String(e.model).padStart(4, "0")}: ${esc(e.error)}</div>`
     : e.kind === "ai_done" ? `<div>m${String(e.model).padStart(4, "0")}: AI base ${esc(e.base)} ${esc(label(e.pose))}</div>`

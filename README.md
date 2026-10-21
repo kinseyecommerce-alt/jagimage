@@ -165,6 +165,12 @@ jagimage serve            # then open http://127.0.0.1:8765
 - **Colour check:** a base photo where the AI got the colours wrong is retried.
 - **Recolouring:** every top/bottom pair is recoloured to the exact hex on your computer, at no API cost. You also get a 1500×1500 marketplace JPG and a `qc.json` with the ΔE of the top and the bottom.
 
+**Save to Google Drive:**
+- Install [Google Drive for desktop](https://www.google.com/drive/download/). The Studio finds its "My Drive" folder, and you can pick it under **Save to → Also save finished photos to**. You can also choose "Another folder…" and type any path.
+- Finished photos are copied there as `<batch>/<Top>__<Bottom>/m0001_front_main.jpg`, and Drive uploads them automatically.
+- You choose the files: 1500×1500 JPG, full-size PNG, or both.
+- Base photos, masks and everything else stay in the working folder, which you can change under **Save to → Working folder**.
+
 The Run box shows the count before you start. For example, 300 models × 9 colours (matching sets) needs 600 AI images and gives 2,700 photos.
 
 **Other features:**

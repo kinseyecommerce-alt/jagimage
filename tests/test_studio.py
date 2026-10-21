@@ -78,6 +78,14 @@ def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     assert again["ai_done"] == 0 and again["ai_skipped"] == 8 and again["recolour_skipped"] == 8
 
 
+def test_finished_photos_are_copied_to_a_drive_folder(tmp_path):
+    s = studio.Spec(top_colours=["Red"], models=2)
+    drive = tmp_path / "My Drive" / "Jag Studio"
+    studio.Batch(s, out=tmp_path / "work", generate=fake_generate, export=str(drive), export_what="both").run()
+    got = sorted(p.relative_to(drive).as_posix() for p in drive.rglob("*.*"))
+    assert got == [f"{s.name}/Red__Red/m000{m}_front_main.{e}" for m in (1, 2) for e in ("jpg", "png")]
+
+
 def test_wrong_colours_from_the_ai_are_retried(tmp_path):
     s = studio.Spec(top_colours=["Navy"], bottom_colours=["Yellow"], pairing="each", models=1)
     tries = []

@@ -22,13 +22,27 @@ PAGE = Path(__file__).with_name("static") / "studio.html"
 KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
 
 
-def options() -> dict:
+def drive_folders() -> list:
+    """Google Drive for desktop folders on this computer: files saved there upload to Drive by themselves."""
+    import glob
+    import string
+
+    home = Path.home()
+    found = [Path(p) for p in glob.glob(str(home / "Library" / "CloudStorage" / "GoogleDrive-*" / "My Drive"))]
+    found += [home / "Google Drive" / "My Drive", home / "Google Drive", home / "GoogleDrive" / "My Drive"]
+    if os.name == "nt":
+        found += [Path(f"{d}:/My Drive") for d in string.ascii_uppercase[3:]]
+    return [str(p) for p in found if p.is_dir()]
+
+
+def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
         "poses": list(L.POSES), "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
+        "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
     }
 
 
@@ -41,14 +55,15 @@ def default_engine(spec: studio.Spec):
 
 
 class Job:
-    def __init__(self, spec: studio.Spec, out: str, engine, workers: int, stage: str):
+    def __init__(self, spec: studio.Spec, out: str, engine, workers: int, stage: str, export=None, export_what="jpg"):
         self.id = uuid.uuid4().hex[:8]
         self.spec, self.stage, self.plan = spec, stage, spec.plan()
         self.started, self.finished, self.error = time.time(), None, None
         self.log = deque(maxlen=200)
         self.recent = deque(maxlen=48)
         self.batch = studio.Batch(spec, out=out, generate=engine(spec) if stage != "recolor" else None,
-                                  workers=workers, on_event=self.event)
+                                  workers=workers, on_event=self.event, export=export, export_what=export_what)
+        self.export = str(self.batch.export) if self.batch.export else None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def event(self, e: dict):
@@ -71,7 +86,7 @@ class Job:
                 "counts": c, "running": self.finished is None, "stopping": self.batch.stop.is_set(),
                 "error": self.error, "elapsed": round((self.finished or time.time()) - self.started),
                 "ai_progress": c["ai_done"] + c["ai_skipped"], "recolour_progress": c["recoloured"] + c["recolour_skipped"],
-                "log": list(self.log)[:40], "recent": list(self.recent)}
+                "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export}
 
 
 class Studio:
@@ -85,13 +100,16 @@ class Studio:
         if stage not in ("all", "bases", "recolor"):
             raise ValueError("stage must be all, bases or recolor")
         workers = int(body.pop("workers", self.workers))
+        export, export_what = (body.pop("export", None) or "").strip() or None, body.pop("export_what", "jpg")
+        if export:
+            Path(export).expanduser().mkdir(parents=True, exist_ok=True)  # fail now, not after the AI calls
         spec = studio.Spec(**body)
         if stage != "recolor" and self.engine is default_engine and not os.environ.get(KEY_ENV[spec.provider]):
             raise ValueError(f"Add your {spec.provider} API key first")
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
-            job = Job(spec, self.out, self.engine, workers, stage)
+            job = Job(spec, self.out, self.engine, workers, stage, export, export_what)
             self.jobs[job.id] = job
         job.thread.start()
         return job
@@ -152,7 +170,7 @@ def make_handler(app: Studio):
                 if not parts:
                     return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
                 if parts == ["api", "options"]:
-                    return self._json(options())
+                    return self._json(options(app))
                 if parts == ["api", "jobs"]:
                     return self._json({"jobs": [j.status() for j in app.jobs.values()], "folders": app.folders()})
                 if len(parts) == 3 and parts[:2] == ["api", "jobs"]:
@@ -186,11 +204,19 @@ def make_handler(app: Studio):
             try:
                 body = self._body()
                 if parts == ["api", "plan"]:
-                    body.pop("stage", None)
-                    body.pop("workers", None)
+                    for k in ("stage", "workers", "export", "export_what"):
+                        body.pop(k, None)
                     spec = studio.Spec(**body)
                     return self._json({**spec.plan(), "bases": [studio.base_dir(b) for b in spec.bases()],
                                        "pairs": spec.pairs(), "name": spec.name})
+                if parts == ["api", "settings"]:
+                    out = (body.get("out") or "").strip()
+                    if out:
+                        if any(j.finished is None for j in app.jobs.values()):
+                            raise ValueError("Change the working folder when no batch is running")
+                        Path(out).expanduser().mkdir(parents=True, exist_ok=True)
+                        app.out = str(Path(out).expanduser())
+                    return self._json(options(app))
                 if parts == ["api", "keys"]:
                     for p, env in KEY_ENV.items():
                         if body.get(p):
@@ -205,7 +231,7 @@ def make_handler(app: Studio):
                     job.batch.stop.set()
                     return self._json(job.status())
                 return self._json({"error": "not found"}, 404)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OSError) as exc:
                 return self._json({"error": str(exc)}, 400)
 
     return Handler
