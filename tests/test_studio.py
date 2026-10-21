@@ -60,6 +60,20 @@ def test_prompt_asks_for_a_real_person_in_both_base_colours():
     assert studio.prompt(s, 12, ("dark", "light"), "front_main", "face").startswith("Use the reference image ONLY for identity")
 
 
+def test_custom_poses_and_extra_instructions():
+    s = studio.Spec(top_colours=["Red"], custom_poses={"Sitting Wave": "sitting cross-legged,   waving"},
+                    poses=["front_main", "sitting_wave"], extra="big laughing expression", models=1)
+    assert s.custom_poses == {"sitting_wave": "sitting cross-legged, waving"}
+    p = studio.prompt(s, 1, ("dark", "dark"), "sitting_wave", "front")
+    assert "sitting cross-legged, waving." in p and "Also: big laughing expression." in p
+    edited = studio.Spec(top_colours=["Red"], custom_poses={"front_main": "standing with hands on hips"})
+    assert "standing with hands on hips" in studio.prompt(edited, 1, ("dark", "dark"), "front_main", "none")
+    with pytest.raises(ValueError):
+        studio.Spec(top_colours=["Red"], poses=["front_main", "dancing"])  # not defined
+    with pytest.raises(ValueError):
+        studio.Spec(top_colours=["Red"], custom_poses={"empty": "  "})
+
+
 def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     s = studio.Spec(top_colours=["Yellow", "Navy"], bottom_colours=["Black", "Light Pink"], pairing="each", models=2)
     calls = []
@@ -137,6 +151,18 @@ def test_studio_server_runs_a_batch(tmp_path):
         res = json.loads(_get(f"{base}/api/batches/{st['name']}/results")[1])
         assert res["total"] == 6
         assert _get(f"{base}/thumbs/{st['name']}/{res['rows'][0]['png']}")[0] == 200
+        pose = {**body, "custom_poses": {"wave": "waving at the camera"}, "poses": ["front_main", "wave"]}
+        code, pr = _post(base + "/api/prompt", {**pose, "preview_pose": "wave", "preview_model": 9})
+        assert code == 200 and "waving at the camera" in pr["prompt"] and pr["model"] == 9 and pr["reference_images"]
+        code, pv = _post(base + "/api/preview", {**pose, "preview_pose": "wave", "preview_model": 9})
+        assert code == 200
+        for _ in range(100):
+            pv = json.loads(_get(f"{base}/api/preview/{pv['id']}")[1])
+            if pv["done"]:
+                break
+            time.sleep(0.1)
+        assert pv["counts"]["ai_done"] == 2 and pv["result"].endswith("wave.png") and not pv["error"]
+        assert _get(f"{base}/thumbs/_previews/{pv['result']}")[0] == 200
         z = zipfile.ZipFile(io.BytesIO(_get(f"{base}/api/batches/{st['name']}/zip?what=jpg")[1]))
         assert len(z.namelist()) == 6 and all(n.endswith(".jpg") for n in z.namelist())
         with pytest.raises(urllib.error.HTTPError):

@@ -69,6 +69,9 @@ class Spec:
     models: int = 1
     first_model: int = 1     # numbering, so a batch can be extended (301-600) later
     poses: List[str] = field(default_factory=lambda: ["front_main"])
+    # Your own poses (name -> description), or new wording for a library pose such as front_main.
+    custom_poses: Dict[str, str] = field(default_factory=dict)
+    extra: str = ""          # extra instructions added to every photo's prompt
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -90,7 +93,14 @@ class Spec:
             raise ValueError("pairing must be match or each")
         if self.pairing == "each" and not self.bottom_colours and self.bottom not in FIXED_BOTTOMS:
             raise ValueError("pick at least one bottom colour, or pair the bottom with the top colour")
-        bad = [p for p in self.poses if p not in L.POSES]
+        self.custom_poses = {slug(k).lower(): " ".join(str(v).split()) for k, v in (self.custom_poses or {}).items()}
+        empty = [k for k, v in self.custom_poses.items() if not k or not v]
+        if empty:
+            raise ValueError("each custom pose needs a name and a description")
+        self.extra = " ".join(str(self.extra or "").split())
+        if len(self.extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
+            raise ValueError("keep pose descriptions and extra instructions under 1000 characters")
+        bad = [p for p in self.poses if p not in self.pose_texts()]
         if bad or "front_main" not in self.poses:
             raise ValueError("poses must include front_main and come from: " + ", ".join(L.POSES))
         if not 1 <= int(self.models) <= 5000:
@@ -101,6 +111,9 @@ class Spec:
             self.canvas = tuple(int(v) for v in self.canvas)
         if not self.name:
             self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}")
+
+    def pose_texts(self) -> Dict[str, str]:
+        return {**L.POSES, **self.custom_poses}
 
     # ---- what the batch makes
     def pairs(self) -> List[Tuple[str, Optional[str]]]:
@@ -160,11 +173,13 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     colours = f"top {tname} ({thex})" + (f", bottom {bcol[0]} ({bcol[1]})" if bcol else "")
     rules = L.RULES.replace("Exact garment colour {COLOUR} ({HEX}),", f"Exact garment colours: {colours}, each")
     text = (f"{lines[reference]}Real photograph of a real, living human model (not a mannequin, dummy, doll or 3D figure): "
-            f"{faces.describe(spec.category, model_no)}, {L.POSES[pose]}. "
+            f"{faces.describe(spec.category, model_no)}, {spec.pose_texts()[pose]}. "
             f"Wearing {top_text}, fabric: {L.FABRIC_TEXT[spec.fabric][L.FABRIC_KIND[spec.top]]}; "
             f"with {bottom_text}" + (f", fabric: {L.FABRIC_TEXT[spec.fabric]['bottom']}" if bcol else "") +
             f"; and {shoes}. The top and the bottom are two clearly different colours, exactly as stated. "
             f"{L.BACKGROUNDS.get(pose, L.GREY)} {rules}")
+    if spec.extra:
+        text += f" Also: {spec.extra.rstrip('.')}."
     if kids:
         text += L.KIDS_RULE
     product = "Trackpants" if spec.bottom == "Trackpants" else spec.top

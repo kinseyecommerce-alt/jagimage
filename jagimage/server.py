@@ -39,7 +39,7 @@ def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
-        "poses": list(L.POSES), "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
+        "poses": list(L.POSES), "pose_texts": L.POSES, "providers": {p: bool(os.environ.get(env)) for p, env in KEY_ENV.items()},
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
@@ -89,10 +89,49 @@ class Job:
                 "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export}
 
 
+class Preview:
+    """One test model in one pose (plus its front, which the pose is made from), in the first
+    colour pair: 1-2 AI images, so a new pose or prompt can be checked before a whole batch."""
+
+    def __init__(self, spec: studio.Spec, pose: str, model_no: int, out: str, engine):
+        import shutil
+
+        self.id = uuid.uuid4().hex[:8]
+        top, bottom = spec.pairs()[0]
+        body = {**asdict(spec), "models": 1, "first_model": model_no, "top_colours": [top],
+                "bottom_colours": [bottom] if bottom and spec.pairing == "each" else [],
+                "poses": ["front_main"] + ([pose] if pose != "front_main" else []), "name": "preview"}
+        self.spec = studio.Spec(**body)
+        self.pose, self.error, self.done = pose, None, False
+        root = Path(out) / "_previews"
+        shutil.rmtree(root / "preview", ignore_errors=True)  # always a fresh shoot with the current prompt
+        self.batch = studio.Batch(self.spec, out=str(root), generate=engine(self.spec), workers=1, retries=2,
+                                  on_event=lambda e: e["kind"] == "errors" and setattr(self, "error", e["error"]))
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        try:
+            self.batch.run()
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+        self.done = True
+
+    def status(self) -> dict:
+        m = self.spec.first_model
+        base = self.spec.bases()[0]
+        top, bottom = self.spec.pairs()[0]
+        rel = lambda p: str(p.relative_to(self.batch.root.parent)) if p.exists() else None
+        return {"id": self.id, "done": self.done, "error": self.error, "pose": self.pose, "model": m,
+                "top": top, "bottom": bottom, "counts": self.batch.counts,
+                "base": rel(self.batch.base_path(m, base, self.pose)),
+                "result": rel(self.batch.out_path(m, top, bottom, self.pose))}
+
+
 class Studio:
     def __init__(self, out="output/studio", engine=default_engine, workers=4):
         self.out, self.engine, self.workers = out, engine, workers
         self.jobs = {}
+        self.previews = {}
         self.lock = threading.Lock()
 
     def start(self, body: dict) -> Job:
@@ -176,6 +215,9 @@ def make_handler(app: Studio):
                 if len(parts) == 3 and parts[:2] == ["api", "jobs"]:
                     job = app.jobs.get(parts[2])
                     return self._json(job.status()) if job else self._json({"error": "no such job"}, 404)
+                if len(parts) == 3 and parts[:2] == ["api", "preview"]:
+                    pv = app.previews.get(parts[2])
+                    return self._json(pv.status()) if pv else self._json({"error": "no such preview"}, 404)
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "results":
                     rows = app.batch_for(parts[2]).results()
                     off, lim = int(q.get("offset", ["0"])[0]), int(q.get("limit", ["60"])[0])
@@ -203,6 +245,34 @@ def make_handler(app: Studio):
             parts = [p for p in urlparse(self.path).path.strip("/").split("/") if p]
             try:
                 body = self._body()
+                if parts == ["api", "preview"]:
+                    pose, model_no = body.pop("preview_pose", "front_main"), int(body.pop("preview_model", 0) or 0)
+                    for k in ("stage", "workers", "export", "export_what"):
+                        body.pop(k, None)
+                    spec = studio.Spec(**body)
+                    if pose not in spec.pose_texts():
+                        raise ValueError(f"unknown pose {pose}")
+                    if app.engine is default_engine and not os.environ.get(KEY_ENV[spec.provider]):
+                        raise ValueError(f"Add your {spec.provider} API key first")
+                    if any(not p.done for p in app.previews.values()):
+                        raise ValueError("A test photo is already being made")
+                    pv = Preview(spec, pose, model_no or spec.first_model, app.out, app.engine)
+                    app.previews = {pv.id: pv}
+                    return self._json(pv.status())
+                if parts == ["api", "prompt"]:
+                    # the exact prompt a base photo gets, before any money is spent
+                    pose, model_no = body.pop("preview_pose", "front_main"), body.pop("preview_model", None)
+                    for k in ("stage", "workers", "export", "export_what"):
+                        body.pop(k, None)
+                    spec = studio.Spec(**body)
+                    if pose not in spec.pose_texts():
+                        raise ValueError(f"unknown pose {pose}")
+                    base = spec.bases()[0]
+                    m = int(model_no or spec.first_model)
+                    ref = "none" if pose == "front_main" else "front"
+                    refs = [] if pose == "front_main" else ["this model's approved front_main photo"]
+                    return self._json({"prompt": studio.prompt(spec, m, base, pose, ref), "model": m,
+                                       "base": studio.base_dir(base), "reference_images": refs})
                 if parts == ["api", "plan"]:
                     for k in ("stage", "workers", "export", "export_what"):
                         body.pop(k, None)

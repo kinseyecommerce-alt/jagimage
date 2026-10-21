@@ -76,6 +76,11 @@ a.btn { text-decoration: none; display: inline-block; }
 .batch .nm { font-weight: 600; font-size: 13px; word-break: break-all; }
 .batch .meta { font-size: 12px; color: var(--muted); }
 .hide { display: none !important; }
+textarea { font: inherit; color: var(--ink); background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; resize: vertical; min-height: 64px; }
+.chip.custom { border-style: dashed; }
+.chip.edited::after { content: "edited"; font-size: 10px; color: var(--muted); margin-left: 2px; }
+pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; max-height: 320px; overflow: auto; margin: 8px 0 0; }
+.sub2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 6px; }
 .hint { font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -132,7 +137,40 @@ a.btn { text-decoration: none; display: inline-block; }
         <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" value="1"></label>
       </div>
       <p class="hint">Every model is a different person (face, skin tone, hair, eyes). Start at 301 to add 300 more to an earlier batch.</p>
+      <div class="sub2">Poses (tap to include)</div>
       <div class="chips" id="poses"></div>
+
+      <div class="sub2">Write a pose</div>
+      <div class="row">
+        <label class="field"><span>Pose</span><select id="poseEdit"></select></label>
+        <label class="field" id="poseNameField"><span>New pose name</span><input type="text" id="poseName" placeholder="e.g. sitting_wave"></label>
+      </div>
+      <label class="field" style="margin-top:8px"><span>Pose description (what the model does)</span>
+        <textarea id="poseText" placeholder="e.g. sitting cross-legged on the studio floor, one hand waving at the camera, big happy smile, full body in frame"></textarea></label>
+      <div class="row">
+        <button class="btn" id="poseSave">Save pose</button>
+        <button class="btn" id="poseReset">Reset to library wording</button>
+        <button class="btn" id="poseDelete">Delete pose</button>
+      </div>
+
+      <div class="sub2">Extra instructions for every photo</div>
+      <textarea id="extra" placeholder="e.g. big laughing expression, hair slightly messy (keep it about the model, not the clothes)"></textarea>
+
+      <div class="sub2">Prompt preview</div>
+      <div class="row">
+        <label class="field"><span>Pose</span><select id="previewPose"></select></label>
+        <label class="field"><span>Model no.</span><input type="number" id="previewModel" min="1" value="1"></label>
+      </div>
+      <div class="row">
+        <button class="btn" id="previewBtn">Preview prompt</button>
+        <button class="btn primary" id="testBtn">Generate test photo</button>
+      </div>
+      <p class="hint">A test photo is one model in this pose and your first colour pair: 1 AI image for front main, 2 for other poses (the front is made first).</p>
+      <pre class="prompt hide" id="previewOut"></pre>
+      <div id="testOut" class="hide" style="margin-top:10px">
+        <div class="hint" id="testStatus"></div>
+        <div class="gallery" id="testImgs" style="margin-top:8px"></div>
+      </div>
     </section>
 
     <section class="panel">
@@ -229,7 +267,7 @@ a.btn { text-decoration: none; display: inline-block; }
 const $ = (id) => document.getElementById(id);
 const S = { opts: null, category: "Kids_Boys", provider: "gemini", pairing: "match", top: new Set(["Navy"]), bottom: new Set(),
             topPal: "PureCotton", bottomPal: "PureCotton", custom: { top: [], bottom: [] }, poses: new Set(["front_main"]),
-            job: null, batch: null, shown: 0, poll: null };
+            job: null, batch: null, shown: 0, poll: null, customPoses: {} };
 const api = async (path, body) => {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
@@ -272,6 +310,7 @@ function spec() {
   return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 1, poses: [...S.poses],
+    custom_poses: S.customPoses, extra: $("extra").value,
     provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
 }
 let planTimer = null;
@@ -286,6 +325,49 @@ function refreshPlan() {
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
     } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
   }, 150);
+}
+const allPoses = () => [...S.opts.poses, ...Object.keys(S.customPoses).filter((p) => !S.opts.poses.includes(p))];
+const poseText = (p) => S.customPoses[p] ?? S.opts.pose_texts[p] ?? "";
+function renderPoses(select) {
+  $("poses").innerHTML = allPoses().map((p) => { const custom = !S.opts.poses.includes(p), edited = !custom && S.customPoses[p];
+    return `<button class="chip ${S.poses.has(p) ? "on" : ""} ${custom ? "custom" : ""} ${edited ? "edited" : ""}" data-p="${esc(p)}" title="${esc(p === "front_main" ? "Always made: the other poses are made from it. " : "")}${esc(poseText(p))}"><i style="background:var(--soft)"></i>${esc(label(p))}</button>`; }).join("");
+  const cur = select || $("poseEdit").value || "front_main";
+  $("poseEdit").innerHTML = allPoses().map((p) => `<option value="${esc(p)}">${esc(label(p))}</option>`).join("") + `<option value="__new">+ New pose…</option>`;
+  $("poseEdit").value = allPoses().includes(cur) || cur === "__new" ? cur : "front_main";
+  const pv = $("previewPose").value;
+  $("previewPose").innerHTML = [...S.poses].map((p) => `<option value="${esc(p)}">${esc(label(p))}</option>`).join("");
+  if (S.poses.has(pv)) $("previewPose").value = pv;
+  showPoseText();
+}
+function showPoseText() {
+  const p = $("poseEdit").value, isNew = p === "__new", custom = !isNew && !S.opts.poses.includes(p);
+  $("poseNameField").classList.toggle("hide", !isNew);
+  $("poseText").value = isNew ? "" : poseText(p);
+  $("poseReset").classList.toggle("hide", isNew || custom || !S.customPoses[p]);
+  $("poseDelete").classList.toggle("hide", !custom);
+}
+async function preview() {
+  try { const r = await api("/api/prompt", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 1 });
+    $("previewOut").textContent = `Model ${r.model} · base ${r.base.replace("-", " top / ")}${r.base.includes("-") ? " bottom" : " top"}`
+      + (r.reference_images.length ? ` · reference: ${r.reference_images.join(", ")}` : " · no reference image (new face from the text)") + "\n\n" + r.prompt;
+    $("previewOut").classList.remove("hide"); $("err").textContent = ""; }
+  catch (e) { $("err").textContent = e.message; }
+}
+async function testPhoto() {
+  $("err").textContent = "";
+  try {
+    let st = await api("/api/preview", { ...spec(), preview_pose: $("previewPose").value, preview_model: +$("previewModel").value || 1 });
+    $("testBtn").disabled = true; $("testOut").classList.remove("hide"); $("testImgs").innerHTML = "";
+    const t0 = Date.now();
+    while (!st.done) {
+      $("testStatus").textContent = `Making a test photo of model ${st.model} in "${label(st.pose)}" with ${S.provider === "gemini" ? "Gemini" : "OpenAI"}… ${Math.round((Date.now() - t0) / 1000)} s`;
+      await new Promise((r) => setTimeout(r, 1500)); st = await api(`/api/preview/${st.id}`);
+    }
+    const v = `?v=${Date.now()}`, img = (path, cap) => path ? `<a class="card" href="/files/_previews/${path.split("/").map(encodeURIComponent).join("/")}" target="_blank" rel="noopener"><img src="/thumbs/_previews/${path.split("/").map(encodeURIComponent).join("/")}${v}" alt=""><span class="cap"><b>${esc(cap)}</b></span></a>` : "";
+    $("testImgs").innerHTML = img(st.base, "AI base photo") + img(st.result, `${label(st.top)}${st.bottom ? " / " + label(st.bottom) : ""}`);
+    $("testStatus").textContent = st.error ? `Couldn't finish: ${st.error}` : `Model ${st.model}, ${label(st.pose)}: ${st.counts.ai_done} AI image(s) made in ${Math.round((Date.now() - t0) / 1000)} s. Happy with it? Start the batch.`;
+  } catch (e) { $("err").textContent = e.message; }
+  $("testBtn").disabled = false;
 }
 function syncBottom() {
   const fixed = S.opts.fixed_bottoms.includes($("bottom").value);
@@ -303,9 +385,19 @@ async function init() {
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
   $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");
   $("quality").innerHTML = S.opts.openai_qualities.map((s) => `<option ${s === "high" ? "selected" : ""}>${s}</option>`).join("");
-  $("poses").innerHTML = S.opts.poses.map((p) => `<button class="chip ${S.poses.has(p) ? "on" : ""}" data-p="${p}" ${p === "front_main" ? 'title="Always made: other poses are made from it"' : ""}><i style="background:var(--soft)"></i>${label(p)}</button>`).join("");
+  renderPoses();
   $("poses").onclick = (e) => { const c = e.target.closest(".chip"); if (!c || c.dataset.p === "front_main") return;
-    S.poses.has(c.dataset.p) ? S.poses.delete(c.dataset.p) : S.poses.add(c.dataset.p); c.classList.toggle("on"); refreshPlan(); };
+    S.poses.has(c.dataset.p) ? S.poses.delete(c.dataset.p) : S.poses.add(c.dataset.p); renderPoses(); refreshPlan(); };
+  $("poseEdit").onchange = showPoseText;
+  $("poseSave").onclick = () => { const sel = $("poseEdit").value, text = $("poseText").value.trim();
+    const name = sel === "__new" ? $("poseName").value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") : sel;
+    if (!name || !text) { $("err").textContent = "Give the pose a name and a description"; return; }
+    S.customPoses[name] = text; S.poses.add(name); $("err").textContent = ""; renderPoses(name); refreshPlan(); };
+  $("poseReset").onclick = () => { delete S.customPoses[$("poseEdit").value]; renderPoses($("poseEdit").value); refreshPlan(); };
+  $("poseDelete").onclick = () => { const p = $("poseEdit").value; delete S.customPoses[p]; S.poses.delete(p); renderPoses(); refreshPlan(); };
+  $("extra").addEventListener("input", refreshPlan);
+  $("previewBtn").onclick = preview;
+  $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
   seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
@@ -383,7 +475,7 @@ function loadSettings(s) {
   for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
-  [...$("poses").children].forEach((c) => c.classList.toggle("on", S.poses.has(c.dataset.p)));
+  S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
   $("imageSize").value = s.image_size; $("quality").value = s.quality;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();

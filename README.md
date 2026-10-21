@@ -165,6 +165,12 @@ jagimage serve            # then open http://127.0.0.1:8765
 - **Colour check:** a base photo where the AI got the colours wrong is retried.
 - **Recolouring:** every top/bottom pair is recoloured to the exact hex on your computer, at no API cost. You also get a 1500×1500 marketplace JPG and a `qc.json` with the ΔE of the top and the bottom.
 
+**Your own poses and a test photo first:**
+- Under **Write a pose**, pick "+ New pose…". Give it a name and describe what the model does, e.g. "sitting cross-legged on the studio floor, one hand waving at the camera". You can also change the wording of any built-in pose, and reset it later.
+- **Extra instructions for every photo** adds a line to every prompt, e.g. "big laughing expression".
+- **Preview prompt** shows the exact text sent to Gemini or OpenAI.
+- **Generate test photo** makes one model in that pose and your first colour pair, then recolours it. That's 1 AI image for front main, or 2 for any other pose, so you can check a pose before running the batch.
+
 **Save to Google Drive:**
 - Install [Google Drive for desktop](https://www.google.com/drive/download/). The Studio finds its "My Drive" folder, and you can pick it under **Save to → Also save finished photos to**. You can also choose "Another folder…" and type any path.
 - Finished photos are copied there as `<batch>/<Top>__<Bottom>/m0001_front_main.jpg`, and Drive uploads them automatically.
