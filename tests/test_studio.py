@@ -395,7 +395,7 @@ def test_same_models_in_another_style_keep_their_face(tmp_path):
     counts = studio.Batch(hoodie, out=tmp_path, generate=gen).run()
     assert counts["ai_done"] == 2 and counts["recoloured"] == 2
     fronts = [(p, r) for p, r in calls]
-    assert [r for _, r in fronts] == [[str(face)], [str(tmp_path / "_faces" / "Men" / "m0002.png")]]
+    assert sorted(r for _, r in fronts) == [[str(face)], [str(tmp_path / "_faces" / "Men" / "m0002.png")]]  # models run in parallel
     assert all(p.startswith("Use the reference image ONLY for identity") and "pullover hoodie" in p for p, _ in fronts)
 
 
