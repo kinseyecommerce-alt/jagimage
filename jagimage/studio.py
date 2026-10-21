@@ -212,6 +212,26 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     return text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + (", top and bottom in the same colour." if bcol else ".")
 
 
+def account_problem(exc: Exception) -> Optional[str]:
+    """A plain explanation when an AI error means the account can't make images at all, so the
+    batch stops at once instead of failing every model. None for errors worth retrying."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if "credits are depleted" in text or "insufficient_quota" in text or "billing" in text and "402" in text or code == 402:
+        return ("The AI account is out of credits or billing isn't set up. Add credits (Gemini: AI Studio > "
+                "Billing; OpenAI: platform.openai.com > Billing), then start the batch again: finished photos are kept.")
+    if code in (401, 403) or "api key not valid" in text or "invalid_api_key" in text or "incorrect api key" in text \
+            or "permission_denied" in text:
+        return "The API key was refused (wrong, expired or without access to this model). Save a working key and start again."
+    return None
+
+
+def is_rate_limit(exc: Exception) -> bool:
+    text = f"{exc}".lower()
+    return getattr(exc, "status_code", None) == 429 or getattr(exc, "code", None) == 429 or "rate limit" in text \
+        or ("resource_exhausted" in text and "credits" not in text)
+
+
 _LEDGER_LOCK = threading.Lock()
 
 
@@ -282,6 +302,7 @@ class Batch:
         self.on_event = on_event or (lambda e: None)
         self.stop = threading.Event()
         self.lock = threading.Lock()
+        self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
         self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0}
 
     # ---- paths
@@ -318,7 +339,7 @@ class Batch:
         (md / "model.json").write_text(json.dumps({"model": m, "look": faces.look(spec.category, m),
                                                     "description": faces.describe(spec.category, m)}, indent=2))
         bases = spec.bases()
-        first_front = self.base_path(m, bases[0], "front_main")
+        first_front = self.identity_front(m, bases)
         poses = ["front_main"] + [p for p in spec.poses if p != "front_main"]
         for base in bases:
             for pose in poses:
@@ -329,6 +350,15 @@ class Batch:
                     continue
                 if stage != "bases" and path.exists():
                     self._recolour_base(m, base, pose)
+
+    def identity_front(self, m: int, bases) -> Path:
+        """The photo that defines model m's face: the first base front ever made for this model (so
+        adding colours later, which may need a new base, keeps the same person), else the front of
+        the base this run makes first."""
+        made = [p for p in (self.model_dir(m) / "_base").glob("*/front_main.png")]
+        if made:
+            return min(made, key=lambda p: p.stat().st_mtime)
+        return self.base_path(m, bases[0], "front_main")
 
     def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:
         """Make one base photo if missing. False if it couldn't be made."""
@@ -360,7 +390,14 @@ class Batch:
                 return True
             except Exception as exc:  # API errors, rate limits, wrong colours: retry with backoff
                 last = exc
-                time.sleep(min(30, 2 ** attempt) if attempt + 1 < self.retries else 0)
+                fatal = account_problem(exc)
+                if fatal:  # no credits / bad key: every other request would fail the same way
+                    self.fatal = fatal
+                    self.stop.set()
+                    self._event("errors", model=m, path=str(path), error=fatal)
+                    return False
+                wait = 20 * (attempt + 1) if is_rate_limit(exc) else 2 ** attempt
+                time.sleep(min(60, wait) if attempt + 1 < self.retries else 0)
         self._event("errors", model=m, path=str(path), error=f"{type(last).__name__}: {last}")
         return False
 

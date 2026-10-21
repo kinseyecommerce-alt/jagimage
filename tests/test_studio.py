@@ -143,6 +143,33 @@ def test_finished_photos_are_copied_to_a_drive_folder(tmp_path):
     assert got == [f"{s.name}/Red__Red/m000{m}_front_main.{e}" for m in (1, 2) for e in ("jpg", "png")]
 
 
+def test_adding_colours_later_keeps_the_same_face(tmp_path):
+    first = studio.Spec(top_colours=["Navy"], bottom_colours=["Black"], pairing="each", models=1)
+    studio.Batch(first, out=tmp_path, generate=fake_generate).run()
+    calls = []
+    gen = lambda p, refs: (calls.append((p, refs)), fake_generate(p, refs))[1]
+    more = studio.Spec(top_colours=["Navy"], bottom_colours=["Yellow"], pairing="each", models=1)  # needs a new base
+    assert more.bases() == [("dark", "light")]
+    studio.Batch(more, out=tmp_path, generate=gen).run()
+    (prompt, refs), = calls
+    assert refs == [str(tmp_path / first.name / "m0001" / "_base" / "dark-dark" / "front_main.png")]
+    assert prompt.startswith("Use the reference image ONLY for identity")
+
+
+def test_out_of_credits_stops_the_whole_batch(tmp_path):
+    calls = []
+
+    def broke(p, refs):
+        calls.append(1)
+        raise RuntimeError("402 RESOURCE_EXHAUSTED. Your prepayment credits are depleted.")
+
+    b = studio.Batch(studio.Spec(top_colours=["Navy"], models=20), out=tmp_path, generate=broke, workers=2)
+    b.run()
+    assert "out of credits" in b.fatal and len(calls) <= 2 and b.counts["errors"] <= 2
+    assert studio.account_problem(RuntimeError("429 RESOURCE_EXHAUSTED rate limit")) is None
+    assert studio.is_rate_limit(RuntimeError("429 RESOURCE_EXHAUSTED rate limit"))
+
+
 def test_wrong_colours_from_the_ai_are_retried(tmp_path):
     s = studio.Spec(top_colours=["Navy"], bottom_colours=["Yellow"], pairing="each", models=1)
     tries = []

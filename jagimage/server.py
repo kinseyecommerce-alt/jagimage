@@ -85,7 +85,7 @@ class Job:
         c = self.batch.counts
         return {"id": self.id, "name": self.spec.name, "spec": asdict(self.spec), "stage": self.stage, "plan": self.plan,
                 "counts": c, "running": self.finished is None, "stopping": self.batch.stop.is_set(),
-                "error": self.error, "elapsed": round((self.finished or time.time()) - self.started),
+                "error": self.error or self.batch.fatal, "elapsed": round((self.finished or time.time()) - self.started),
                 "ai_progress": c["ai_done"] + c["ai_skipped"], "recolour_progress": c["recoloured"] + c["recolour_skipped"],
                 "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export}
 
@@ -115,6 +115,7 @@ class Preview:
             self.batch.run()
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
+        self.error = self.batch.fatal or self.error
         self.done = True
 
     def status(self) -> dict:
