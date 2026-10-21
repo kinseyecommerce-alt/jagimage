@@ -17,6 +17,7 @@ OUTPUT = {
 # Estimated input per image: the ~900-token prompt plus 0-2 reference photos (identity / approved front).
 INPUT = {"gemini-3-pro-image": 0.003, "gemini-3.1-flash-image": 0.001, "openai": 0.02}
 RETRY_ALLOWANCE = 0.10  # images the app re-asks for when the AI gets the base colours wrong, network errors
+BATCH_DISCOUNT = 0.5    # batch mode: half the standard price (Google and OpenAI list it this way)
 USD_INR = float(os.environ.get("JAGIMAGE_USD_INR", "96.5"))
 
 
@@ -42,6 +43,8 @@ def estimate(spec) -> dict:
     plan = spec.plan()
     setting = spec.image_size if spec.provider == "gemini" else spec.quality
     each = per_image(spec.provider, setting)
+    if each is not None and getattr(spec, "batch", False):
+        each *= BATCH_DISCOUNT  # Gemini batch mode: output and input both half price
     if each is None:
         return {"per_image_usd": None, "note": f"No list price for {spec.provider} {setting}; pick another setting to estimate."}
     base = plan["ai_images"] * each
@@ -50,4 +53,4 @@ def estimate(spec) -> dict:
     return {"per_image_usd": round(each, 4), "ai_cost_usd": round(base, 2), "with_retries_usd": round(total, 2),
             "per_photo_usd": round(total / photos, 4), "usd_inr": USD_INR, "with_retries_inr": round(total * USD_INR),
             "per_photo_inr": round(total / photos * USD_INR, 2), "retry_allowance": RETRY_ALLOWANCE,
-            "prices_checked": PRICES_CHECKED, "model": gemini_model() if spec.provider == "gemini" else "openai"}
+            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": gemini_model() if spec.provider == "gemini" else "openai"}

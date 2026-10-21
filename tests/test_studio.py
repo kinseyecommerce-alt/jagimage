@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -263,3 +264,97 @@ def test_studio_server_runs_a_batch(tmp_path):
             _get(f"{base}/files/{st['name']}/..%2F..%2Fetc%2Fpasswd")
     finally:
         httpd.shutdown()
+
+
+class FakeGenai:
+    """Stands in for google-genai's client: Files API and Batch API, run on fake_generate."""
+
+    def __init__(self, polls_before_done=1):
+        self.store, self.jobs, self.created, self.polls = {}, {}, 0, polls_before_done
+        outer = self
+
+        class Files:
+            def upload(self, file, config=None):
+                name = f"files/{len(outer.store)}"
+                outer.store[name] = open(file, "rb").read()
+                return SimpleNamespace(name=name, uri=f"https://fake/{name}", mime_type="image/png")
+
+            def download(self, file):
+                return outer.store[file]
+
+        class Batches:
+            def create(self, model, src, config=None):
+                import base64
+                outer.created += 1
+                lines = []
+                for line in outer.store[src].decode().splitlines():
+                    row = json.loads(line)
+                    parts = row["request"]["contents"][0]["parts"]
+                    text = parts[-1]["text"]
+                    refs = [p["fileData"]["fileUri"] for p in parts[:-1]]
+                    png = base64.b64encode(fake_generate(text, refs)).decode()
+                    lines.append(json.dumps({"key": row["key"], "response": {"candidates": [
+                        {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": png}}]}}]}}))
+                out = f"files/out{outer.created}"
+                outer.store[out] = "\n".join(lines).encode()
+                name = f"batches/{outer.created}"
+                outer.jobs[name] = {"left": outer.polls, "out": out, "n": len(lines)}
+                return SimpleNamespace(name=name)
+
+            def get(self, name):
+                j = outer.jobs[name]
+                done = j["left"] <= 0
+                j["left"] -= 1
+                return SimpleNamespace(name=name, state=SimpleNamespace(name="JOB_STATE_SUCCEEDED" if done else "JOB_STATE_RUNNING"),
+                                       dest=SimpleNamespace(file_name=j["out"]), error=None)
+
+        self.files, self.batches = Files(), Batches()
+
+
+def batch_engine(client):
+    from jagimage.providers import GeminiProvider
+    provider = GeminiProvider(client=client, model="gemini-3-pro-image")
+
+    def generate(p, refs):
+        raise AssertionError("batch mode must not make single calls")
+
+    generate.run_batch = lambda jobs, **kw: provider.run_batch(jobs, poll=0, **kw)
+    return generate
+
+
+def test_batch_mode_makes_everything_in_rounds(tmp_path):
+    client = FakeGenai()
+    s = studio.Spec(top_colours=["Navy", "Yellow"], models=3, poses=["front_main", "back"], batch=True)
+    assert s.bases() and len(s.bases()) == 2
+    counts = studio.Batch(s, out=tmp_path, generate=batch_engine(client)).run()
+    # round 1: 3 first fronts; round 2: 3 other fronts + 3 first-base backs; round 3: 3 other backs
+    assert client.created == 3 and [j["n"] for j in client.jobs.values()] == [3, 6, 3]
+    assert counts["ai_done"] == 12 and counts["recoloured"] == 12 and counts["errors"] == 0
+    assert not json.loads((tmp_path / s.name / "_batch_jobs.json").read_text())  # all collected
+    again = studio.Batch(s, out=tmp_path, generate=batch_engine(client)).run()
+    assert client.created == 3 and again["ai_skipped"] == 12  # nothing re-sent
+
+
+def test_batch_job_is_collected_after_a_restart(tmp_path):
+    import threading as th
+    from jagimage.providers import GeminiProvider
+    client = FakeGenai(polls_before_done=5)
+    provider = GeminiProvider(client=client, model="gemini-3-pro-image")
+    state = tmp_path / "_batch_jobs.json"
+    stop = th.Event()
+    stop.set()  # the app stops while Google is still working on the job
+    jobs = [("m0001|dark-dark|front_main", studio.prompt(studio.Spec(top_colours=["Navy"]), 1, ("dark", "dark"), "front_main", "none"), [])]
+    assert provider.run_batch(jobs, stop=stop, state_file=state, poll=0) == {}
+    assert list(json.loads(state.read_text())) == ["batches/1"]
+    got = provider.run_batch(jobs, state_file=state, poll=0)  # next start: same job, not a new one
+    assert client.created == 1 and got["m0001|dark-dark|front_main"][:8] == b"\x89PNG\r\n\x1a\n"
+    assert json.loads(state.read_text()) == {}
+
+
+def test_batch_mode_is_half_price_and_gemini_only():
+    from jagimage import pricing
+    full = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100))
+    half = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100, batch=True))
+    assert half["per_image_usd"] == round(full["per_image_usd"] / 2, 4) and half["batch"]
+    with pytest.raises(ValueError):
+        studio.Spec(top_colours=["Navy"], provider="openai", batch=True)

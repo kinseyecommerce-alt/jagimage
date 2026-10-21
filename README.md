@@ -187,6 +187,8 @@ jagimage serve            # then open http://127.0.0.1:8765
 
 The Run box shows the count and the **estimated AI cost** before you start, in $ and ₹: AI images × list price (Gemini 3 Pro 2K about $0.137 each including the prompt and reference photos), plus 10% for retries, and the cost per finished photo. Prices live in `jagimage/pricing.py` (checked 2026-10-21); set `JAGIMAGE_USD_INR` to change the rupee rate.
 
+**Batch mode** (Gemini, Engine section): half price. The app sends the base photos as Google batch jobs in up to 3 rounds (each model's first front; then the other fronts and the first base's poses; then the remaining poses, because each round uses photos from the one before as references). Google promises each job within 24 hours and is usually much faster. The job IDs are saved in the batch folder (`_batch_jobs.json`), so if the app is closed while Google is working, the next start collects that job instead of paying for it again. Photos the AI gets wrong are sent again in the next round.
+
 The Run box shows the count before you start. For example, 300 models × 9 colours (matching sets) needs 600 AI images and gives 2,700 photos.
 
 **Other features:**

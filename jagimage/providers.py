@@ -99,6 +99,88 @@ class GeminiProvider:
         raise RuntimeError(f"Gemini returned no image{reason}. Try again or adjust the prompt.")
 
 
+    # ---- Batch mode: half price, results within 24 hours (usually much sooner)
+    TERMINAL = {"JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED", "JOB_STATE_FAILED",
+                "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
+
+    def run_batch(self, jobs, on_status=None, stop=None, state_file=None, poll=30):
+        """jobs: [(key, prompt, reference paths)]. Sends them as one Gemini batch job and returns
+        {key: PNG bytes or Exception}. The job's name is kept in state_file until its results are
+        read, so if the app stops, the next start collects that job instead of paying for it twice.
+        Returns {} if stopped while waiting (the job keeps running at Google)."""
+        import json
+        import tempfile
+        import time
+        from pathlib import Path
+
+        from google.genai import types
+
+        say = on_status or (lambda s: None)
+        state = json.loads(Path(state_file).read_text()) if state_file and Path(state_file).exists() else {}
+        wanted = {k for k, _, _ in jobs}
+        pending = [name for name, keys in state.items() if set(keys) & wanted]
+        if pending:  # an earlier job (app stopped while waiting) covers some of these: collect it first
+            name = pending[0]
+        else:
+            uris = {}
+
+            def file_part(path):
+                if path not in uris:
+                    f = self.client.files.upload(file=path, config=types.UploadFileConfig(mime_type="image/png"))
+                    uris[path] = {"fileUri": f.uri, "mimeType": f.mime_type or "image/png"}
+                return {"fileData": uris[path]}
+
+            lines = []
+            for key, text, refs in jobs:
+                lines.append(json.dumps({"key": key, "request": {
+                    "contents": [{"role": "user", "parts": [file_part(r) for r in refs] + [{"text": text}]}],
+                    "generationConfig": {"responseModalities": ["IMAGE"],
+                                         "imageConfig": {"aspectRatio": self.aspect_ratio, "imageSize": self.image_size}}}}))
+            with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as tmp:
+                tmp.write("\n".join(lines))
+            src = self.client.files.upload(file=tmp.name, config=types.UploadFileConfig(display_name="jag-studio-batch", mime_type="jsonl"))
+            Path(tmp.name).unlink(missing_ok=True)
+            job = self.client.batches.create(model=self.model, src=src.name, config={"display_name": f"jag-studio {len(jobs)} images"})
+            name = job.name
+            if state_file:
+                state[name] = sorted(wanted)
+                Path(state_file).write_text(json.dumps(state, indent=1))
+        while True:
+            job = self.client.batches.get(name=name)
+            st = getattr(job.state, "name", str(job.state))
+            say(st.replace("JOB_STATE_", "").lower())
+            if st in self.TERMINAL:
+                break
+            if stop is not None and stop.wait(poll):
+                return {}
+            if stop is None:
+                time.sleep(poll)
+        out = {}
+        if st in ("JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED") and job.dest and job.dest.file_name:
+            for line in self.client.files.download(file=job.dest.file_name).decode().splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                key = row.get("key")
+                if row.get("error") or not row.get("response"):
+                    out[key] = RuntimeError(f"Gemini batch: {row.get('error') or 'no response'}")
+                    continue
+                img = None
+                for cand in row["response"].get("candidates") or []:
+                    for part in (cand.get("content") or {}).get("parts") or []:
+                        data = part.get("inlineData") or part.get("inline_data")
+                        if data and data.get("data"):
+                            img = base64.b64decode(data["data"])
+                out[key] = to_png(img) if img else RuntimeError("Gemini batch returned no image for this request")
+        else:
+            err = RuntimeError(f"Gemini batch job ended {st.replace('JOB_STATE_', '').lower()}: {getattr(job, 'error', '')}")
+            out = {k: err for k in (state.get(name) or wanted)}
+        if state_file and name in state:
+            del state[name]
+            Path(state_file).write_text(json.dumps(state, indent=1))
+        return out
+
+
 def make_provider(name: str = "openai", **kw):
     if name == "gemini":
         return GeminiProvider(model=kw.get("model"), image_size=kw.get("image_size", "2K"), api_key=kw.get("api_key"))

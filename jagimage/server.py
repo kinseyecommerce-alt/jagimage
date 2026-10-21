@@ -52,7 +52,13 @@ def default_engine(spec: studio.Spec):
 
     provider = make_provider(spec.provider, quality=spec.quality, image_size=spec.image_size,
                              api_key=os.environ.get(KEY_ENV[spec.provider]))
-    return provider.generate
+
+    def generate(prompt, refs):
+        return provider.generate(prompt, refs)
+
+    if hasattr(provider, "run_batch"):
+        generate.run_batch = provider.run_batch  # batch mode (half price), used when spec.batch is on
+    return generate
 
 
 class Job:
@@ -61,6 +67,7 @@ class Job:
         self.spec, self.stage, self.plan = spec, stage, spec.plan()
         self.started, self.finished, self.error = time.time(), None, None
         self.log = deque(maxlen=200)
+        self.batch_state = None
         self.recent = deque(maxlen=48)
         self.batch = studio.Batch(spec, out=out, generate=engine(spec) if stage != "recolor" else None,
                                   workers=workers, on_event=self.event, export=export, export_what=export_what)
@@ -71,8 +78,10 @@ class Job:
         e = {**e, "t": round(time.time() - self.started, 1)}
         if e["kind"] == "recoloured":
             self.recent.appendleft(str(Path(e["path"]).relative_to(self.batch.root)))
-        if e["kind"] in ("ai_done", "recoloured", "errors"):
+        if e["kind"] in ("ai_done", "recoloured", "errors", "batch"):
             self.log.appendleft(e)
+        if e["kind"] == "batch":
+            self.batch_state = e
 
     def _run(self):
         try:
@@ -87,7 +96,8 @@ class Job:
                 "counts": c, "running": self.finished is None, "stopping": self.batch.stop.is_set(),
                 "error": self.error or self.batch.fatal, "elapsed": round((self.finished or time.time()) - self.started),
                 "ai_progress": c["ai_done"] + c["ai_skipped"], "recolour_progress": c["recoloured"] + c["recolour_skipped"],
-                "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export}
+                "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export,
+                "batch": self.batch_state}
 
 
 class Preview:

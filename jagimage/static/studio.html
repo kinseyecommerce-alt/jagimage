@@ -190,6 +190,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
         <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
       </div>
+      <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, Google returns the photos within 24 hours (usually much sooner)</label>
       <div class="row">
         <input type="password" id="key" placeholder="API key (kept on this computer only)" style="flex:1" autocomplete="off">
         <button class="btn" id="saveKey">Save key</button>
@@ -320,7 +321,8 @@ function spec() {
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
-    provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value };
+    provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value,
+    batch: S.provider === "gemini" && $("batchMode").checked };
 }
 let planTimer = null;
 function refreshPlan() {
@@ -386,7 +388,7 @@ function costLine(c) {
   if (!c || c.per_image_usd == null) return `<div class="cost">${esc((c && c.note) || "")}</div>`;
   const usd = (v) => "$" + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `<div class="cost">Estimated AI cost: <b>${usd(c.with_retries_usd)}</b> (about <b>₹${fmt(c.with_retries_inr)}</b>)`
-    + ` · $${Number(c.per_image_usd).toFixed(3)} per AI image, +${Math.round(c.retry_allowance * 100)}% for retries`
+    + ` · $${Number(c.per_image_usd).toFixed(3)} per AI image${c.batch ? " (batch, half price)" : ""}, +${Math.round(c.retry_allowance * 100)}% for retries`
     + ` · <b>₹${c.per_photo_inr}</b> per finished photo</div>`
     + `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`;
 }
@@ -424,12 +426,12 @@ async function init() {
     S.customPoses[name] = text; S.poses.add(name); $("err").textContent = ""; renderPoses(name); refreshPlan(); };
   $("poseReset").onclick = () => { delete S.customPoses[$("poseEdit").value]; renderPoses($("poseEdit").value); refreshPlan(); };
   $("poseDelete").onclick = () => { const p = $("poseEdit").value; delete S.customPoses[p]; S.poses.delete(p); renderPoses(); refreshPlan(); };
-  $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan);
+  $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan); $("batchMode").addEventListener("change", refreshPlan);
   $("previewBtn").onclick = preview;
   $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
-  seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
+  seg($("provider"), ["gemini", "openai"], S.provider, (v) => { S.provider = v; $("sizeField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini"); $("qualityField").classList.toggle("hide", v !== "openai"); refreshPlan(); }, (v) => v === "gemini" ? "Gemini" : "OpenAI");
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   $("saveKey").onclick = async () => { const k = $("key").value.trim(); if (!k) return; keys(await api("/api/keys", { [S.provider]: k })); $("key").value = ""; $("err").textContent = ""; };
   setupSave();
@@ -470,7 +472,8 @@ function showJob(j) {
   $("timeTxt").textContent = `${m} min ${j.elapsed % 60} s` + (j.running ? (j.stopping ? " · stopping…" : " · running") : " · finished") + (j.error ? " · " + j.error : "");
   $("exportTxt").textContent = j.export || "–";
   $("start").disabled = j.running; $("stop").disabled = !j.running;
-  $("log").innerHTML = j.log.map((e) => e.kind === "errors" ? `<div class="e">m${String(e.model).padStart(4, "0")}: ${esc(e.error)}</div>`
+  if (j.batch && j.running) $("timeTxt").textContent += ` · Google batch: ${j.batch.images} photos, ${j.batch.state}`;
+  $("log").innerHTML = j.log.map((e) => e.kind === "batch" ? `<div>Google batch job: ${esc(e.images)} photos, ${esc(e.state)}</div>` : e.kind === "errors" ? `<div class="e">m${String(e.model).padStart(4, "0")}: ${esc(e.error)}</div>`
     : e.kind === "ai_done" ? `<div>m${String(e.model).padStart(4, "0")}: AI base ${esc(e.base)} ${esc(label(e.pose))}</div>`
     : `<div>m${String(e.model).padStart(4, "0")}: ${esc(label(e.top))}${e.bottom ? " / " + esc(label(e.bottom)) : ""} ${esc(label(e.pose))}</div>`).join("");
 }
@@ -508,7 +511,7 @@ function loadSettings(s) {
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider));
-  $("imageSize").value = s.image_size; $("quality").value = s.quality;
+  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
 }
 init().catch((e) => { $("err").textContent = "Couldn't reach the Studio server: " + e.message; });

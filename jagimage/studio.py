@@ -85,6 +85,7 @@ class Spec:
     custom_poses: Dict[str, str] = field(default_factory=dict)
     extra: str = ""          # extra instructions added to every photo's prompt
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
+    batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     provider: str = "gemini"
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
@@ -104,6 +105,8 @@ class Spec:
             raise ValueError("pick at least one top colour")
         if self.pairing not in ("match", "each"):
             raise ValueError("pairing must be match or each")
+        if self.batch and self.provider != "gemini":
+            raise ValueError("Batch mode (half price) is available with Gemini")
         if self.shot not in SHOTS:
             raise ValueError("shot must be outfit (top and bottom) or top (top only)")
         if self.shot == "top":
@@ -308,6 +311,8 @@ class Batch:
         self.export_what = export_what
         self.root = Path(out) / spec.name
         self.generate = generate          # (prompt, reference paths) -> image bytes
+        # batch mode: the engine's run_batch([(key, prompt, refs)], ...) -> {key: bytes | Exception}
+        self.batch_runner = getattr(generate, "run_batch", None) if spec.batch else None
         self.workers = workers
         self.retries = retries
         self.on_event = on_event or (lambda e: None)
@@ -339,9 +344,72 @@ class Batch:
         (self.root / "spec.json").write_text(json.dumps(asdict(self.spec), indent=2))
         if stage != "recolor" and self.generate is None:
             raise RuntimeError("No image engine: pass generate=, or use stage='recolor'")
+        if stage != "recolor" and self.spec.batch:
+            if not self.batch_runner:
+                raise RuntimeError("This engine has no batch mode")
+            self._run_batched()
+            if stage == "bases" or self.stop.is_set():
+                return self.counts
+            stage = "recolor"  # every base is made (or has failed): recolour them all
         with ThreadPoolExecutor(max_workers=max(1, self.workers)) as pool:
             list(pool.map(lambda m: self.run_model(m, stage), self.spec.model_numbers()))
         return self.counts
+
+    def _run_batched(self):
+        """Batch mode: each round sends every base photo whose reference photos already exist as one
+        Gemini batch job (half price). Round 1 makes each model's first front, round 2 the other fronts
+        and the first base's poses, round 3 the remaining poses. Photos the AI got wrong go into the
+        next round, up to `retries` times."""
+        poses = ["front_main"] + [p for p in self.spec.poses if p != "front_main"]
+        tries: Dict[str, int] = {}
+        seen = set()
+        while not self.stop.is_set():
+            todo = []
+            for m in self.spec.model_numbers():
+                bases = self.spec.bases()
+                first = self.identity_front(m, bases)
+                for base in bases:
+                    for pose in poses:
+                        path = self.base_path(m, base, pose)
+                        key = f"m{m:04d}|{base_dir(base)}|{pose}"
+                        if path.exists():
+                            if key not in seen and key not in tries:
+                                self._event("ai_skipped", model=m, path=str(path))
+                            seen.add(key)
+                            continue
+                        req = self._request(m, base, pose, path, first)
+                        if req and tries.get(key, 0) < self.retries:
+                            todo.append((key, m, base, pose, path) + req)
+            if not todo:
+                break
+            n_round = 1 + max(tries.values(), default=0)
+            self._event("batch", round=n_round, images=len(todo), state="sending")
+            results = self.batch_runner(
+                [(key, text, refs) for key, m, base, pose, path, text, refs in todo],
+                on_status=lambda state, n=len(todo): self._event("batch", images=n, state=state),
+                stop=self.stop, state_file=self.root / "_batch_jobs.json")
+            for key, m, base, pose, path, text, refs in todo:
+                tries[key] = tries.get(key, 0) + 1
+                got = results.get(key)
+                if got is None:
+                    continue  # stopped, or the job is still with Google: picked up on the next start
+                if isinstance(got, Exception):
+                    fatal = account_problem(got)
+                    if fatal:
+                        self.fatal = fatal
+                        self.stop.set()
+                        self._event("errors", model=m, path=str(path), error=fatal)
+                        return
+                    if tries[key] >= self.retries:
+                        self._event("errors", model=m, path=str(path), error=f"{type(got).__name__}: {got}")
+                    continue
+                try:
+                    self._accept(path, got, base, m, pose)
+                except Exception as exc:
+                    if tries[key] >= self.retries:
+                        self._event("errors", model=m, path=str(path), error=f"{type(exc).__name__}: {exc}")
+            if all(results.get(t[0]) is None for t in todo):
+                break  # nothing came back (stopped): don't spin
 
     def run_model(self, m: int, stage="all"):
         spec = self.spec
@@ -371,11 +439,8 @@ class Batch:
             return min(made, key=lambda p: p.stat().st_mtime)
         return self.base_path(m, bases[0], "front_main")
 
-    def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:
-        """Make one base photo if missing. False if it couldn't be made."""
-        if path.exists():
-            self._event("ai_skipped", model=m, path=str(path))
-            return True
+    def _request(self, m, base, pose, path: Path, first_front: Path):
+        """(prompt, reference paths) for one base photo, or None while a reference isn't made yet."""
         is_first = path.parent == first_front.parent
         own_front = path.parent / "front_main.png"
         if pose == "front_main":
@@ -383,21 +448,38 @@ class Batch:
         else:
             ref, refs = ("front", [str(own_front)]) if is_first else ("face+front", [str(first_front), str(own_front)])
         if any(not Path(r).exists() for r in refs):
+            return None
+        return prompt(self.spec, m, base, pose, ref), refs
+
+    def _accept(self, path: Path, data: bytes, base, m, pose):
+        """Keep an AI image only if it used the base colours (else raise, so it's asked for again)."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp.png")
+        tmp.write_bytes(data)
+        try:
+            self._check_base(tmp, base)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.replace(path)
+        self._event("ai_done", model=m, path=str(path), base=base_dir(base), pose=pose)
+
+    def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:
+        """Make one base photo if missing. False if it couldn't be made."""
+        if path.exists():
+            self._event("ai_skipped", model=m, path=str(path))
+            return True
+        req = self._request(m, base, pose, path, first_front)
+        if req is None:
             self._event("errors", model=m, path=str(path), error="its reference front is missing")
             return False
-        text = prompt(self.spec, m, base, pose, ref)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        text, refs = req
         last = None
         for attempt in range(self.retries):
             if self.stop.is_set():
                 return False
             try:
-                data = self.generate(text, refs)
-                tmp = path.with_suffix(".tmp.png")
-                tmp.write_bytes(data)
-                self._check_base(tmp, base)  # the AI must have used both base colours
-                tmp.replace(path)
-                self._event("ai_done", model=m, path=str(path), base=base_dir(base), pose=pose)
+                self._accept(path, self.generate(text, refs), base, m, pose)
                 return True
             except Exception as exc:  # API errors, rate limits, wrong colours: retry with backoff
                 last = exc
