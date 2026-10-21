@@ -157,7 +157,9 @@ def _library_bases(args, L, items, poses, models) -> int:
     if args.stage in ("all", "poses", "recolor"):
         for it in items:
             sku = f"{it['category']}/{it['product']}/{it['fabric']}/{it['colour']}"
-            for pose, path, status, de in L.recolor_item(it, poses, out=args.out, bases=bases, mode=args.recolor_mode, force=args.force):
+            canvas = tuple(int(v) for v in args.canvas.lower().split("x")) if args.canvas else None
+            for pose, path, status, de in L.recolor_item(it, poses, out=args.out, bases=bases, mode=args.recolor_mode,
+                                                         force=args.force, canvas=canvas):
                 note = f" ΔE {de:.2f}" + ("" if de < 3 else " CHECK") if de is not None else ""
                 print(f"{sku} [{pose}] {status}{note} {path}")
                 if status.startswith("needs a mask") or (de is not None and de >= 3):
@@ -224,6 +226,8 @@ def main(argv=None) -> int:
                      help="AI makes each style in 2 base colours only; every palette colour is recoloured from them to its exact hex")
     lib.add_argument("--base-light", default="#8FD3A8", help="Light base colour (default: mint #8FD3A8)")
     lib.add_argument("--base-dark", default="#1E4636", help="Dark base colour (default: bottle green #1E4636)")
+    lib.add_argument("--canvas", default="1500x1500",
+                     help="Also save each recoloured photo as a marketplace JPG of this size (default 1500x1500; '' to skip)")
     lib.add_argument("--recolor-mode", default="match", choices=["match", "hue", "scale"],
                      help="match = exact hex on average; hue = keep lightness; scale = scale shading")
     lib.add_argument("--no-negative", action="store_true", help="Don't append the negative list as an 'Avoid:' line")

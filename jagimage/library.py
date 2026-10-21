@@ -266,12 +266,13 @@ def base_for(it: dict) -> str:
     return "light" if lightness(COLOURS[it["fabric"]][it["colour"]]) >= LIGHT_FROM else "dark"
 
 
-def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="match", force=False) -> Iterator[tuple]:
+def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="match", force=False,
+                 canvas=None) -> Iterator[tuple]:
     """Make one palette colour from its base photos. Yields (pose, path, status, ΔE or None).
     A hand-corrected <pose>_mask.png in the base folder is used when present."""
     from PIL import Image
 
-    from .recolor import WHITE_FROM, MaskError, lightness, load_mask, recolor_image, save_mask, write_qc
+    from .recolor import WHITE_FROM, MaskError, fit_canvas, lightness, load_mask, recolor_image, save_mask, write_qc
 
     which = base_for(it)
     b = base_item(it, which, bases)
@@ -298,6 +299,8 @@ def recolor_item(it: dict, poses: List[str], out="output", bases=None, mode="mat
         if not mpath.exists():
             save_mask(mpath, mask)
         img.save(path)
+        if canvas:  # marketplace copy, e.g. front_main_1500x1500.jpg
+            fit_canvas(img, *canvas).save(folder / f"{pose}_{canvas[0]}x{canvas[1]}.jpg", quality=95)
         qc[pose] = {"from": f"{which} base {b['hex']}", "target": target, "deltaE": round(de, 2), "on_shade": de < 3}
         if lightness(target) > WHITE_FROM:
             qc[pose]["note"] = "near-white: highlights are on the hex; folds show as shadow, so the average is slightly darker"

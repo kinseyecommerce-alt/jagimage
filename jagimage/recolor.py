@@ -68,6 +68,8 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
     largest connected piece (so same-coloured hair or props stay out) and fills knit speckle."""
     w = np.array([W_L, 1, 1], np.float32)
     base = hex_to_lab(base_hex)
+    if np.hypot(base[1], base[2]) >= 0.05:
+        return _hue_mask(lab, base, base_hex)
     if tol is None:  # tighter for low-chroma bases so grey backgrounds stay out
         tol = float(np.clip(0.55 * np.hypot(base[1], base[2]) + 0.03, 0.04, 0.09))
     d = np.linalg.norm((lab - base) * w, axis=-1)
@@ -119,6 +121,52 @@ def fabric_layers(L: np.ndarray, mask: Optional[np.ndarray]):
     den = ndimage.gaussian_filter(m, 3.0)
     Lb = np.where(den > 1e-3, num / np.maximum(den, 1e-3), Ld)
     return Lb, Ld - Lb, L - Ld
+
+
+def _cleanup(m, lab, centre):
+    """Keep the largest piece(s), close knit speckle, fill shadow holes, feather the edge."""
+    lbl, n = ndimage.label(m)
+    if n == 0:
+        raise MaskError("Couldn't find the garment in this photo.")
+    sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
+    m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
+    m = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
+    holes = ndimage.binary_fill_holes(m) & ~m
+    hl, hn = ndimage.label(holes)
+    if hn:
+        idx = np.arange(1, hn + 1)
+        hs = ndimage.sum(holes, hl, index=idx)
+        hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
+        same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
+        m |= np.isin(hl, idx[(hs <= 0.002 * m.sum()) | same])
+    soft = ndimage.gaussian_filter(m.astype(np.float32), 0.8)
+    core = soft > 0.95
+    return soft, lab[core].mean(axis=0) if core.any() else centre
+
+
+def _hue_mask(lab, base, base_hex):
+    """Coloured bases (e.g. mint or bottle green): find the garment by hue, which grey studio,
+    skin, black hair and white shoes never share, even when the AI made it paler or deeper."""
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    H = np.arctan2(lab[..., 2], lab[..., 1])
+    hb = np.arctan2(base[2], base[1])
+    dh = np.abs(np.angle(np.exp(1j * (H - hb))))
+    cand = (dh < np.radians(40)) & (C > 0.025)
+    if cand.sum() < 0.01 * cand.size:
+        raise MaskError(f"Couldn't find the {base_hex} garment in this photo.")
+    hc = np.angle(np.mean(np.exp(1j * H[cand])))      # the hue the AI actually produced
+    cc = float(np.median(C[cand]))
+    dh = np.abs(np.angle(np.exp(1j * (H - hc))))
+    m = (dh < np.radians(28)) & (C > max(0.02, 0.35 * cc))
+    # shadows lose chroma but keep hue: grow into connected pixels with a looser chroma floor
+    loose = (dh < np.radians(40)) & (C > max(0.012, 0.18 * cc))
+    lbl, n = ndimage.label(m)
+    if n:
+        sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
+        m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
+    m = ndimage.binary_propagation(m, mask=m | loose)
+    centre = lab[m].mean(axis=0) if m.any() else base
+    return _cleanup(m, lab, centre)
 
 
 def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = "match",
@@ -191,6 +239,30 @@ def _composite(rgb, new, mask):
         B = rgb[bi[0], bi[1]]
         out = np.where(band[..., None], a * F + (1 - a) * B, out)
     return np.round(np.clip(out, 0, 255)).astype(np.uint8)
+
+
+def fit_canvas(img: Image.Image, width: int = 1500, height: int = 1500) -> Image.Image:
+    """Marketplace canvas (e.g. 1500x1500): scale the photo to fit, then extend the studio
+    background sideways (or up/down) row by row from the photo's own edge colour, so the
+    seamless backdrop continues instead of showing bars."""
+    img = img.convert("RGB")
+    s = min(width / img.width, height / img.height)
+    w, h = max(1, round(img.width * s)), max(1, round(img.height * s))
+    im = np.asarray(img.resize((w, h), Image.LANCZOS)).astype(np.float32)
+    out = np.zeros((height, width, 3), np.float32)
+    x0, y0 = (width - w) // 2, (height - h) // 2
+    if w < width:  # pad left/right with each row's edge colour
+        k = max(2, w // 60)
+        left = np.median(im[:, :k], axis=1)[:, None]
+        right = np.median(im[:, -k:], axis=1)[:, None]
+        out[y0:y0 + h, :x0] = ndimage.gaussian_filter1d(left, 3, axis=0)
+        out[y0:y0 + h, x0 + w:] = ndimage.gaussian_filter1d(right, 3, axis=0)
+    if h < height:
+        k = max(2, h // 60)
+        out[:y0, :] = np.median(im[:k], axis=0).mean(axis=0)
+        out[y0 + h:, :] = np.median(im[-k:], axis=0).mean(axis=0)
+    out[y0:y0 + h, x0:x0 + w] = im
+    return Image.fromarray(np.clip(np.round(out), 0, 255).astype(np.uint8))
 
 
 def load_mask(path: Path) -> np.ndarray:
