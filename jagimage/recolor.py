@@ -15,6 +15,7 @@ from scipy import ndimage
 W_L = 0.35  # weight of lightness vs colour when matching the garment (shadows stay in)
 MODES = ("match", "hue", "scale")
 WHITE_FROM = 0.93  # targets this light keep texture as shadow below the hex (white can't go brighter)
+PHOTO_BLACK = 0.2  # darkest garment lightness rendered (~#1A1A1A); below it knit and folds can't show
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 
 
@@ -169,6 +170,13 @@ def _hue_mask(lab, base, base_hex):
     return _cleanup(m, lab, centre)
 
 
+def render_target(target_hex: str) -> np.ndarray:
+    """The OKLab colour a garment is rendered at: the hex itself, except that targets darker than
+    PHOTO_BLACK (e.g. #000000) are lifted to it, as black fabric photographs, so the knit stays visible."""
+    T = hex_to_lab(target_hex)
+    return np.array([PHOTO_BLACK, T[1], T[2]]) if T[0] < PHOTO_BLACK else T
+
+
 def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = "match",
                 mask: Optional[np.ndarray] = None, texture: float = 1.0) -> np.ndarray:
     """Recolour in OKLab. The garment's own colour is discarded; only its texture is kept.
@@ -183,6 +191,7 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
         f = T[0] / mean[0] if mean[0] > 0.02 else 1.0
         L2 = L * f
     else:
+        T = render_target(target_hex)
         g = texture_gain(float(mean[0]), float(T[0]))
         Lb, knit, noise = fabric_layers(L, mask)
         fold = g * (Lb - mean[0])  # cap deep creases so boosted shadows don't read as dirt
@@ -218,7 +227,8 @@ def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = 
     new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=mask, texture=texture)).astype(np.float32)
     out = _composite(rgb.astype(np.float32), new, mask)
     core = mask > 0.95
-    de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - hex_to_lab(target_hex)) * 100)
+    goal = render_target(target_hex) if mode == "match" else hex_to_lab(target_hex)
+    de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - goal) * 100)
     return Image.fromarray(np.dstack([out, rgba[..., 3]]), "RGBA"), de, mask
 
 

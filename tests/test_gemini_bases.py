@@ -37,6 +37,13 @@ def test_recolor_hits_hex_and_leaves_hair_and_skin():
     assert mask[200, 150] > 0.95 and mask[10, 10] < 0.05
 
 
+def test_pure_black_keeps_its_knit():
+    # #000000 can't show folds or knit, so it renders as photographed black and keeps the texture
+    out, de, mask = recolor_image(fake_photo("#1E4636"), "#1E4636", "#000000")
+    o = np.asarray(out.convert("L")).astype(float)[mask > 0.95]
+    assert de < 3 and 15 < o.mean() < 40 and o.std() > 2
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)
