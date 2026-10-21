@@ -185,6 +185,8 @@ jagimage serve            # then open http://127.0.0.1:8765
 - You choose the files: 1500×1500 JPG, full-size PNG, or both.
 - Base photos, masks and everything else stay in the working folder, which you can change under **Save to → Working folder**.
 
+The Run box shows the count and the **estimated AI cost** before you start, in $ and ₹: AI images × list price (Gemini 3 Pro 2K about $0.137 each including the prompt and reference photos), plus 10% for retries, and the cost per finished photo. Prices live in `jagimage/pricing.py` (checked 2026-10-21); set `JAGIMAGE_USD_INR` to change the rupee rate.
+
 The Run box shows the count before you start. For example, 300 models × 9 colours (matching sets) needs 600 AI images and gives 2,700 photos.
 
 **Other features:**

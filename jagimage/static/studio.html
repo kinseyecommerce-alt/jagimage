@@ -56,6 +56,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .plan { background: var(--soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
 .plan b { font-variant-numeric: tabular-nums; }
 .plan .bases { color: var(--muted); margin-top: 4px; }
+.plan .cost { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .err { color: var(--warn); font-size: 13px; min-height: 1em; }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .bar { height: 8px; background: var(--soft); border-radius: 99px; overflow: hidden; }
@@ -333,6 +334,7 @@ function refreshPlan() {
       const per = p.bases_per_model;
       $("plan").innerHTML = `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""} = <b>${fmt(p.ai_images)}</b> AI images (${S.provider === "gemini" ? "Gemini " + $("imageSize").value : "OpenAI " + $("quality").value})<br>`
         + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b> = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
+        + costLine(p.cost)
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
     } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
   }, 150);
@@ -379,6 +381,14 @@ async function testPhoto() {
     $("testStatus").textContent = st.error ? `Couldn't finish: ${st.error}` : `Model ${st.model}, ${label(st.pose)}: ${st.counts.ai_done} AI image(s) made in ${Math.round((Date.now() - t0) / 1000)} s. Happy with it? Start the batch.`;
   } catch (e) { $("err").textContent = e.message; }
   $("testBtn").disabled = false;
+}
+function costLine(c) {
+  if (!c || c.per_image_usd == null) return `<div class="cost">${esc((c && c.note) || "")}</div>`;
+  const usd = (v) => "$" + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `<div class="cost">Estimated AI cost: <b>${usd(c.with_retries_usd)}</b> (about <b>₹${fmt(c.with_retries_inr)}</b>)`
+    + ` · $${Number(c.per_image_usd).toFixed(3)} per AI image, +${Math.round(c.retry_allowance * 100)}% for retries`
+    + ` · <b>₹${c.per_photo_inr}</b> per finished photo</div>`
+    + `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`;
 }
 function syncBottom() {
   const top = S.shot === "top", fixed = top || S.opts.fixed_bottoms.includes($("bottom").value), jeans = S.opts.fixed_bottoms.includes($("bottom").value);

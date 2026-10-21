@@ -294,7 +294,8 @@ def make_handler(app: Studio):
                     body["first_model"] = body.get("first_model") or ledger.next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)
                     hit = ledger.clash(spec)
-                    return self._json({**spec.plan(), "first_model": spec.first_model, "auto": auto,
+                    from .pricing import estimate
+                    return self._json({**spec.plan(), "first_model": spec.first_model, "auto": auto, "cost": estimate(spec),
                                        "clash": hit and f"Models {hit['first']}-{hit['last']} are already in batch {hit['batch']}: faces would repeat. Next free: {ledger.next_free(spec.category)}.", "bases": [studio.base_dir(b) for b in spec.bases()],
                                        "pairs": spec.pairs(), "name": spec.name})
                 if parts == ["api", "settings"]:

@@ -117,6 +117,15 @@ def test_custom_poses_and_extra_instructions():
         studio.Spec(top_colours=["Red"], custom_poses={"empty": "  "})
 
 
+def test_cost_estimate():
+    from jagimage import pricing
+    s = studio.Spec(top_colours=["Black", "White", "Red", "Navy", "Yellow"], models=300, poses=["front_main", "back"])
+    c = pricing.estimate(s)  # 300 models x 2 bases x 2 poses = 1200 Gemini 3 Pro 2K images
+    assert s.plan()["ai_images"] == 1200 and c["per_image_usd"] == 0.137
+    assert c["with_retries_usd"] == round(1200 * 0.137 * 1.1, 2) and c["per_photo_usd"] == round(c["with_retries_usd"] / 3000, 4)
+    assert pricing.estimate(studio.Spec(top_colours=["Red"], provider="openai", quality="max"))["per_image_usd"] is None
+
+
 def test_hands_free_pose():
     s = studio.Spec(top_colours=["Red"], poses=["front_main", "back", "handpocket"])
     front = studio.prompt(s, 1, ("dark", "dark"), "front_main", "none")
