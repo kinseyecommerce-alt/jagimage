@@ -44,6 +44,7 @@ TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just 
                     "out of frame, small margin above the head, the whole top fully visible, model fills about 90% of frame height")
 FULL_FRAMING = "Full body head to shoes in frame with small margins, model about 85-90% of frame height"
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
+BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
 BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -263,6 +264,21 @@ def is_rate_limit(exc: Exception) -> bool:
     text = f"{exc}".lower()
     return getattr(exc, "status_code", None) == 429 or getattr(exc, "code", None) == 429 or "rate limit" in text \
         or ("resource_exhausted" in text and "credits" not in text)
+
+
+def backdrop_problem(lab) -> Optional[str]:
+    """Why an AI photo isn't on the plain light grey studio backdrop (the AI sometimes ignores it and
+    puts the model outdoors), or None. Reads the top edge and the upper sides, where only backdrop is:
+    tested studio photos stay below 0.008 colourfulness and above 0.84 lightness there."""
+    import numpy as np
+
+    h = lab.shape[0]
+    edge = np.concatenate([lab[:12].reshape(-1, 3), lab[:int(h * 0.7), :12].reshape(-1, 3), lab[:int(h * 0.7), -12:].reshape(-1, 3)])
+    colourful = float(np.percentile(np.hypot(edge[:, 1], edge[:, 2]), 90))
+    light = float(np.median(edge[:, 0]))
+    if colourful > BACKDROP_MAX_CHROMA or light < BACKDROP_MIN_LIGHT:
+        return f"the background isn't the plain studio backdrop (colour {colourful:.3f}, lightness {light:.2f})"
+    return None
 
 
 _LEDGER_LOCK = threading.Lock()
@@ -546,6 +562,9 @@ class Batch:
         from .recolor import MaskError, garment_mask, rgb_to_lab, save_mask
 
         lab = rgb_to_lab(np.asarray(Image.open(path).convert("RGB")))
+        why = backdrop_problem(lab)
+        if why:
+            raise MaskError(why)
         top, _ = garment_mask(lab, TOP_BASES[base[0]][1])
         if not base[1] and self.spec.bottom not in FIXED_BOTTOMS:
             top = self._trim_fixed_bottom(lab, top)

@@ -241,6 +241,29 @@ def test_wrong_colours_from_the_ai_are_retried(tmp_path):
     assert len(tries) == 2 and counts["ai_done"] == 1 and counts["errors"] == 0
 
 
+def test_photo_off_the_studio_backdrop_is_made_again(tmp_path):
+    """Right base colours but the model outdoors (Flash once ignored the studio backdrop): rejected."""
+    s = studio.Spec(top_colours=["Navy"], models=1)
+    tries = []
+
+    def gen(p, refs):
+        tries.append(1)
+        data = fake_generate(p, refs)
+        if len(tries) == 1:
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            d = ImageDraw.Draw(img)
+            d.rectangle((0, 0, 299, 20), fill="#6E8B3D")       # trees along the top
+            d.rectangle((0, 0, 25, 280), fill="#5C7A32")       # and down the sides
+            d.rectangle((274, 0, 299, 280), fill="#7A5C3A")
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            data = buf.getvalue()
+        return data
+
+    counts = studio.Batch(s, out=tmp_path, generate=gen, retries=2).run()
+    assert len(tries) == 2 and counts["ai_done"] == 1 and counts["errors"] == 0
+
+
 def _get(url):
     with urllib.request.urlopen(url) as r:
         return r.status, r.read()
