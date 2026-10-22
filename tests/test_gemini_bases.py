@@ -126,7 +126,7 @@ def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     png = GeminiProvider(client=client, image_size="4K").generate("make it", [str(ref)])
     assert png[:4] == b"\x89PNG"
     model, contents, config = calls[0]
-    assert model == "gemini-3-pro-image" and contents[-1] == "make it" and len(contents) == 2
+    assert model == "gemini-3.1-flash-image" and contents[-1] == "make it" and len(contents) == 2
     assert config.image_config.image_size == "4K" and config.image_config.aspect_ratio == "3:4"
 
 

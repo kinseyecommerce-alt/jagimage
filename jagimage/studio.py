@@ -93,6 +93,7 @@ class Spec:
     provider: str = "gemini"  # gemini, openai, or runpod (your own GPU pod with an open model)
     quality: str = "high"    # OpenAI
     image_size: str = "2K"   # Gemini
+    gemini_model: str = "flash"  # Gemini: flash (default, cheaper) or pro
     canvas: Optional[Tuple[int, int]] = (1500, 1500)
     name: str = ""
 
@@ -111,6 +112,8 @@ class Spec:
             raise ValueError("pairing must be match or each")
         if self.provider not in ("gemini", "openai", "runpod"):
             raise ValueError("provider must be gemini, openai or runpod")
+        if self.gemini_model not in ("flash", "pro"):
+            raise ValueError("gemini_model must be flash or pro")
         if self.batch and self.provider != "gemini":
             raise ValueError("Batch mode (half price) is available with Gemini")
         if self.shot not in SHOTS:

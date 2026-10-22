@@ -191,6 +191,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <h2>Engine</h2>
       <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="runpod">RunPod (own GPU)</button></div>
       <div class="row">
+        <label class="field" id="modelField"><span>Gemini model</span><select id="geminiModel"><option value="flash" selected>Flash (cheaper, recommended)</option><option value="pro">Pro</option></select></label>
         <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
         <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
         <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
@@ -303,7 +304,7 @@ S.fabric = () => $("fabric").value;
 const engineName = (v) => ({ gemini: "Gemini", openai: "OpenAI", runpod: "RunPod (own GPU)" })[v] || v;
 function engineFields() {
   const v = S.provider;
-  $("sizeField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini");
+  $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini");
   $("qualityField").classList.toggle("hide", v !== "openai");
   $("runpodHint").classList.toggle("hide", v !== "runpod"); $("runpodUrlRow").classList.toggle("hide", v !== "runpod");
   if (v === "runpod") $("workers").value = 1;
@@ -340,7 +341,7 @@ function spec() {
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
-    provider: S.provider, image_size: $("imageSize").value, quality: $("quality").value,
+    provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
     batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
     one_base: $("oneBase").checked };
@@ -358,7 +359,7 @@ function refreshPlan() {
         + (p.styles > 1 ? ` Made in ${p.styles} styles with the same faces.` : "");
       $("start").disabled = !!p.clash || (S.job && $("stop").disabled === false);
       const per = p.bases_per_model;
-      $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${({ gemini: "Gemini " + $("imageSize").value, openai: "OpenAI " + $("quality").value })[S.provider] || "RunPod GPU"})<br>`
+      $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${({ gemini: "Gemini " + ($("geminiModel").value === "pro" ? "Pro " : "Flash ") + $("imageSize").value, openai: "OpenAI " + $("quality").value })[S.provider] || "RunPod GPU"})<br>`
         + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b>${p.styles > 1 ? ` × <b>${p.styles}</b>` : ""} = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
         + costLine(p.cost) + `<div class="bases">Disk space needed: about <b>${fmt(p.disk_gb)} GB</b>${$("keepPng").checked ? " (with full-size PNGs)" : ""}.</div>`
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
@@ -465,7 +466,7 @@ async function init() {
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
   seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
   $("runpodUrl").value = S.opts.runpod_url || "";
-  for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
+  for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   $("saveKey").onclick = async () => {
     const k = $("key").value.trim(), url = S.provider === "runpod" ? $("runpodUrl").value.trim() : "";
     if (!k && !url) return;
@@ -548,7 +549,7 @@ function loadSettings(s) {
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();
   S.provider = s.provider; [...$("provider").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.provider)); engineFields();
-  $("imageSize").value = s.image_size; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false; $("oneBase").checked = !!s.one_base;
+  $("imageSize").value = s.image_size; $("geminiModel").value = s.gemini_model || "pro"; $("quality").value = s.quality; $("batchMode").checked = !!s.batch; $("keepPng").checked = s.keep_png !== false; $("oneBase").checked = !!s.one_base;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); syncBottom(); refreshPlan();
 }
 init().catch((e) => { $("err").textContent = "Couldn't reach the Studio server: " + e.message; });

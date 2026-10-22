@@ -124,11 +124,13 @@ def test_custom_poses_and_extra_instructions():
 
 def test_cost_estimate():
     from jagimage import pricing
-    s = studio.Spec(top_colours=["Black", "White", "Red", "Navy", "Yellow"], models=300, poses=["front_main", "back"])
+    s = studio.Spec(top_colours=["Black", "White", "Red", "Navy", "Yellow"], models=300, poses=["front_main", "back"], gemini_model="pro")
     c = pricing.estimate(s)  # 300 models x 2 bases x 2 poses = 1200 Gemini 3 Pro 2K images
     assert s.plan()["ai_images"] == 1200 and c["per_image_usd"] == 0.137
     assert c["with_retries_usd"] == round(1200 * 0.137 * 1.1, 2) and c["per_photo_usd"] == round(c["with_retries_usd"] / 3000, 4)
     assert pricing.estimate(studio.Spec(top_colours=["Red"], provider="openai", quality="max"))["per_image_usd"] is None
+    flash = pricing.estimate(studio.Spec(top_colours=["Red"]))  # Flash is the default: $0.101 + input at 2K
+    assert flash["per_image_usd"] == 0.102 and flash["model"] == "gemini-3.1-flash-image"
 
 
 def test_hands_free_pose():

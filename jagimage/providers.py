@@ -14,7 +14,9 @@ import os
 from contextlib import ExitStack
 from typing import List, Optional
 
-GEMINI_DEFAULT_MODEL = "gemini-3-pro-image"
+# Flash: same 1792x2400 photos and colour accuracy as Pro in our test (2026-10), 25% cheaper
+GEMINI_MODELS = {"flash": "gemini-3.1-flash-image", "pro": "gemini-3-pro-image"}
+GEMINI_DEFAULT_MODEL = GEMINI_MODELS["flash"]
 GEMINI_SIZES = ("1K", "2K", "4K")
 
 

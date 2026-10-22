@@ -57,7 +57,10 @@ def options(app=None) -> dict:
 def default_engine(spec: studio.Spec):
     from .providers import make_provider
 
-    provider = make_provider(spec.provider, quality=spec.quality, image_size=spec.image_size,
+    from .providers import GEMINI_MODELS
+
+    model = GEMINI_MODELS[spec.gemini_model] if spec.provider == "gemini" else None
+    provider = make_provider(spec.provider, model=model, quality=spec.quality, image_size=spec.image_size,
                              api_key=os.environ.get(KEY_ENV[spec.provider]), url=os.environ.get(RUNPOD_URL_ENV))
 
     def generate(prompt, refs):

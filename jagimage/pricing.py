@@ -26,9 +26,12 @@ RUNPOD_SECONDS = float(os.environ.get("JAGIMAGE_RUNPOD_SECONDS", "45"))
 USD_INR = float(os.environ.get("JAGIMAGE_USD_INR", "96.5"))
 
 
-def gemini_model() -> str:
-    from .providers import GEMINI_DEFAULT_MODEL
+def gemini_model(choice: Optional[str] = None) -> str:
+    """Model id for a Studio choice (flash/pro), else the command-line default."""
+    from .providers import GEMINI_DEFAULT_MODEL, GEMINI_MODELS
 
+    if choice:
+        return GEMINI_MODELS[choice]
     return os.environ.get("JAGIMAGE_GEMINI_MODEL", GEMINI_DEFAULT_MODEL).replace("-preview", "")
 
 
@@ -49,7 +52,8 @@ def estimate(spec) -> dict:
     """Money for a batch: AI images x price, with an allowance for retries."""
     plan = spec.plan()
     setting = {"gemini": spec.image_size, "openai": spec.quality}.get(spec.provider, "gpu")
-    each = per_image(spec.provider, setting)
+    model = gemini_model(getattr(spec, "gemini_model", None)) if spec.provider == "gemini" else None
+    each = per_image(spec.provider, setting, model)
     if each is not None and getattr(spec, "batch", False):
         each *= BATCH_DISCOUNT  # Gemini batch mode: output and input both half price
     if each is None:
@@ -60,7 +64,7 @@ def estimate(spec) -> dict:
     return {"per_image_usd": round(each, 4), "ai_cost_usd": round(base, 2), "with_retries_usd": round(total, 2),
             "per_photo_usd": round(total / photos, 4), "usd_inr": USD_INR, "with_retries_inr": round(total * USD_INR),
             "per_photo_inr": round(total / photos * USD_INR, 2), "retry_allowance": RETRY_ALLOWANCE,
-            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": {"gemini": gemini_model(), "runpod": "qwen-image-edit-2511"}.get(spec.provider, "openai"),
+            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": {"gemini": model, "runpod": "qwen-image-edit-2511"}.get(spec.provider, "openai"),
             **({"gpu_usd_per_hour": RUNPOD_USD_PER_HOUR, "gpu_seconds_per_image": RUNPOD_SECONDS} if spec.provider == "runpod" else {})}
 
 
