@@ -641,11 +641,11 @@ class Batch:
 
         spec = self.spec
         thex = colour_hex(top, spec.fabric)
-        out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tmask)
+        out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tmask, others=bmask if bottom else None)
         qc = {"top": {"colour": top, "hex": thex, "deltaE": round(de_t, 2), "on_shade": de_t < 3}}
         if bottom:
             bhex = colour_hex(bottom, spec.fabric)
-            out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bmask)
+            out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bmask, others=tmask)
             qc["bottom"] = {"colour": bottom, "hex": bhex, "deltaE": round(de_b, 2), "on_shade": de_b < 3}
         path.parent.mkdir(parents=True, exist_ok=True)
         if spec.keep_png:

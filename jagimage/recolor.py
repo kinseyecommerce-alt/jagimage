@@ -266,8 +266,11 @@ def recolor_lab(lab: np.ndarray, mean: np.ndarray, target_hex: str, mode: str = 
 
 
 def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = "match",
-                  mask: Optional[np.ndarray] = None, texture: float = 1.0) -> Tuple[Image.Image, float, np.ndarray]:
-    """Returns (recoloured image, ΔE x100 of the garment vs target, soft mask used)."""
+                  mask: Optional[np.ndarray] = None, texture: float = 1.0,
+                  others: Optional[np.ndarray] = None) -> Tuple[Image.Image, float, np.ndarray]:
+    """Returns (recoloured image, ΔE x100 of the garment vs target, soft mask used).
+    others: mask of the outfit's other garment(s), recoloured separately; their pixels at a shared
+    seam are garment, not backdrop, so the rim check that keeps backdrop unpainted skips them."""
     rgba = np.array(img.convert("RGBA"))
     if mask is None:
         mask, _ = garment_mask(rgb_to_lab(rgba[..., :3]), base_hex)
@@ -284,14 +287,17 @@ def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = 
     mean = lab[core].mean(axis=0)
     new = lab_to_rgb(recolor_lab(lab, mean, target_hex, mode, mask=cm, texture=texture)).astype(np.float32)
     gain = texture_gain(float(mean[0]), float(render_target(target_hex)[0])) if mode == "match" else 1.0
-    out = _composite(rgb.astype(np.float32), new, cm, gain)
+    full = rgba[..., :3]
+    backdrop = np.median(np.concatenate([full[0], full[-1], full[:, 0], full[:, -1]]), axis=0)
+    out = _composite(rgb.astype(np.float32), new, cm, gain,
+                     garment=None if others is None else others[y0:y1, x0:x1] > 0.5, backdrop=backdrop)
     goal = render_target(target_hex) if mode == "match" else hex_to_lab(target_hex)
     de = float(np.linalg.norm(rgb_to_lab(out)[core].mean(axis=0) - goal) * 100)
     rgba[y0:y1, x0:x1, :3] = out
     return Image.fromarray(rgba, "RGBA"), de, mask
 
 
-def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):
+def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5, garment=None, backdrop=None):
     """Inside the garment use the recoloured pixels. Near the edge, unmix each pixel from the photo
     itself: alpha = how far it sits from the nearby background colour towards the nearby garment
     colour. The edge then keeps the photo's own anti-aliasing and dark edge creases instead of
@@ -309,11 +315,27 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5):
         P, Fo, Fn, Bc = rgb[ys, xs], rgb[fy, fx], new[fy, fx], rgb[by, bx]
         w = np.array([1.0, 2.0, 2.0])  # weight colour over lightness, so shadows on the backdrop stay out
         lp, lf, lb = rgb_to_lab(P) * w, rgb_to_lab(Fo) * w, rgb_to_lab(Bc) * w
-        d = lf - lb
-        dd = (d * d).sum(-1)
-        a = ((lp - lb) * d).sum(-1) / np.maximum(dd, 1e-6)
         soft = np.clip(ndimage.gaussian_filter(m.astype(np.float32), 0.9), 0, 1)[ys, xs]
-        a = np.clip(np.where(dd > 0.0016, a, soft), 0, 1)  # too alike to unmix: use the mask
+
+        def unmix(lb):
+            d = lf - lb
+            dd = (d * d).sum(-1)
+            # too alike to unmix: use the mask
+            a = np.clip(np.where(dd > 0.0016, ((lp - lb) * d).sum(-1) / np.maximum(dd, 1e-6), soft), 0, 1)
+            return a, np.linalg.norm(lp - (lb + a[:, None] * d), axis=-1)
+
+        a, miss = unmix(lb)
+        # Where three things meet (a grey gap beside a hand) the nearest surround pixel is the wrong
+        # one to unmix a rim pixel against: also try the studio backdrop and keep whichever explains
+        # the pixel better. Not for pixels of another garment at a shared seam.
+        rim = ~m[ys, xs] if garment is None else ~(m[ys, xs] | garment[ys, xs])
+        if backdrop is not None:
+            kb = np.broadcast_to(rgb_to_lab(np.asarray(backdrop, np.float32)[None]) * w, lb.shape)
+            a2, miss2 = unmix(kb)
+            use = rim & (miss2 < miss)
+            a = np.where(use, a2, a)
+            lb = np.where(use[:, None], kb, lb)
+            Bc = np.where(use[:, None], np.asarray(backdrop, np.float32)[None], Bc)
         # A soft blend between garment and surround that were close in lightness (a mint collar on skin)
         # turns into a blur once the garment is much darker or lighter (navy on skin). Steepen it by
         # how much the lightness contrast grows, so the new edge is as crisp as the AI drew it.

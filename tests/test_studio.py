@@ -162,6 +162,26 @@ def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     assert again["ai_done"] == 0 and again["ai_skipped"] == 8 and again["recolour_skipped"] == 8
 
 
+def test_seam_between_top_and_bottom_keeps_no_base_colour(tmp_path):
+    """Pixels where the top meets the bottom are garment: each garment's rim check must not leave
+    them unpainted in the base colours (a dotted mint/lilac line along the hem)."""
+    spec = studio.Spec(top_colours=["Red"], pairing="match", models=1, poses=["front_main"], same_models=True)
+    def gen(prompt, refs):  # with the dull grey-lilac shadow a real hem casts on the bottom
+        img = Image.open(io.BytesIO(fake_generate(prompt, refs))).convert("RGB")
+        ImageDraw.Draw(img).rectangle((96, 248, 204, 250), fill="#6D6783")
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+
+    b = studio.Batch(spec, out=tmp_path, generate=gen, workers=1)
+    b.run()
+    out = np.asarray(Image.open(next(tmp_path.glob("*/m0001/Red__Red/front_main.png"))).convert("RGB"))
+    base = np.asarray(Image.open(next(tmp_path.glob("*/m0001/_base/*/front_main.png"))).convert("RGB"))
+    seam = (slice(244, 257), slice(100, 200))  # the hem: top above, bottom below
+    unpainted = np.abs(out[seam].astype(int) - base[seam].astype(int)).max(-1) < 15
+    assert unpainted.sum() == 0
+
+
 def test_jpg_only_saves_disk_and_still_resumes(tmp_path):
     s = studio.Spec(top_colours=["Red", "White"], models=1, keep_png=False)
     b = studio.Batch(s, out=tmp_path, generate=fake_generate)

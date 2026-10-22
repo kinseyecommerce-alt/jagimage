@@ -79,6 +79,34 @@ def test_bright_backdrop_gap_between_arm_and_body_is_not_recoloured():
     assert np.asarray(out.convert("RGB"))[180, 210].min() > 240  # still white backdrop, not red
 
 
+def test_backdrop_slot_between_garment_and_hand_gets_no_paint():
+    """Where garment, backdrop and a hand meet, the nearest surround of a grey rim pixel is the hand:
+    unmixing against it called the grey half garment and painted a red block beside the hand."""
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.rectangle((206, 290, 207, 328), fill="#EDEDED")   # 2 px backdrop slot along the garment's side
+    d.rectangle((208, 290, 236, 328), fill="#6B4A3A")   # the hand just beyond it
+    out, _, mask = recolor_image(img, "#8FD3A8", "#E31B23")
+    px = np.asarray(out.convert("RGB")).astype(int)[300:320, 206:208]
+    assert (np.abs(px - np.asarray(img).astype(int)[300:320, 206:208]).max() < 12)  # still backdrop grey
+
+
+def test_hem_shadow_between_top_and_bottom_is_painted():
+    """Pixel values from a real Flash photo: mint shirt, a dark grey-lilac shadow line under the hem
+    (in the top's mask), lilac trousers. Recoloured top then bottom, the shadow line must not keep
+    its base colour as a dotted line along the hem."""
+    rgb = np.zeros((40, 60, 3), np.uint8)
+    rgb[:19], rgb[19], rgb[20:] = (167, 210, 193), (109, 103, 131), (182, 148, 199)
+    top = np.zeros((40, 60), np.float32)
+    top[:20] = 1
+    bottom = 1 - top
+    img = Image.fromarray(rgb)
+    out, _, _ = recolor_image(img, "#8FD3A8", "#E31B23", mask=top, others=bottom)
+    out, _, _ = recolor_image(out, "#C4A3EE", "#E31B23", mask=bottom, others=top)
+    r, g, b = np.asarray(out.convert("RGB")).astype(int)[19, 10:50].T
+    assert (r - g > 60).all() and (r - b > 60).all()
+
+
 def test_pale_tinted_halo_and_shoes_beside_a_deep_base_stay_out():
     """Gemini Flash leaves a faint purple tint in the bright backdrop along the trousers and in the
     shoe shadows: same hue, pale. It must not join the mask (it showed as a ragged dark fringe)."""
