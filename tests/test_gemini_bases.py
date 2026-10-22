@@ -68,6 +68,17 @@ def test_backdrop_between_legs_is_not_recoloured():
     assert (np.asarray(out.convert("RGB"))[300, 150] == np.asarray(img)[300, 150]).all()
 
 
+def test_bright_backdrop_gap_between_arm_and_body_is_not_recoloured():
+    """Studio backdrops are brighter mid-frame than at the photo's edges: a thin gap between a sleeve
+    and the body can be lighter than the edge grey by more than a fixed tolerance. It stays backdrop."""
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.rectangle((209, 150, 211, 205), fill="#FFFFFF")  # 3 px bright gap inside the sleeve line
+    out, _, mask = recolor_image(img, "#8FD3A8", "#E31B23")
+    assert mask[180, 210] < 0.5
+    assert np.asarray(out.convert("RGB"))[180, 210].min() > 240  # still white backdrop, not red
+
+
 def test_pale_tinted_halo_and_shoes_beside_a_deep_base_stay_out():
     """Gemini Flash leaves a faint purple tint in the bright backdrop along the trousers and in the
     shoe shadows: same hue, pale. It must not join the mask (it showed as a ragged dark fringe)."""

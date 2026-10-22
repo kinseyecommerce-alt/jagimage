@@ -24,6 +24,7 @@ CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
+BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or skin is mistaken for it
 GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
 
 
@@ -102,10 +103,17 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
 def _fill_holes(m, lab, centre):
     """Close knit speckle, fill small holes (stitching) and larger ones that are just deep shadow of
     the same fabric. Never fill backdrop showing through, e.g. between the legs or arm and body."""
-    studio = np.median(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]), axis=0)
+    border = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
+    studio = np.median(border, axis=0)
+    lo, hi = np.percentile(border[:, 0], [2, 98])
+
+    def backdrop(v):  # grey and within the backdrop's own light range (it is brighter mid-frame than at the edges)
+        return (np.linalg.norm(v - studio, axis=-1) < 0.04) | (
+            (np.hypot(v[..., 1], v[..., 2]) < BACKDROP_CHROMA) & (v[..., 0] > lo - 0.03) & (v[..., 0] < hi + 0.06))
+
     closed = ndimage.binary_closing(m, structure=np.ones((5, 5), bool))
     # closing bridges narrow gaps too (the thin top of the gap between the legs): undo it there
-    m = closed & ~(~m & (np.linalg.norm(lab - studio, axis=-1) < 0.04))
+    m = closed & ~(~m & backdrop(lab))
     holes = ndimage.binary_fill_holes(m) & ~m
     hl, hn = ndimage.label(holes)
     if hn:
@@ -113,8 +121,7 @@ def _fill_holes(m, lab, centre):
         hs = ndimage.sum(holes, hl, index=idx)
         hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
         same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
-        backdrop = np.linalg.norm(hm - studio, axis=1) < 0.04
-        m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same) & ~backdrop])
+        m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same) & ~backdrop(hm)])
     return m
 
 
