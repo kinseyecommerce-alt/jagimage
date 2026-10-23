@@ -264,6 +264,31 @@ def test_photo_off_the_studio_backdrop_is_made_again(tmp_path):
     assert len(tries) == 2 and counts["ai_done"] == 1 and counts["errors"] == 0
 
 
+def test_collage_and_washed_out_base_photos_are_made_again(tmp_path):
+    """Seen with Flash: a 4-panel product infographic, and lilac trousers so pale they were almost
+    white (their edge can't be told from the backdrop). Both are rejected and asked for again."""
+    s = studio.Spec(top_colours=["White"], models=1)  # light colours: mint top, lilac bottom base
+    tries = []
+
+    def gen(p, refs):
+        tries.append(1)
+        if len(tries) == 1:  # four small figures side by side
+            one = Image.open(io.BytesIO(fake_generate(p, refs))).convert("RGB").resize((150, 200))
+            img = Image.new("RGB", (300, 400), "#EDEDED")
+            for x, y in ((0, 0), (150, 0), (0, 200), (150, 200)):
+                img.paste(one, (x, y))
+        elif len(tries) == 2:  # washed-out lilac bottom
+            img = Image.open(io.BytesIO(fake_generate(p.replace("#C4A3EE", "#D6CCE2"), refs))).convert("RGB")
+        else:
+            return fake_generate(p, refs)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+
+    counts = studio.Batch(s, out=tmp_path, generate=gen, retries=3).run()
+    assert len(tries) == 3 and counts["ai_done"] == 1 and counts["errors"] == 0
+
+
 def _get(url):
     with urllib.request.urlopen(url) as r:
         return r.status, r.read()

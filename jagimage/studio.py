@@ -47,6 +47,7 @@ TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just 
 FULL_FRAMING = "Full body head to shoes in frame with small margins, model about 85-90% of frame height"
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
 BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
+MIN_BASE_STRENGTH = 0.33  # a base garment keeps at least this share of its base colour's chroma (good ones: >= 0.38)
 BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -281,6 +282,36 @@ def backdrop_problem(lab) -> Optional[str]:
     light = float(np.median(edge[:, 0]))
     if colourful > BACKDROP_MAX_CHROMA or light < BACKDROP_MIN_LIGHT:
         return f"the background isn't the plain studio backdrop (colour {colourful:.3f}, lightness {light:.2f})"
+    return None
+
+
+def garment_problem(lab, masks: dict, base) -> Optional[str]:
+    """Why the garments in an AI base photo can't be recoloured cleanly, or None.
+    - More than one figure (Flash once drew a 4-panel product infographic): the top's mask then
+      falls into several similar pieces; every real photo checked has one.
+    - A garment much paler than its base colour (lilac trousers that came out nearly white): its
+      edge can't be told from the light backdrop and the recolour leaves a ragged fringe."""
+    import numpy as np
+    from scipy import ndimage
+
+    from .recolor import hex_to_lab
+
+    pieces, n = ndimage.label(masks["top"] > 0.5)
+    if n > 1:
+        sizes = np.sort(ndimage.sum(masks["top"] > 0.5, pieces, index=np.arange(1, n + 1)))[::-1]
+        if (sizes >= 0.3 * sizes[0]).sum() > 1:
+            return "the photo shows more than one figure (a collage or several views), not one model"
+    chroma = np.hypot(lab[..., 1], lab[..., 2])
+    for part, key, bases in (("top", base[0], TOP_BASES), ("bottom", base[1], BOTTOM_BASES)):
+        if part not in masks or not key:
+            continue
+        core = masks[part] > 0.95
+        if not core.any():
+            continue
+        want = float(np.hypot(*hex_to_lab(bases[key][1])[1:]))
+        got = float(np.median(chroma[core]))
+        if got < MIN_BASE_STRENGTH * want:
+            return f"the {part} came out too pale for a clean recolour ({got:.3f} colour strength, needs {MIN_BASE_STRENGTH * want:.3f})"
     return None
 
 
@@ -584,6 +615,9 @@ class Batch:
             if (bottom > 0.95).sum() < 0.002 * bottom.size:
                 raise MaskError("the bottom isn't in its base colour")
             masks["bottom"] = bottom
+        why = garment_problem(lab, masks, base)
+        if why:
+            raise MaskError(why)
         stem = path.name.replace(".tmp.png", "")
         for k, mk in masks.items():  # saved next to the base; edit them to fix an edge
             save_mask(path.parent / f"{stem}_{k}_mask.png", mk)
