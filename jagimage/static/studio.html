@@ -205,6 +205,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <input type="password" id="key" placeholder="API key (kept on this computer only)" style="flex:1" autocomplete="off">
         <button class="btn" id="saveKey">Save key</button>
       </div>
+      <label class="check hide" id="rememberField"><input type="checkbox" id="rememberKey" checked> Remember on this computer (saved in your Windows user folder)</label>
     </section>
 
     <section class="panel">
@@ -466,11 +467,12 @@ async function init() {
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
   seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
   $("runpodUrl").value = S.opts.runpod_url || "";
+  $("rememberField").classList.toggle("hide", !S.opts.can_remember);
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   $("saveKey").onclick = async () => {
     const k = $("key").value.trim(), url = S.provider === "runpod" ? $("runpodUrl").value.trim() : "";
     if (!k && !url) return;
-    try { keys(await api("/api/keys", { [S.provider]: k, runpod_url: url })); $("key").value = ""; $("err").textContent = ""; } catch (e) { $("err").textContent = e.message; }
+    try { keys(await api("/api/keys", { [S.provider]: k, runpod_url: url, remember: $("rememberKey").checked })); $("key").value = ""; $("err").textContent = ""; } catch (e) { $("err").textContent = e.message; }
   };
   setupSave();
   $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };

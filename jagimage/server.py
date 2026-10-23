@@ -49,9 +49,31 @@ def options(app=None) -> dict:
         "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
-        "out": str(Path(app.out).resolve()) if app else None, "drive_folders": drive_folders(),
+        "out": str(Path(app.out).resolve()) if app else None, "can_remember": bool(app and app.keys_file), "drive_folders": drive_folders(),
         "next_model": {c: studio.ModelLedger(app.out).next_free(c) for c in L.CATEGORIES} if app else {},
     }
+
+
+def save_keys(path: Path):
+    """Keep the saved API keys in a file in the user's own profile (desktop app, opt-in)."""
+    keys = {env: os.environ[env] for env in [*KEY_ENV.values(), RUNPOD_URL_ENV] if os.environ.get(env)}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(keys))
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+
+
+def load_keys(path: Path):
+    """Put remembered keys into this process (only ones not already set)."""
+    try:
+        keys = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return
+    allowed = {*KEY_ENV.values(), RUNPOD_URL_ENV}
+    for env, value in keys.items():
+        if env in allowed and isinstance(value, str) and value and not os.environ.get(env):
+            os.environ[env] = value
 
 
 def default_engine(spec: studio.Spec):
@@ -187,8 +209,9 @@ class Preview:
 
 
 class Studio:
-    def __init__(self, out="output/studio", engine=default_engine, workers=4):
+    def __init__(self, out="output/studio", engine=default_engine, workers=4, keys_file=None):
         self.out, self.engine, self.workers = out, engine, workers
+        self.keys_file = Path(keys_file) if keys_file else None  # desktop app: remembered API keys
         self.jobs = {}
         self.previews = {}
         self.lock = threading.Lock()
@@ -375,6 +398,8 @@ def make_handler(app: Studio):
                         if not url.startswith(("https://", "http://")):
                             raise ValueError("The RunPod address starts with https://, e.g. https://abc123-8000.proxy.runpod.net")
                         os.environ[RUNPOD_URL_ENV] = url
+                    if app.keys_file and body.get("remember"):
+                        save_keys(app.keys_file)
                     return self._json(ready())
                 if parts == ["api", "jobs"]:
                     return self._json(app.start(body).status())
@@ -407,7 +432,7 @@ def thumb(path: Path, size=360) -> bytes:
     return cache.read_bytes()
 
 
-def serve(host="127.0.0.1", port=8765, out="output/studio", workers=4, engine=default_engine):
-    app = Studio(out=out, engine=engine, workers=workers)
+def serve(host="127.0.0.1", port=8765, out="output/studio", workers=4, engine=default_engine, keys_file=None):
+    app = Studio(out=out, engine=engine, workers=workers, keys_file=keys_file)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     return app, httpd
