@@ -20,6 +20,18 @@ GEMINI_DEFAULT_MODEL = GEMINI_MODELS["flash"]
 GEMINI_SIZES = ("1K", "2K", "4K")
 
 
+def usage_tokens(usage) -> Optional[dict]:
+    """Google's own count of what one request is billed for: prompt tokens (text and reference
+    photos), image output tokens (1,680 per 2K image) and other output tokens."""
+    if usage is None:
+        return None
+    if hasattr(usage, "model_dump"):
+        usage = usage.model_dump(mode="json", by_alias=True, exclude_none=True)
+    image = sum(d.get("tokenCount", 0) for d in usage.get("candidatesTokensDetails") or [] if d.get("modality") == "IMAGE")
+    out = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
+    return {"prompt": usage.get("promptTokenCount", 0), "image_out": image, "other_out": max(0, out - image)}
+
+
 def to_png(data: bytes) -> bytes:
     """Re-encode any image bytes as PNG (Gemini may return JPEG)."""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -77,6 +89,22 @@ class GeminiProvider:
         self.model = model or os.environ.get("JAGIMAGE_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
         self.image_size = image_size
         self.aspect_ratio = aspect_ratio
+        self.usage_log = None  # Path of a JSONL file: Google's billed token counts per request
+
+    def _log_usage(self, key, usage, batch: bool):
+        import json
+        import threading
+        import time
+        from pathlib import Path
+
+        row = usage_tokens(usage)
+        if not row or not self.usage_log:
+            return
+        row = {"key": key, "model": self.model.replace("models/", "").replace("-preview", ""), "batch": batch,
+               "time": round(time.time()), **row}
+        lock = self.__dict__.setdefault("_usage_lock", threading.Lock())
+        with lock, open(Path(self.usage_log), "a") as f:
+            f.write(json.dumps(row) + "\n")
 
     def generate(self, prompt: str, refs: List[str]) -> bytes:
         from google.genai import types
@@ -93,6 +121,7 @@ class GeminiProvider:
             image_config=types.ImageConfig(aspect_ratio=self.aspect_ratio, image_size=self.image_size),
         )
         resp = self.client.models.generate_content(model=self.model, contents=contents, config=config)
+        self._log_usage(None, getattr(resp, "usage_metadata", None), batch=False)
         for cand in resp.candidates or []:
             for part in (cand.content.parts if cand.content else []) or []:
                 if getattr(part, "inline_data", None) and part.inline_data.data:
@@ -149,6 +178,8 @@ class GeminiProvider:
         from google.genai import types
 
         say = on_status or (lambda s: None)
+        if state_file and not self.usage_log:
+            self.usage_log = Path(state_file).with_name("_usage.jsonl")
         state = json.loads(Path(state_file).read_text()) if state_file and Path(state_file).exists() else {}
         wanted = {k for k, _, _ in jobs}
         pending = [name for name, keys in state.items() if set(keys) & wanted]
@@ -198,6 +229,7 @@ class GeminiProvider:
                 if row.get("error") or not row.get("response"):
                     out[key] = RuntimeError(f"Gemini batch: {row.get('error') or 'no response'}")
                     continue
+                self._log_usage(key, row["response"].get("usageMetadata"), batch=True)
                 img = None
                 for cand in row["response"].get("candidates") or []:
                     for part in (cand.get("content") or {}).get("parts") or []:

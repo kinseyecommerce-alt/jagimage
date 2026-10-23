@@ -262,6 +262,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="stat" style="margin-top:10px">
         <span>Errors</span><span class="v" id="errTxt">0</span>
         <span>Time</span><span class="v" id="timeTxt">–</span>
+        <span>Real Google cost (from Google's usage counts)</span><span class="v" id="costTxt">–</span>
         <span>Copying finished photos to</span><span class="v" id="exportTxt" style="word-break:break-all">–</span>
       </div>
       <div class="log" id="log"></div>
@@ -511,6 +512,8 @@ function showJob(j) {
   $("errTxt").textContent = c.errors; const m = Math.floor(j.elapsed / 60);
   $("timeTxt").textContent = `${m} min ${j.elapsed % 60} s` + (j.running ? (j.stopping ? " · stopping…" : " · running") : " · finished") + (j.error ? " · " + j.error : "");
   $("exportTxt").textContent = j.export || "–";
+  const ac = j.actual_cost;
+  $("costTxt").textContent = ac ? `₹${fmt(ac.inr)} for ${fmt(ac.requests)} AI images (₹${ac.per_request_inr} each, ₹${ac.per_photo_inr} per finished photo${ac.extra_images_inr ? `; ₹${ac.extra_images_inr} of it for extra images the AI added` : ""})` : "–";
   $("start").disabled = j.running; $("stop").disabled = !j.running;
   if (j.batch && j.running) $("timeTxt").textContent += ` · Google batch: ${j.batch.images} photos, ${j.batch.state}`;
   $("log").innerHTML = j.log.map((e) => e.kind === "batch" ? `<div>Google batch job: ${esc(e.images)} photos, ${esc(e.state)}</div>` : e.kind === "errors" ? `<div class="e">m${String(e.model).padStart(4, "0")}: ${esc(e.error)}</div>`

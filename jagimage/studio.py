@@ -37,6 +37,8 @@ HANDS_FREE = ("Hands free: both hands relaxed and open, never touching the cloth
               "not holding anything, arms kept a little away from the body so the whole garment is visible, "
               "including its side seams and hem")
 HANDS_FREE_AVOID = "hands on the clothes, hands in pockets, hands tucked in, arms covering the garment, holding an object"
+# Flash sometimes returns several images in one response (2 to 35 seen); each is billed, one is used.
+ONE_IMAGE = "Output exactly one image: a single photograph of this one model, not a sequence, grid, collage or set of variations."
 NO_HANDS_FREE = {"handpocket"}  # poses that need the hands on the clothes
 NOT_MANNEQUIN = "mannequin, dummy, doll, ghost mannequin, faceless figure, plastic or wax figure, CGI character"
 SHOTS = {"outfit": "Top and bottom (full body, both recoloured)", "top": "Top only (head to just above the knee)"}
@@ -226,6 +228,7 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     hands = spec.hands_free and pose not in NO_HANDS_FREE
     if hands:
         text += f" {HANDS_FREE}."
+    text += f" {ONE_IMAGE}"
     if spec.extra:
         text += f" Also: {spec.extra.rstrip('.')}."
     if kids:
@@ -357,6 +360,8 @@ class Batch:
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
         self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0}
+        if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
+            generate.set_usage_log(self.root / "_usage.jsonl")
 
     # ---- paths
     def model_dir(self, m: int) -> Path:

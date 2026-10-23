@@ -24,6 +24,9 @@ BATCH_DISCOUNT = 0.5    # batch mode: half the standard price (Google and OpenAI
 RUNPOD_USD_PER_HOUR = float(os.environ.get("JAGIMAGE_RUNPOD_USD_PER_HOUR", "2.69"))
 RUNPOD_SECONDS = float(os.environ.get("JAGIMAGE_RUNPOD_SECONDS", "45"))
 USD_INR = float(os.environ.get("JAGIMAGE_USD_INR", "96.5"))
+# USD per 1M tokens at standard price (batch is half): input text/image, image output, other output.
+TOKEN_PRICES = {"gemini-3.1-flash-image": (0.50, 60.0, 3.0), "gemini-3-pro-image": (2.0, 120.0, 12.0)}
+TOKENS_PER_IMAGE = {"gemini-3.1-flash-image": 1680, "gemini-3-pro-image": 1120}  # 2K
 
 
 def gemini_model(choice: Optional[str] = None) -> str:
@@ -78,4 +81,38 @@ def sum_estimates(rows: list, photos: int) -> dict:
     out["with_retries_inr"] = round(out["with_retries_usd"] * out["usd_inr"])
     out["per_photo_usd"] = round(out["with_retries_usd"] / max(1, photos), 4)
     out["per_photo_inr"] = round(out["with_retries_usd"] * out["usd_inr"] / max(1, photos), 2)
+    return out
+
+
+def actual_cost(usage_file, photos: int = 0) -> Optional[dict]:
+    """The real AI cost of a batch, from Google's billed token counts (saved per request in
+    _usage.jsonl), rather than an estimate. Includes photos the app rejected and asked for again,
+    and extra images the AI sometimes returns in one response (billed, though only one is used)."""
+    import json
+    from pathlib import Path
+
+    p = Path(usage_file)
+    if not p.exists():
+        return None
+    usd = extra = 0.0
+    n = unknown = 0
+    for line in p.read_text().splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        rates = TOKEN_PRICES.get(r.get("model"))
+        if not rates:
+            unknown += 1
+            continue
+        half = BATCH_DISCOUNT if r.get("batch") else 1.0
+        per_image = TOKENS_PER_IMAGE[r["model"]]
+        usd += half * (r["prompt"] * rates[0] + r["image_out"] * rates[1] + r["other_out"] * rates[2]) / 1e6
+        extra += half * max(0, r["image_out"] - per_image) * rates[1] / 1e6
+        n += 1
+    if not n:
+        return None
+    out = {"requests": n, "usd": round(usd, 2), "inr": round(usd * USD_INR), "per_request_inr": round(usd * USD_INR / n, 2),
+           "extra_images_inr": round(extra * USD_INR), "usd_inr": USD_INR, "unpriced_requests": unknown}
+    if photos:
+        out["per_photo_inr"] = round(usd * USD_INR / photos, 2)
     return out

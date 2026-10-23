@@ -90,6 +90,8 @@ def default_engine(spec: studio.Spec):
 
     if hasattr(provider, "run_batch"):
         generate.run_batch = provider.run_batch  # batch mode (half price), used when spec.batch is on
+    if hasattr(provider, "usage_log"):  # Google's billed token counts, for the batch's real cost
+        generate.set_usage_log = lambda path: setattr(provider, "usage_log", path)
     return generate
 
 
@@ -146,7 +148,19 @@ class Job:
                 "error": self.error or fatal, "elapsed": round((self.finished or time.time()) - self.started),
                 "ai_progress": c["ai_done"] + c["ai_skipped"], "recolour_progress": c["recoloured"] + c["recolour_skipped"],
                 "log": list(self.log)[:40], "recent": list(self.recent), "export": self.export,
-                "batch": self.batch_state}
+                "batch": self.batch_state, "actual_cost": self.actual_cost()}
+
+    def actual_cost(self):
+        from .pricing import actual_cost
+
+        rows = [r for b in self.batches if (r := actual_cost(b.root / "_usage.jsonl", b.spec.plan()["recoloured_images"]))]
+        if not rows:
+            return None
+        inr = sum(r["inr"] for r in rows)
+        req = sum(r["requests"] for r in rows)
+        photos = sum(b.spec.plan()["recoloured_images"] for b in self.batches)
+        return {"inr": inr, "requests": req, "per_request_inr": round(inr / req, 2), "per_photo_inr": round(inr / max(1, photos), 2),
+                "extra_images_inr": sum(r["extra_images_inr"] for r in rows)}
 
 
 def sum_plans(plans):
