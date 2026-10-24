@@ -700,6 +700,19 @@ async function addFiles(list) {
   if (state.docs.length) openDoc(Math.max(0, state.docs.findIndex((d, i) => i >= start - 1 && !d.sample)));
   toast(`Added ${files.length} photo${files.length > 1 ? "s" : ""}.`);
 }
+// The region to pre-select in a model photo: the biggest coloured region that isn't the grey
+// backdrop (the biggest region overall) or skin (muted orange-beige; a bright orange tee is far
+// more saturated), so the first colour tapped recolours a garment.
+// The garment's lit and shaded sides can land in separate regions: all regions of its hue are selected.
+function garmentRegions(doc) {
+  const cs = doc.clusters || [], hueOf = (c) => Math.atan2(c.b, c.a) * 180 / Math.PI;
+  const coloured = (c) => { const ch = Math.hypot(c.a, c.b), h = hueOf(c); return !(c.parent || c.parent === 0) && ch > 0.03 && !(h > 25 && h < 95 && ch < 0.13); };
+  let best = -1;
+  cs.forEach((c, i) => { if (coloured(c) && (best < 0 || c.share > cs[best].share)) best = i; });
+  if (best < 0) return [0];
+  const h0 = hueOf(cs[best]), near = (h) => Math.abs(((h - h0 + 540) % 360) - 180) < 25;
+  return cs.map((c, i) => i).filter((i) => i === best || (coloured(cs[i]) && near(hueOf(cs[i]))));
+}
 function openDoc(i) {
   const prev = cur(); if (prev && prev !== state.docs[i] && prev.maps && state.docs.length > 3) { prev.maps = null; prev.preview = null; } // free memory
   state.active = i; state.sel.clear(); state.hover = -1;
@@ -709,7 +722,7 @@ function openDoc(i) {
     else ensureMaps(doc);
     if (!doc.history.length) { doc.history = [{ label: "Opened", edits: {} }]; doc.hpos = 0; }
     view.width = doc.w; view.height = doc.h; $("dims").textContent = `${doc.w} × ${doc.h} px`;
-    if (doc.clusters.length && !Object.keys(doc.edits).length) state.sel.add(0);
+    if (doc.clusters.length && !Object.keys(doc.edits).length) garmentRegions(doc).forEach((r) => state.sel.add(r));
     redraw(); busy(false); renderAll();
   }, 10);
 }
@@ -952,7 +965,7 @@ document.addEventListener("keydown", (e) => {
   else if (!typing && e.key.toLowerCase() === "c" && !mod && !e.repeat) compare(true);
 });
 document.addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "c") compare(false); });
-const resegment = () => { const d = cur(); if (!d) return; busy(true); setTimeout(() => { segment(d); state.sel.clear(); state.sel.add(0); redraw(); refreshThumb(d); busy(false); renderAll(); }, 10); };
+const resegment = () => { const d = cur(); if (!d) return; busy(true); setTimeout(() => { segment(d); state.sel.clear(); garmentRegions(d).forEach((r) => state.sel.add(r)); redraw(); refreshThumb(d); busy(false); renderAll(); }, 10); };
 $("kRange").addEventListener("input", (e) => { $("kVal").textContent = e.target.value; });
 $("kRange").addEventListener("change", (e) => { state.k = +e.target.value; resegment(); });
 $("wRange").addEventListener("input", (e) => { $("wVal").textContent = (+e.target.value).toFixed(2); });
@@ -983,10 +996,22 @@ function sampleTee() {
   return c;
 }
 
+// ---------- Sample photos: real AI models in the base colours (mint top, lilac bottom) ----------
+const SAMPLES = [["Men, half sleeve tee", "samples/men-half-sleeve.jpg"], ["Men, sweatshirt (back)", "samples/men-sweatshirt-back.jpg"],
+  ["Women, tee", "samples/women-tee.jpg"], ["Boys, tee and shorts", "samples/boys-tee.jpg"], ["Girls, tee and shorts", "samples/girls-tee.jpg"]];
+function loadSample([name, url]) {
+  return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(makeDoc(name, imageToCanvas(img), true)); img.onerror = () => rej(new Error(url)); img.src = url; });
+}
+
 // ---------- Start ----------
 setMode("match"); setHex(state.hex); renderPalette();
-state.docs.push(makeDoc("Sample tee", sampleTee(), true));
-openDoc(0);
-setTimeout(() => { const d = cur(); if (d && d.clusters && !Object.keys(d.edits).length) { state.sel.clear(); state.sel.add(0); renderRegions(); } }, 60);
+(async () => {
+  busy(true);
+  const got = (await Promise.allSettled(SAMPLES.map(loadSample))).filter((r) => r.status === "fulfilled").map((r) => r.value);
+  busy(false);
+  state.docs.push(...(got.length ? got : [makeDoc("Sample tee", sampleTee(), true)])); // drawn tee only if the photos can't load
+  openDoc(0);
+  setTimeout(() => { const d = cur(); if (d && d.clusters && !Object.keys(d.edits).length) { state.sel.clear(); garmentRegions(d).forEach((r) => state.sel.add(r)); renderRegions(); } }, 60);
+})();
 })();
 </script>
