@@ -71,6 +71,20 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
 /* Stage */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
 .toolbar .sep { flex: 1 }
+.garmentbar { gap: 10px 14px }
+.gl { display: inline-flex; align-items: center; gap: 8px; font-weight: 600 }
+#garment { border: 1px solid var(--accent); border-radius: 8px; padding: 7px 10px; background: var(--panel); font-weight: 500; min-width: 0; max-width: 100% }
+.gstate { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted) }
+.gstate span { display: inline-flex; align-items: center; gap: 5px }
+.gstate .sw { width: 16px; height: 16px }
+.quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100% }
+.ql { font-weight: 600 }
+.quickpal { display: flex; flex-wrap: wrap; gap: 6px }
+.qsw { width: 32px; height: 32px; border-radius: 7px; border: 1px solid var(--line); padding: 0; position: relative }
+.qsw:hover { outline: 2px solid var(--accent); outline-offset: 1px }
+.qsw.on { outline: 2px solid var(--accent); outline-offset: 2px }
+.qcustom { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer }
+.qcustom input { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 2px; background: var(--panel) }
 .stage { position: relative; display: grid; place-items: center; min-height: 320px; border-radius: 8px; overflow: hidden;
   background: repeating-conic-gradient(var(--check1) 0 25%, var(--check2) 0 50%) 50% / 18px 18px }
 .frame { position: relative; display: inline-block; max-width: 100%; line-height: 0 }
@@ -161,6 +175,21 @@ progress { width: 100%; accent-color: var(--accent); height: 6px }
   </aside>
 
   <section class="panel">
+    <div class="toolbar garmentbar">
+      <label for="garment" class="gl">Garment
+        <select id="garment">
+          <option value="top">Top</option>
+          <option value="bottom">Bottom</option>
+          <option value="both">Top and bottom (same colour)</option>
+          <option value="manual">Tap regions myself</option>
+        </select></label>
+      <span id="garmentState" class="gstate"></span>
+      <div class="quick" role="group" aria-label="Colour for the chosen garment">
+        <span class="ql">Colour</span>
+        <div class="quickpal" id="quickPal"></div>
+        <label class="qcustom" title="Any colour"><input id="quickPicker" type="color" value="#0c2340" aria-label="Any colour"><span>Custom</span></label>
+      </div>
+    </div>
     <div class="toolbar">
       <button class="btn small" id="undoBtn" type="button" title="Undo (⌘Z)">Undo</button>
       <button class="btn small" id="redoBtn" type="button" title="Redo (⇧⌘Z)">Redo</button>
@@ -372,14 +401,91 @@ function segment(doc) {
   for (const arr of [maps.labels, maps.label2]) for (let i = 0; i < arr.length; i++) arr[i] = remap[arr[i]];
   doc.clusters = order.map((old) => ({ ...clusters[old], share: maps.counts[old] / total }));
   doc.clusters.forEach((c) => { c.hex = labToHex(c.L, c.a, c.b); });
-  doc.maps = maps; doc.baseK = doc.clusters.length; doc.splits = []; doc.edits = {}; doc.history = [{ label: "Detected " + doc.clusters.length + " regions", edits: {} }]; doc.hpos = 0;
+  doc.maps = maps; doc.baseK = doc.clusters.length; doc.splits = []; doc.edits = {};
+  attachGarments(doc);
+  const found = Object.keys(doc.garments).map((k) => k === "top" ? "top" : "bottom");
+  doc.history = [{ label: found.length ? "Found the " + found.join(" and ") : "Detected " + doc.baseK + " regions", edits: {} }]; doc.hpos = 0;
   buildPreview(doc);
 }
 function ensureMaps(doc) {
   if (doc.maps) return;
   doc.clusters.length = doc.baseK; doc.maps = assign(doc); // rebuild, then replay any "part" splits in order
+  attachGarments(doc);
   (doc.splits || []).forEach((s) => splitAt(doc, s, false));
   buildPreview(doc);
+}
+
+// ---------- Top and bottom, found by their base colours ----------
+// Jag Studio photos wear a mint (or bottle green) top and a lilac (or deep purple) bottom. Each
+// garment is found by hue, which the grey studio, skin, hair and white shoes never share, the
+// same way as the desktop app: strict hue match, keep the big connected pieces, grow into the
+// connected shadows of the same hue (never lighter than the lit fabric), fill small holes but
+// never backdrop showing through.
+const GARMENT_HUES = { top: "#8FD3A8", bottom: "#C4A3EE" };
+function garmentMask(doc, baseHex) {
+  const { src, w: W, h: H } = doc, n = W * H, lab = [0, 0, 0];
+  const L = new Float32Array(n), C = new Float32Array(n), Hh = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); L[i] = lab[0]; C[i] = Math.hypot(lab[1], lab[2]); Hh[i] = Math.atan2(lab[2], lab[1]); }
+  const b = hexToLab(baseHex), hb = Math.atan2(b[2], b[1]);
+  const dh = (h, r) => { let d = Math.abs(h - r); return d > Math.PI ? 2 * Math.PI - d : d; };
+  const R40 = 40 * Math.PI / 180, R28 = 28 * Math.PI / 180;
+  let sx = 0, sy = 0, cnt = 0; const cs = [];
+  for (let i = 0; i < n; i++) if (C[i] > 0.025 && dh(Hh[i], hb) < R40) { sx += Math.cos(Hh[i]); sy += Math.sin(Hh[i]); cnt++; if ((i & 7) === 0) cs.push(C[i]); }
+  if (cnt < 0.01 * n) return null;
+  const hc = Math.atan2(sy, sx); cs.sort((p, q) => p - q); const cc = cs[cs.length >> 1] || 0.05;
+  let m = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (dh(Hh[i], hc) < R28 && C[i] > Math.max(0.02, 0.35 * cc)) m[i] = 1;
+  // keep the big connected pieces (same-hue specks elsewhere stay out)
+  const lbl = new Int32Array(n), q = new Int32Array(n), sizes = [0];
+  for (let s0 = 0; s0 < n; s0++) { if (!m[s0] || lbl[s0]) continue; const id = sizes.length; let qh = 0, qt = 0; lbl[s0] = id; q[qt++] = s0;
+    while (qh < qt) { const i = q[qh++], x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && m[j] && !lbl[j]) { lbl[j] = id; q[qt++] = j; } }
+    sizes.push(qt); }
+  const big = Math.max(...sizes); if (big < 0.005 * n) return null;
+  let lmax = []; for (let i = 0; i < n; i++) { if (m[i] && sizes[lbl[i]] >= 0.5 * big) lmax.push(L[i]); else m[i] = 0; }
+  lmax.sort((p, q) => p - q); const lit = lmax[Math.floor(lmax.length * 0.99)] + 0.03;
+  // grow into connected shadows: same hue, less colour, never lighter than the lit fabric
+  const loose = (i) => dh(Hh[i], hc) < R40 && C[i] > Math.max(0.012, 0.18 * cc) && L[i] < lit;
+  let qh = 0, qt = 0; for (let i = 0; i < n; i++) if (m[i]) q[qt++] = i;
+  while (qh < qt) { const i = q[qh++], x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && !m[j] && loose(j)) { m[j] = 1; q[qt++] = j; } }
+  // fill holes (knit speckle, stitching, deep creases) that the border can't reach, unless backdrop
+  const studio = studioLab(doc), out = new Uint8Array(n); qh = qt = 0;
+  const push = (i) => { if (!m[i] && !out[i]) { out[i] = 1; q[qt++] = i; } };
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); } for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+  while (qh < qt) { const i = q[qh++], x = i % W; if (x > 0) push(i - 1); if (x < W - 1) push(i + 1); if (i >= W) push(i - W); if (i + W < n) push(i + W); }
+  let area = 0; for (let i = 0; i < n; i++) area += m[i];
+  const seen = new Uint8Array(n);
+  for (let s0 = 0; s0 < n; s0++) { if (m[s0] || out[s0] || seen[s0]) continue; qh = qt = 0; seen[s0] = 1; q[qt++] = s0; let sL = 0, sC = 0;
+    while (qh < qt) { const i = q[qh++], x = i % W; sL += L[i]; sC += C[i]; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && !m[j] && !out[j] && !seen[j]) { seen[j] = 1; q[qt++] = j; } }
+    const backdrop = sC / qt < 0.012 && Math.abs(sL / qt - studio[0]) < 0.08;
+    if (!backdrop && qt <= 0.002 * area) for (let k = 0; k < qt; k++) m[q[k]] = 1; }
+  return m;
+}
+function detectGarments(doc) {
+  if (doc.gmask) return doc.gmask;
+  const top = garmentMask(doc, GARMENT_HUES.top), bottom = garmentMask(doc, GARMENT_HUES.bottom);
+  if (top && bottom) for (let i = 0; i < top.length; i++) if (top[i] && bottom[i]) bottom[i] = 0; // a seam pixel belongs to one
+  return (doc.gmask = { top, bottom });
+}
+// Two regions, "Top" and "Bottom", over exactly the garment pixels; the rest keeps its colour regions.
+function attachGarments(doc) {
+  const g = detectGarments(doc), { labels, label2, ratio } = doc.maps, src = doc.src, lab = [0, 0, 0];
+  doc.garments = {};
+  for (const part of ["top", "bottom"]) {
+    const mk = g[part]; if (!mk) continue;
+    const id = doc.clusters.length; let sL = 0, sa = 0, sb = 0, c = 0;
+    for (let i = 0; i < mk.length; i++) if (mk[i]) { labels[i] = id; label2[i] = id; ratio[i] = 0;
+      if ((i & 7) === 0) { const o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); sL += lab[0]; sa += lab[1]; sb += lab[2]; c++; } }
+    const mL = sL / c, ma = sa / c, mb = sb / c;
+    doc.clusters.push({ f: [mL * doc.wL, ma, mb], L: mL, a: ma, b: mb, hex: labToHex(mL, ma, mb), name: part === "top" ? "Top" : "Bottom", garment: part, share: 0 });
+    doc.garments[part] = id;
+  }
+  recountShares(doc);
+}
+// The regions the Garment menu points at.
+function garmentSelection(doc, which) {
+  const g = doc.garments || {};
+  if (which === "both") return [g.top, g.bottom].filter((v) => v != null);
+  return g[which] != null ? [g[which]] : [];
 }
 
 // Split off the connected part around one pixel, so e.g. a black tee can be recoloured
@@ -392,7 +498,8 @@ function splitAt(doc, split, record) {
   doc.clusters.forEach((c, i) => { if (!c.parent && c.parent !== 0 && Math.hypot(c.f[0] - f0[0], c.f[1] - f0[1], c.f[2] - f0[2]) <= split.tol) near[i] = 1; });
   near[L0] = 1;
   const mask = new Uint8Array(W * H), stack = new Int32Array(W * H); let sp = 0, count = 0;
-  const ok = (j) => !mask[j] && labels[j] !== 255 && (near[labels[j]] || (near[label2[j]] && ratio[j] > 150));
+  const garment = new Uint8Array(256); doc.clusters.forEach((c, i) => { if (c.garment) garment[i] = 1; }); // Top/Bottom are never taken over
+  const ok = (j) => !mask[j] && labels[j] !== 255 && !garment[labels[j]] && (near[labels[j]] || (near[label2[j]] && ratio[j] > 150));
   mask[seed] = 1; stack[sp++] = seed;
   let x0 = W, y0 = H, x1 = 0, y1 = 0, grown = 0;
   while (sp) { const i = stack[--sp]; count++; const x = i % W, y = (i / W) | 0;
@@ -407,7 +514,7 @@ function splitAt(doc, split, record) {
     grown = 0;
     const c0 = Math.hypot(f0[1], f0[2]), h0 = Math.atan2(f0[2], f0[1]), studio = studioLab(doc);
     const awayFromStudio = Math.hypot(f0[0] / wL - studio[0], f0[1] - studio[1], f0[2] - studio[2]) > 0.06;
-    const close = (j) => { if (mask[j] || labels[j] === 255) return false; const o = j * 4; rgbToLab(src[o], src[o+1], src[o+2], lab);
+    const close = (j) => { if (mask[j] || labels[j] === 255 || garment[labels[j]]) return false; const o = j * 4; rgbToLab(src[o], src[o+1], src[o+2], lab);
       if (Math.hypot(lab[0] * wL - f0[0], lab[1] - f0[1], lab[2] - f0[2]) >= lim) return false;
       if (awayFromStudio && Math.hypot(lab[0] - studio[0], lab[1] - studio[1], lab[2] - studio[2]) < 0.04) return false;
       if (c0 < 0.04) return true;
@@ -427,7 +534,7 @@ function splitAt(doc, split, record) {
   for (let y = 0; y < bh; y++) { let row = 0; for (let x = 0; x < bw; x++) { row += mask[(y + y0) * W + x + x0]; S[(y + 1) * (bw + 1) + x + 1] = S[y * (bw + 1) + x + 1] + row; } }
   const NL = doc.clusters.length, src = doc.src, lab = [0, 0, 0]; let sL = 0, sa = 0, sb = 0, sc = 0;
   for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
-    const i = (y + y0) * W + x + x0; if (labels[i] === 255) continue;
+    const i = (y + y0) * W + x + x0; if (labels[i] === 255 || garment[labels[i]]) continue;
     let take = mask[i];
     if (!take) { const ax = Math.max(0, x - R), ay = Math.max(0, y - R), bx = Math.min(bw, x + R + 1), by = Math.min(bh, y + R + 1);
       const s = S[by * (bw + 1) + bx] - S[ay * (bw + 1) + bx] - S[by * (bw + 1) + ax] + S[ay * (bw + 1) + ax];
@@ -704,7 +811,28 @@ async function addFiles(list) {
 // The region to pre-select in a model photo: the biggest coloured region that isn't the grey
 // backdrop (the biggest region overall) or skin (muted orange-beige; a bright orange tee is far
 // more saturated), so the first colour tapped recolours a garment.
-// The garment's lit and shaded sides can land in separate regions: all regions of its hue are selected.
+function syncGarmentMenu(doc) {
+  const g = doc.garments || {}, menu = $("garment");
+  menu.querySelector('[value="top"]').disabled = g.top == null; menu.querySelector('[value="bottom"]').disabled = g.bottom == null;
+  menu.querySelector('[value="both"]').disabled = g.top == null || g.bottom == null;
+  if (menu.value !== "manual" && !garmentSelection(doc, menu.value).length) menu.value = g.top != null ? "top" : g.bottom != null ? "bottom" : "manual";
+  state.sel.clear();
+  if (menu.value === "manual") { if (!Object.keys(g).length) garmentRegions(doc).forEach((r) => state.sel.add(r)); }
+  else garmentSelection(doc, menu.value).forEach((r) => state.sel.add(r));
+}
+// The colours right under the Garment menu: the open palette, with the chosen garment's colour marked.
+function renderQuick() {
+  const d = cur(), on = new Set([...state.sel].map((l) => d && d.edits[l] && d.edits[l].hex));
+  $("quickPal").innerHTML = PALETTES[state.palette].map(([n, h]) =>
+    `<button type="button" class="qsw${on.has(h) ? " on" : ""}" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}" aria-label="${esc(n)}" style="background:${h}"></button>`).join("");
+}
+function renderGarmentState() {
+  const d = cur(), el = $("garmentState"); if (!d || !d.garments) { el.innerHTML = ""; return; }
+  const parts = ["top", "bottom"].filter((k) => d.garments[k] != null).map((k) => { const e = d.edits[d.garments[k]];
+    return `<span>${k === "top" ? "Top" : "Bottom"}: ${e ? `<i class="sw" style="background:${e.hex}"></i><b class="mono">${e.hex}</b>` : "not changed"}</span>`; });
+  el.innerHTML = parts.length ? parts.join("") : "No Jag base colours found in this photo: tap the regions to recolour.";
+}
+// For photos not in the base colours ("Tap regions myself"): the garment's lit and shaded sides can land in separate regions: all regions of its hue are selected.
 function garmentRegions(doc) {
   const cs = doc.clusters || [], hueOf = (c) => Math.atan2(c.b, c.a) * 180 / Math.PI;
   const coloured = (c) => { const ch = Math.hypot(c.a, c.b), h = hueOf(c); return !(c.parent || c.parent === 0) && ch > 0.03 && !(h > 25 && h < 95 && ch < 0.13); };
@@ -723,7 +851,7 @@ function openDoc(i) {
     else ensureMaps(doc);
     if (!doc.history.length) { doc.history = [{ label: "Opened", edits: {} }]; doc.hpos = 0; }
     view.width = doc.w; view.height = doc.h; $("dims").textContent = `${doc.w} × ${doc.h} px`;
-    if (doc.clusters.length && !Object.keys(doc.edits).length) garmentRegions(doc).forEach((r) => state.sel.add(r));
+    syncGarmentMenu(doc);
     redraw(); busy(false); renderAll();
   }, 10);
 }
@@ -880,6 +1008,7 @@ function renderPalette() {
   $("palTabs").innerHTML = Object.keys(PALETTES).map((n) => `<button type="button" role="tab" aria-selected="${n === state.palette}" data-p="${esc(n)}">${esc(n)} <span class="mono">${PALETTES[n].length}</span></button>`).join("");
   $("palette").innerHTML = PALETTES[state.palette].map(([n, h]) => `<button type="button" class="pal" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}"><i style="background:${h}"></i><span>${esc(n)}</span></button>`).join("");
   $("customList").hidden = state.palette !== "Custom";
+  renderQuick();
   $("waysBtn").textContent = `Make ${PALETTES[state.palette].length} colorways`;
 }
 function renderWays() {
@@ -894,7 +1023,7 @@ function renderHistory() {
   $("history").innerHTML = d.history.map((h, i) => `<div class="${i === d.hpos ? "cur" : ""}">${i === d.hpos ? "● " : ""}${esc(h.label)}</div>`).join("");
   $("undoBtn").disabled = d.hpos <= 0; $("redoBtn").disabled = d.hpos >= d.history.length - 1; $("resetBtn").disabled = !Object.keys(d.edits).length;
 }
-function renderAll() { renderFiles(); renderRegions(); renderReadout(); renderHistory(); renderRamp(); drawOverlay(); }
+function renderAll() { renderFiles(); renderRegions(); renderReadout(); renderHistory(); renderRamp(); drawOverlay(); renderGarmentState(); renderQuick(); }
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const tick = () => new Promise((r) => setTimeout(r, 0));
 function busy(on, text) { $("busy").hidden = !on; if (text) $("busy").textContent = text; else $("busy").textContent = "Working…"; }
@@ -911,8 +1040,14 @@ function labelAt(ev) {
 }
 view.addEventListener("pointermove", (ev) => { const l = labelAt(ev); if (l !== state.hover) { state.hover = l; drawOverlay(); } });
 view.addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
+$("quickPal").addEventListener("click", (e) => { const b = e.target.closest(".qsw"); if (b) applyColor(b.dataset.h, b.dataset.n); });
+$("quickPicker").addEventListener("change", (e) => applyColor(e.target.value));
+$("garment").addEventListener("change", () => { const d = cur(); if (!d) return; syncGarmentMenu(d); renderRegions(); renderReadout(); drawOverlay(); renderGarmentState(); renderQuick(); });
 view.addEventListener("click", (ev) => {
   let l = labelAt(ev); if (l < 0) return; const d = cur();
+  const gk = Object.keys(d.garments || {}).find((k) => d.garments[k] === l);
+  if (gk) { $("garment").value = gk; syncGarmentMenu(d); renderRegions(); renderReadout(); drawOverlay(); renderGarmentState(); return; }
+  if (Object.keys(d.garments || {}).length) $("garment").value = "manual";
   if (state.connected && !d.clusters[l].parent && d.clusters[l].parent !== 0) {
     const r = view.getBoundingClientRect();
     const x = Math.min(d.w - 1, Math.floor((ev.clientX - r.left) / r.width * d.w)), y = Math.min(d.h - 1, Math.floor((ev.clientY - r.top) / r.height * d.h));
@@ -926,7 +1061,9 @@ function select(l, add) {
   const e = cur().edits[l]; if (e) { setHex(e.hex); setMode(e.mode); }
   renderRegions(); renderReadout(); drawOverlay();
 }
-$("regions").addEventListener("click", (ev) => { const b = ev.target.closest(".region"); if (b) select(+b.dataset.l, ev.shiftKey || ev.metaKey || ev.ctrlKey); });
+$("regions").addEventListener("click", (ev) => { const b = ev.target.closest(".region"); if (!b) return; const d = cur(), l = +b.dataset.l;
+  const gk = Object.keys(d.garments || {}).find((k) => d.garments[k] === l); $("garment").value = gk || "manual";
+  select(l, ev.shiftKey || ev.metaKey || ev.ctrlKey); renderGarmentState(); });
 $("regions").addEventListener("pointerover", (ev) => { const b = ev.target.closest(".region"); const l = b ? +b.dataset.l : -1; if (l !== state.hover) { state.hover = l; drawOverlay(); } });
 $("regions").addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
 $("files").addEventListener("click", (ev) => { const b = ev.target.closest(".file"); if (b) openDoc(+b.dataset.i); });
@@ -997,6 +1134,7 @@ function sampleTee() {
   return c;
 }
 
+window.__jagRecolor = { state, cur }; // read-only handle for automated checks
 // ---------- Sample photos: real AI models in the base colours (mint top, lilac bottom) ----------
 const SAMPLES = [["Men, half sleeve tee", "samples/men-half-sleeve.jpg"], ["Men, sweatshirt (back)", "samples/men-sweatshirt-back.jpg"],
   ["Women, tee", "samples/women-tee.jpg"], ["Boys, tee and shorts", "samples/boys-tee.jpg"], ["Girls, tee and shorts", "samples/girls-tee.jpg"]];
