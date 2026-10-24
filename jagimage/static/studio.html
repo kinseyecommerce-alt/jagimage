@@ -24,6 +24,12 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 syst
 header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
 header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
 header .sub { color: var(--muted); font-size: 13px; }
+.cloudnav { display: flex; gap: 4px; margin-left: 12px }
+.cloudnav a { padding: 6px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 14px }
+.cloudnav a.on, .cloudnav a:hover { background: var(--accent-soft, #e4e8fb) }
+.agenttab { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px }
+.agenttab td, .agenttab th { border-bottom: 1px solid var(--line); padding: 5px 4px; text-align: left }
+.agenttab td.r, .agenttab th.r { text-align: right }
 header .keys { margin-left: auto; display: flex; gap: 10px; font-size: 13px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 5px; vertical-align: 1px; }
 .dot.on { background: var(--ok); }
@@ -64,7 +70,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .stat { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
 .stat .v { font-variant-numeric: tabular-nums; color: var(--muted); }
 .log { max-height: 140px; overflow: auto; font-size: 12px; color: var(--muted); margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
-.log .e { color: var(--warn); }
+.log .e, .e { color: var(--warn); }
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--soft); color: inherit; text-decoration: none; }
 .card:hover { border-color: var(--accent); }
@@ -89,10 +95,28 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
+  <nav class="cloudnav hide" id="cloudNav"><a href="/" class="on">Studio</a><a href="/recolor/">Recolor</a><a href="/logout">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <main>
   <div>
+    <section class="panel hide" id="agentPanel">
+      <h2>Agent</h2>
+      <p class="hint">Say what to make, e.g. <i>"1000 Men models in half sleeve and hoodie, all Pure Cotton colours, front and back"</i>. It shows the plan and cost first; nothing is made until you press Start. It uses the engine settings below.</p>
+      <textarea id="agentMsg" rows="3" style="width:100%" placeholder="What should I make?"></textarea>
+      <div class="row"><button class="btn primary" id="agentPlan">Plan it</button></div>
+      <div id="agentOut"></div>
+      <div id="agentRuns"></div>
+    </section>
+    <section class="panel hide" id="drivePanel">
+      <h2>Google Drive</h2>
+      <div id="driveState" class="hint">–</div>
+      <div class="row">
+        <a class="btn primary" id="driveConnect" href="/drive/connect">Connect Google Drive</a>
+        <button class="btn" id="driveSync">Upload now</button>
+        <button class="btn" id="driveOff">Disconnect</button>
+      </div>
+    </section>
     <section class="panel">
       <h2>Category</h2>
       <div class="seg" id="category"></div>
@@ -432,9 +456,48 @@ function syncBottom() {
 }
 function keys(p) { for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
 
+// ---------- server version: agent and Google Drive ----------
+async function driveRefresh() {
+  try {
+    const d = await api("/api/drive");
+    $("driveState").innerHTML = !d.configured ? "Drive isn't set up on this server yet (see the setup guide)."
+      : !d.connected ? `Not connected. Connect once and every finished photo uploads to the <b>${esc(d.folder)}</b> folder by itself.`
+      : `Connected: photos upload to <b>${esc(d.folder)}</b>. ${fmt(d.uploaded)} uploaded since the server started, ${fmt(d.pending)} waiting.` + (d.last_error ? `<br><span class="e">Last problem: ${esc(d.last_error)} (it retries every minute)</span>` : "");
+    $("driveConnect").classList.toggle("hide", !d.configured || d.connected); $("driveSync").classList.toggle("hide", !d.connected); $("driveOff").classList.toggle("hide", !d.connected);
+  } catch (e) { $("driveState").textContent = e.message; }
+}
+async function agentRuns() {
+  const r = await api("/api/agent/runs");
+  $("agentRuns").innerHTML = r.runs.map((x) => `<div class="hint" style="margin-top:8px">Agent: “${esc(x.label)}”: batch ${Math.min(x.done + (x.running ? 1 : 0), x.batches)} of ${x.batches}`
+    + (x.running ? ` · running <button class="btn" data-stoprun="${esc(x.id)}">Stop</button>` : x.error ? ` · stopped: <span class="e">${esc(x.error)}</span>` : x.stopped ? " · stopped" : " · finished") + `</div>`).join("");
+  if (r.runs.some((x) => x.running)) loadJobs();
+}
+function initCloud() {
+  ["cloudNav", "agentPanel", "drivePanel"].forEach((id) => $(id).classList.remove("hide"));
+  driveRefresh(); agentRuns(); setInterval(() => { driveRefresh(); agentRuns(); }, 15000);
+  $("driveSync").onclick = async () => { await api("/api/drive/sync", {}); driveRefresh(); };
+  $("driveOff").onclick = async () => { if (confirm("Disconnect Google Drive? Photos stop uploading until you connect again.")) { await api("/api/drive/disconnect", {}); driveRefresh(); } };
+  $("agentPlan").onclick = async () => {
+    const msg = $("agentMsg").value.trim(); if (!msg) return;
+    const s = spec(), base = { provider: s.provider, gemini_model: s.gemini_model, image_size: s.image_size, quality: s.quality, batch: s.batch, one_base: s.one_base, keep_png: s.keep_png, hands_free: s.hands_free };
+    $("agentOut").innerHTML = '<p class="hint">Planning…</p>';
+    try {
+      const p = await api("/api/agent", { message: msg, ...base });
+      const rows = p.batches.map((b) => `<tr><td>${esc(b.category)}</td><td>${b.styles.map(esc).join(", ")}</td><td class="r">${fmt(b.models)}<br><span class="hint">from no. ${b.first_model}</span></td><td class="r">${b.colours}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
+      $("agentOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<table class="agenttab"><tr><th>Category</th><th>Styles</th><th class="r">Models</th><th class="r">Colours</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
+        <tr><th colspan="4">Total: ${fmt(p.total.ai_images)} AI images</th><th class="r">${fmt(p.total.photos)}</th><th class="r">₹${fmt(p.total.cost_inr)}</th></tr></table>
+        <div class="row"><button class="btn primary" id="agentGo">Start: ${fmt(p.total.photos)} photos for about ₹${fmt(p.total.cost_inr)}</button></div>` : "")
+        + (p.problems.length ? `<p class="e">${p.problems.map(esc).join("<br>")}</p>` : "");
+      if (p.batches.length) $("agentGo").onclick = async () => { try { await api("/api/agent/start", { plan_id: p.plan_id }); $("agentOut").innerHTML = '<p class="hint">Started. Progress shows below and in the batch panel; photos upload to Drive as they finish.</p>'; agentRuns(); } catch (e) { $("agentOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; } };
+    } catch (e) { $("agentOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+  };
+  $("agentRuns").addEventListener("click", async (e) => { const id = e.target.dataset.stoprun; if (id) { await api(`/api/agent/runs/${id}/stop`, {}); agentRuns(); } });
+}
+
 async function init() {
   S.opts = await api("/api/options");
   keys(S.opts.providers);
+  if (S.opts.cloud) initCloud();
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });
   seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
   const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";

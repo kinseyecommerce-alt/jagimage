@@ -245,13 +245,15 @@ def main(argv=None) -> int:
     srv.add_argument("--host", default="127.0.0.1", help="Keep 127.0.0.1 unless you trust your network")
     srv.add_argument("--out", default="output/studio")
     srv.add_argument("--workers", type=int, default=4, help="Parallel AI requests per batch")
+    srv.add_argument("--cloud", action="store_true",
+                     help="Server version: password login (JAGIMAGE_PASSWORD), Google Drive upload, agent (see jagimage/cloud.py)")
 
     args = parser.parse_args(argv)
 
     if args.command == "serve":
         from .server import serve
 
-        _, httpd = serve(args.host, args.port, args.out, args.workers)
+        _, httpd = serve(args.host, args.port, args.out, args.workers, cloud=True if args.cloud else None)
         print(f"Jag Studio: open http://{args.host}:{args.port} (Ctrl+C to stop)")
         try:
             httpd.serve_forever()

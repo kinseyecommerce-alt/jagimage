@@ -19,6 +19,14 @@ from . import library as L
 from . import studio
 
 PAGE = Path(__file__).with_name("static") / "studio.html"
+RECOLOR = Path(__file__).resolve().parents[1] / "web" / "recolor"  # the Jag Recolor web app (index.html + samples)
+LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jag Studio: sign in</title><style>body{font:16px system-ui,sans-serif;background:#eef0f3;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
+form{background:#fff;border:1px solid #d9dde4;border-radius:12px;padding:24px;display:grid;gap:12px;width:min(340px,100%)}h1{margin:0;font-size:22px}
+input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #d9dde4}button{background:#3346a8;color:#fff;border:0}p{color:#a13;margin:0;min-height:1.2em}</style></head>
+<body><form id="f"><h1>Jag Studio</h1><input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus><button>Sign in</button><p id="e"></p></form>
+<script>f.onsubmit=async(ev)=>{ev.preventDefault();const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw.value})});
+if(r.ok)location.href="/";else e.textContent=(await r.json()).error||"Wrong password"}</script></body></html>"""
 KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "runpod": "JAGIMAGE_RUNPOD_TOKEN"}
 RUNPOD_URL_ENV = "JAGIMAGE_RUNPOD_URL"
 
@@ -49,7 +57,8 @@ def options(app=None) -> dict:
         "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
-        "out": str(Path(app.out).resolve()) if app else None, "can_remember": bool(app and app.keys_file), "drive_folders": drive_folders(),
+        "out": str(Path(app.out).resolve()) if app else None, "can_remember": bool(app and app.keys_file),
+        "cloud": bool(app and app.cloud), "drive_folders": drive_folders(),
         "next_model": {c: studio.ModelLedger(app.out).next_free(c) for c in L.CATEGORIES} if app else {},
     }
 
@@ -222,9 +231,42 @@ class Preview:
                 "result": rel(self.batch.out_path(m, top, bottom, self.pose))}
 
 
+class AgentRun:
+    """Runs an agent plan's batches one after another (the Studio runs one batch at a time)."""
+
+    def __init__(self, app, bodies: list, label: str):
+        self.id, self.app, self.bodies, self.label = uuid.uuid4().hex[:8], app, bodies, label
+        self.done, self.job_ids, self.error, self.stopped = 0, [], None, False
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        for body in self.bodies:
+            if self.stopped:
+                break
+            while any(j.finished is None for j in self.app.jobs.values()):  # wait for a batch already running
+                time.sleep(5)
+            try:
+                job = self.app.start(dict(body))
+            except Exception as exc:
+                self.error = str(exc)
+                break
+            self.job_ids.append(job.id)
+            job.thread.join()
+            if job.error or any(b.fatal for b in job.batches):
+                self.error = job.error or next(b.fatal for b in job.batches if b.fatal)
+                break
+            self.done += 1
+
+    def status(self) -> dict:
+        return {"id": self.id, "label": self.label, "batches": len(self.bodies), "done": self.done, "jobs": self.job_ids,
+                "error": self.error, "running": self.thread.is_alive(), "stopped": self.stopped}
+
+
 class Studio:
-    def __init__(self, out="output/studio", engine=default_engine, workers=4, keys_file=None):
+    def __init__(self, out="output/studio", engine=default_engine, workers=4, keys_file=None, cloud=None):
         self.out, self.engine, self.workers = out, engine, workers
+        self.cloud = cloud  # server version: login, Google Drive upload, agent (see cloud.py)
+        self.agent_runs = {}
         self.keys_file = Path(keys_file) if keys_file else None  # desktop app: remembered API keys
         self.jobs = {}
         self.previews = {}
@@ -306,11 +348,111 @@ def make_handler(app: Studio):
             n = int(self.headers.get("Content-Length") or 0)
             return json.loads(self.rfile.read(n) or b"{}")
 
+        def _redirect(self, where, extra=None):
+            self._send(302, b"", "text/plain", {"Location": where, **(extra or {})})
+
+        def _signed_in(self, parts) -> bool:
+            """Server version: everything but the sign-in page needs the session cookie."""
+            if not app.cloud or parts[:1] == ["login"] or app.cloud.login.valid(self.headers.get("Cookie", "")):
+                return True
+            if parts[:1] == ["api"]:
+                self._json({"error": "Sign in first"}, 401)
+            else:
+                self._redirect("/login")
+            return False
+
+        def _origin(self) -> str:
+            host = self.headers.get("Host", "localhost")
+            local = host.split(":")[0] in ("localhost", "127.0.0.1")
+            return ("http://" if local else "https://") + host
+
+        def _cloud_get(self, parts, q):
+            c = app.cloud
+            if parts == ["login"]:
+                return self._send(200, LOGIN_PAGE.encode(), "text/html; charset=utf-8")
+            if parts == ["logout"]:
+                return self._redirect("/login", {"Set-Cookie": "jag_session=; Path=/; Max-Age=0"})
+            if parts == ["api", "drive"]:
+                return self._json(c.drive_status())
+            if parts == ["drive", "connect"]:
+                if not c.drive.configured:
+                    return self._json({"error": "Google Drive isn't set up on this server (GOOGLE_OAUTH_CLIENT_ID/SECRET)"}, 400)
+                state = uuid.uuid4().hex
+                c.oauth_states[state] = time.time()
+                return self._redirect(c.drive.auth_url(self._origin() + "/drive/callback", state))
+            if parts == ["drive", "callback"]:
+                state, code = q.get("state", [""])[0], q.get("code", [""])[0]
+                if not code or time.time() - c.oauth_states.pop(state, 0) > 600:
+                    return self._redirect("/?drive=failed")
+                c.drive.finish(code, self._origin() + "/drive/callback")
+                c.sync.wake.set()
+                return self._redirect("/?drive=connected")
+            if parts == ["api", "agent", "runs"]:
+                return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
+            if parts[:1] == ["recolor"]:
+                rel = "/".join(parts[1:]) or "index.html"
+                path = (RECOLOR / rel).resolve()
+                if RECOLOR.resolve() not in path.parents or not path.is_file():
+                    return self._json({"error": "not found"}, 404)
+                ctype = {".html": "text/html; charset=utf-8", ".jpg": "image/jpeg", ".png": "image/png"}.get(path.suffix, "application/octet-stream")
+                data = path.read_bytes()
+                if path.name == "index.html":  # a way back to the Studio
+                    data = data.replace(b"<body>", b'<body><a href="/" style="display:inline-block;margin:10px 16px 0;font:600 14px system-ui,sans-serif;color:#3346a8;text-decoration:none">&larr; Jag Studio</a>', 1)
+                return self._send(200, data, ctype)
+            return None
+
+        def _cloud_post(self, parts, body):
+            c = app.cloud
+            if parts == ["login"]:
+                ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+                if not c.login.try_password(ip, str(body.get("password", ""))):
+                    return self._json({"error": "Wrong password"}, 403)
+                return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie()})
+            if parts == ["api", "drive", "disconnect"]:
+                c.drive.disconnect()
+                return self._json(c.drive_status())
+            if parts == ["api", "drive", "sync"]:
+                c.sync.wake.set()
+                return self._json(c.drive_status())
+            if parts == ["api", "agent"]:
+                message = str(body.get("message", "")).strip()
+                if not message:
+                    raise ValueError("Tell the agent what to make")
+                base = {k: body[k] for k in ("provider", "gemini_model", "image_size", "quality", "batch", "one_base", "keep_png", "hands_free") if k in body}
+                plan = c.agent.plan(message, studio.ModelLedger(app.out), base)
+                plan_id = uuid.uuid4().hex[:10]
+                c.plans[plan_id] = {"bodies": plan.pop("bodies"), "label": message[:120], "time": time.time()}
+                return self._json({**plan, "plan_id": plan_id})
+            if parts == ["api", "agent", "start"]:
+                plan = c.plans.pop(str(body.get("plan_id", "")), None)
+                if not plan or not plan["bodies"]:
+                    raise ValueError("That plan is gone or empty. Ask the agent again.")
+                if any(r.thread.is_alive() for r in app.agent_runs.values()):
+                    raise ValueError("The agent is already running a plan. Stop it or wait for it to finish.")
+                run = AgentRun(app, plan["bodies"], plan["label"])
+                app.agent_runs[run.id] = run
+                run.thread.start()
+                return self._json(run.status())
+            if len(parts) == 5 and parts[:3] == ["api", "agent", "runs"] and parts[4] == "stop":
+                run = app.agent_runs.get(parts[3])
+                if not run:
+                    return self._json({"error": "no such run"}, 404)
+                run.stopped = True
+                for j in app.jobs.values():
+                    if j.id in run.job_ids and j.finished is None:
+                        j.stop()
+                return self._json(run.status())
+            return None
+
         def do_GET(self):
             u = urlparse(self.path)
             parts = [unquote(p) for p in u.path.strip("/").split("/") if p]
             q = parse_qs(u.query)
             try:
+                if not self._signed_in(parts):
+                    return
+                if app.cloud and self._cloud_get(parts, q) is not None:
+                    return
                 if not parts:
                     return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
                 if parts == ["api", "options"]:
@@ -349,7 +491,11 @@ def make_handler(app: Studio):
         def do_POST(self):
             parts = [p for p in urlparse(self.path).path.strip("/").split("/") if p]
             try:
+                if not self._signed_in(parts):
+                    return
                 body = self._body()
+                if app.cloud and self._cloud_post(parts, body) is not None:
+                    return
                 if parts == ["api", "preview"]:
                     pose, model_no = body.pop("preview_pose", "front_main"), int(body.pop("preview_model", 0) or 0)
                     for k in ("stage", "workers", "export", "export_what"):
@@ -424,7 +570,9 @@ def make_handler(app: Studio):
                     job.stop()
                     return self._json(job.status())
                 return self._json({"error": "not found"}, 404)
-            except (TypeError, ValueError, OSError) as exc:
+            except PermissionError as exc:
+                return self._json({"error": str(exc)}, 429)
+            except (TypeError, ValueError, OSError, RuntimeError) as exc:
                 return self._json({"error": str(exc)}, 400)
 
     return Handler
@@ -446,7 +594,24 @@ def thumb(path: Path, size=360) -> bytes:
     return cache.read_bytes()
 
 
-def serve(host="127.0.0.1", port=8765, out="output/studio", workers=4, engine=default_engine, keys_file=None):
+def serve(host="127.0.0.1", port=8765, out="output/studio", workers=4, engine=default_engine, keys_file=None, cloud=None):
     app = Studio(out=out, engine=engine, workers=workers, keys_file=keys_file)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
+    default_error = httpd.handle_error
+
+    def handle_error(request, client_address):  # a browser that closed the page mid-download isn't an error
+        import sys
+
+        if not isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
+            default_error(request, client_address)
+
+    httpd.handle_error = handle_error
+    if cloud is not None:  # a cloud.Cloud, or True to build one from the environment
+        from .cloud import Cloud
+
+        app.cloud = cloud if not isinstance(cloud, bool) else Cloud(
+            Path(os.environ.get("JAGIMAGE_DATA") or Path(out).resolve().parent / "jag-data"), lambda: app.out)
+        app.keys_file = app.keys_file or (app.cloud.data / "keys.json")  # API keys saved on the server, opt-in
+        load_keys(app.keys_file)
+        app.cloud.sync.start()
     return app, httpd
