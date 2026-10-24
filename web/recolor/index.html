@@ -77,8 +77,9 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
 .gstate { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted) }
 .gstate span { display: inline-flex; align-items: center; gap: 5px }
 .gstate .sw { width: 16px; height: 16px }
+.quickrows { display: grid; gap: 10px; width: 100% }
 .quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100% }
-.ql { font-weight: 600 }
+.ql { font-weight: 600; min-width: 96px }
 .quickpal { display: flex; flex-wrap: wrap; gap: 6px }
 .qsw { width: 32px; height: 32px; border-radius: 7px; border: 1px solid var(--line); padding: 0; position: relative }
 .qsw:hover { outline: 2px solid var(--accent); outline-offset: 1px }
@@ -184,11 +185,7 @@ progress { width: 100%; accent-color: var(--accent); height: 6px }
           <option value="manual">Tap regions myself</option>
         </select></label>
       <span id="garmentState" class="gstate"></span>
-      <div class="quick" role="group" aria-label="Colour for the chosen garment">
-        <span class="ql">Colour</span>
-        <div class="quickpal" id="quickPal"></div>
-        <label class="qcustom" title="Any colour"><input id="quickPicker" type="color" value="#0c2340" aria-label="Any colour"><span>Custom</span></label>
-      </div>
+      <div id="quickRows" class="quickrows"></div>
     </div>
     <div class="toolbar">
       <button class="btn small" id="undoBtn" type="button" title="Undo (⌘Z)">Undo</button>
@@ -335,7 +332,7 @@ const MODES = {
   hue: "Keeps the photo's own light and shadow; only the hue and colour strength change.",
   scale: "Multiplies the photo's lightness by the change. Stronger, but can look grainy on dark photos.",
 };
-const state = { docs: [], active: -1, k: 6, wL: 0.35, mode: "match", hex: "#0C2340", sel: new Set(), hover: -1, palette: "Pure Cotton", ways: [], comparing: false, connected: true, tol: 0.05 };
+const state = { pick: "top", docs: [], active: -1, k: 6, wL: 0.35, mode: "match", hex: "#0C2340", sel: new Set(), hover: -1, palette: "Pure Cotton", ways: [], comparing: false, connected: true, tol: 0.05 };
 const view = $("view"), vctx = view.getContext("2d", { willReadFrequently: true });
 const overlay = $("overlay"), octx = overlay.getContext("2d");
 
@@ -817,14 +814,50 @@ function syncGarmentMenu(doc) {
   menu.querySelector('[value="both"]').disabled = g.top == null || g.bottom == null;
   if (menu.value !== "manual" && !garmentSelection(doc, menu.value).length) menu.value = g.top != null ? "top" : g.bottom != null ? "bottom" : "manual";
   state.sel.clear();
-  if (menu.value === "manual") { if (!Object.keys(g).length) garmentRegions(doc).forEach((r) => state.sel.add(r)); }
+  if (menu.value === "manual") {
+    const grp = groups(doc);
+    if (!Object.keys(g).length && !grp.top.length && !grp.bottom.length) grp.top = garmentRegions(doc); // best guess for the top
+    grp[state.pick].forEach((r) => state.sel.add(r)); }
   else garmentSelection(doc, menu.value).forEach((r) => state.sel.add(r));
 }
-// The colours right under the Garment menu: the open palette, with the chosen garment's colour marked.
+// Colour rows right under the Garment menu: one for the top and one for the bottom, so each can be
+// set without switching the menu; one row for the selection otherwise ("same colour", tap regions).
 function renderQuick() {
-  const d = cur(), on = new Set([...state.sel].map((l) => d && d.edits[l] && d.edits[l].hex));
-  $("quickPal").innerHTML = PALETTES[state.palette].map(([n, h]) =>
-    `<button type="button" class="qsw${on.has(h) ? " on" : ""}" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}" aria-label="${esc(n)}" style="background:${h}"></button>`).join("");
+  const d = cur(), g = (d && d.garments) || {}, mode = $("garment").value;
+  const manual = mode === "manual" || !Object.keys(g).length;
+  const grp = d ? groups(d) : { top: [], bottom: [] };
+  const rows = mode === "both" && !manual ? [{ key: "sel", label: "Top and bottom", ids: [...state.sel] }]
+    : manual ? ["top", "bottom"].map((k) => ({ key: k, label: (k === "top" ? "Top colour" : "Bottom colour") + ` (${grp[k].length} part${grp[k].length === 1 ? "" : "s"})`, ids: grp[k] }))
+    : ["top", "bottom"].filter((k) => g[k] != null).map((k) => ({ key: k, label: k === "top" ? "Top colour" : "Bottom colour", ids: [g[k]] }));
+  const picker = manual ? `<div class="quick" role="group" aria-label="What a tap picks"><span class="ql">Tapping picks</span>
+      <div class="seg pick">${["top", "bottom"].map((k) => `<button type="button" data-pick="${k}" aria-pressed="${state.pick === k}">${k === "top" ? "Top" : "Bottom"}</button>`).join("")}</div>
+      <span class="modehelp" style="margin:0">Tap each part of the ${state.pick === "top" ? "top" : "bottom"} in the photo; tap again to remove it.</span></div>` : "";
+  $("quickRows").innerHTML = picker + rows.map((r) => {
+    const cur_ = r.ids.length && d.edits[r.ids[0]] ? d.edits[r.ids[0]].hex : "";
+    return `<div class="quick" role="group" aria-label="${esc(r.label)}" data-row="${r.key}"><span class="ql">${esc(r.label)}</span>
+      <div class="quickpal">${PALETTES[state.palette].map(([n, h]) => `<button type="button" class="qsw${h === cur_ ? " on" : ""}" data-h="${h}" data-n="${esc(n)}" title="${esc(n)} ${h}" aria-label="${esc(r.label)}: ${esc(n)}" style="background:${h}"></button>`).join("")}</div>
+      <label class="qcustom" title="Any colour"><input type="color" value="${(cur_ || "#0c2340").toLowerCase()}" aria-label="${esc(r.label)}: any colour"><span>Custom</span></label></div>`; }).join("");
+}
+function isManual(d) { return $("garment").value === "manual" || !Object.keys((d && d.garments) || {}).length; }
+function groups(d) { return (d.groups = d.groups || { top: [], bottom: [] }); } // tapped regions per garment ("Tap regions myself")
+function quickRowIds(row) {
+  const d = cur(), g = (d && d.garments) || {};
+  if (row === "sel") return [...state.sel];
+  if (isManual(d)) return groups(d)[row];
+  return g[row] != null ? [g[row]] : [];
+}
+// In tap-regions mode a tapped region joins the garment being picked (or leaves it if already there).
+function pickRegion(d, l) {
+  const grp = groups(d), mine = grp[state.pick], other = grp[state.pick === "top" ? "bottom" : "top"];
+  const at = mine.indexOf(l); if (at >= 0) mine.splice(at, 1); else { mine.push(l); const o = other.indexOf(l); if (o >= 0) other.splice(o, 1); }
+  state.sel.clear(); mine.forEach((r) => state.sel.add(r));
+}
+function applyToRow(row, hex, name) {
+  const d = cur(); if (!d) return; const ids = quickRowIds(row);
+  if (!ids.length) return toast("Select a region first. Click the garment in the photo.");
+  hex = normHex(hex); setHex(hex);
+  const edits = { ...d.edits }; ids.forEach((l) => { edits[l] = { hex, mode: state.mode }; });
+  commit(`${ids.map(regionName).join(", ")} → ${name ? name + " " : ""}${hex}`, edits);
 }
 function renderGarmentState() {
   const d = cur(), el = $("garmentState"); if (!d || !d.garments) { el.innerHTML = ""; return; }
@@ -1040,20 +1073,25 @@ function labelAt(ev) {
 }
 view.addEventListener("pointermove", (ev) => { const l = labelAt(ev); if (l !== state.hover) { state.hover = l; drawOverlay(); } });
 view.addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
-$("quickPal").addEventListener("click", (e) => { const b = e.target.closest(".qsw"); if (b) applyColor(b.dataset.h, b.dataset.n); });
-$("quickPicker").addEventListener("change", (e) => applyColor(e.target.value));
+$("quickRows").addEventListener("click", (e) => {
+  const pk = e.target.closest("[data-pick]");
+  if (pk) { state.pick = pk.dataset.pick; const d = cur(); if (d) { state.sel.clear(); groups(d)[state.pick].forEach((r) => state.sel.add(r)); } renderQuick(); renderRegions(); drawOverlay(); return; }
+  const b = e.target.closest(".qsw"); if (b) applyToRow(b.closest(".quick").dataset.row, b.dataset.h, b.dataset.n); });
+$("quickRows").addEventListener("change", (e) => { if (e.target.type === "color") applyToRow(e.target.closest(".quick").dataset.row, e.target.value); });
 $("garment").addEventListener("change", () => { const d = cur(); if (!d) return; syncGarmentMenu(d); renderRegions(); renderReadout(); drawOverlay(); renderGarmentState(); renderQuick(); });
 view.addEventListener("click", (ev) => {
   let l = labelAt(ev); if (l < 0) return; const d = cur();
   const gk = Object.keys(d.garments || {}).find((k) => d.garments[k] === l);
   if (gk) { $("garment").value = gk; syncGarmentMenu(d); renderRegions(); renderReadout(); drawOverlay(); renderGarmentState(); return; }
   if (Object.keys(d.garments || {}).length) $("garment").value = "manual";
+  state.tapPick = true;
   if (state.connected && !d.clusters[l].parent && d.clusters[l].parent !== 0) {
     const r = view.getBoundingClientRect();
     const x = Math.min(d.w - 1, Math.floor((ev.clientX - r.left) / r.width * d.w)), y = Math.min(d.h - 1, Math.floor((ev.clientY - r.top) / r.height * d.h));
     const before = d.clusters.length; l = splitAt(d, { seed: y * d.w + x, tol: state.tol }, true);
     if (d.clusters.length > before) { d.history.push({ label: `Separated ${regionName(l)}`, edits: d.edits }); d.hpos = d.history.length - 1; }
   }
+  if (state.tapPick) { state.tapPick = false; pickRegion(d, l); renderRegions(); renderReadout(); drawOverlay(); renderQuick(); return; }
   select(l, ev.shiftKey || ev.metaKey || ev.ctrlKey);
 });
 function select(l, add) {
@@ -1063,6 +1101,7 @@ function select(l, add) {
 }
 $("regions").addEventListener("click", (ev) => { const b = ev.target.closest(".region"); if (!b) return; const d = cur(), l = +b.dataset.l;
   const gk = Object.keys(d.garments || {}).find((k) => d.garments[k] === l); $("garment").value = gk || "manual";
+  if (!gk) { pickRegion(d, l); renderRegions(); renderReadout(); drawOverlay(); renderQuick(); renderGarmentState(); return; }
   select(l, ev.shiftKey || ev.metaKey || ev.ctrlKey); renderGarmentState(); });
 $("regions").addEventListener("pointerover", (ev) => { const b = ev.target.closest(".region"); const l = b ? +b.dataset.l : -1; if (l !== state.hover) { state.hover = l; drawOverlay(); } });
 $("regions").addEventListener("pointerleave", () => { state.hover = -1; drawOverlay(); });
