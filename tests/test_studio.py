@@ -329,9 +329,9 @@ def test_studio_server_runs_a_batch(tmp_path):
         assert res["total"] == 6
         assert _get(f"{base}/thumbs/{st['name']}/{res['rows'][0]['png']}")[0] == 200
         pose = {**body, "custom_poses": {"wave": "waving at the camera"}, "poses": ["front_main", "wave"]}
-        code, pr = _post(base + "/api/prompt", {**pose, "preview_pose": "wave", "preview_model": 9})
+        code, pr = _post(base + "/api/prompt", {**pose, "preview_pose": "wave", "preview_model": 9, "tops": ["Hoodie"]})  # as the page sends it
         assert code == 200 and "waving at the camera" in pr["prompt"] and pr["model"] == 9 and pr["reference_images"]
-        code, pv = _post(base + "/api/preview", {**pose, "preview_pose": "wave", "preview_model": 9})
+        code, pv = _post(base + "/api/preview", {**pose, "preview_pose": "wave", "preview_model": 9, "tops": ["Hoodie"]})
         assert code == 200
         for _ in range(600):
             pv = json.loads(_get(f"{base}/api/preview/{pv['id']}")[1])
@@ -566,3 +566,16 @@ def test_masks_from_older_code_are_made_again(tmp_path):
     redo.run(stage="recolor")
     assert redo.counts["recoloured"] == 1 and redo.counts["errors"] == 0
     assert ver.read_text() == str(MASK_VERSION) and tm.stat().st_size > 0
+
+
+def test_top_only_prompts_never_ask_for_a_full_body():
+    import re
+    spec = studio.Spec(category="Women", shot="top", top_colours=["Red"], models=1,
+                       poses=["front_main", "back", "side", "threequarter", "handpocket"])
+    for pose in spec.poses:
+        for ref in ("none", "face", "front", "face+front"):
+            text = studio.prompt(spec, 1, spec.bases()[0], pose, ref).split(" Avoid: ")[0]
+            assert "just above the knees" in text, (pose, ref)
+            assert not re.search(r"full[- ]body|one leg|head to shoes|sneaker", text, re.I), (pose, ref)
+    full = studio.Spec(category="Women", top_colours=["Red"], models=1, poses=["front_main"])
+    assert "Full body head to shoes" in studio.prompt(full, 1, full.bases()[0], "front_main", "none")

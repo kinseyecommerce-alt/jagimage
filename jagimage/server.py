@@ -635,7 +635,7 @@ def make_handler(app: Studio):
                     return
                 if parts == ["api", "preview"]:
                     pose, model_no = body.pop("preview_pose", "front_main"), int(body.pop("preview_model", 0) or 0)
-                    for k in ("stage", "workers", "export", "export_what"):
+                    for k in ("stage", "workers", "export", "export_what", "tops"):  # a test is the first style only
                         body.pop(k, None)
                     body["first_model"] = body.get("first_model") or studio.ModelLedger(app.out).next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)
@@ -651,7 +651,7 @@ def make_handler(app: Studio):
                 if parts == ["api", "prompt"]:
                     # the exact prompt a base photo gets, before any money is spent
                     pose, model_no = body.pop("preview_pose", "front_main"), body.pop("preview_model", None)
-                    for k in ("stage", "workers", "export", "export_what"):
+                    for k in ("stage", "workers", "export", "export_what", "tops"):  # a test is the first style only
                         body.pop(k, None)
                     body["first_model"] = body.get("first_model") or studio.ModelLedger(app.out).next_free(body.get("category", "Kids_Boys"))
                     spec = studio.Spec(**body)

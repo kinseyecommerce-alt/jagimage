@@ -75,6 +75,34 @@ header .sub { color: var(--muted); font-size: 13px; }
 .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 .zoom { position: fixed; inset: 0; background: rgba(10,12,16,.82); display: grid; place-items: center; z-index: 20; padding: 16px; }
 .zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+/* ---------- Studio: guided steps + sticky run column ---------- */
+main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
+main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
+main.studio .builder, main.studio .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+main.studio .builder > .panel, main.studio .side > .panel, main.studio .results > .panel { margin-top: 0; }
+main.studio .side { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow: auto; }
+main.studio .results { display: grid; gap: 14px; }
+.studiohead .title { font-size: 22px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0 0 8px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.steps a { font-size: 13px; color: var(--muted); text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--panel); }
+.steps a:hover { color: var(--ink); border-color: var(--accent); }
+.stephead { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.stephead .num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 13px; display: grid; place-items: center; margin-top: -2px; }
+.stephead h2 { margin: 0; font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.stephead .hint { margin: 2px 0 0; }
+.step { scroll-margin-top: 80px; }
+.runcard { scroll-margin-top: 80px; border-color: var(--accent); }
+.runcard #start { flex: 1; }
+details.adv { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.adv > summary { cursor: pointer; font-size: 13px; color: var(--accent); font-weight: 600; }
+/* fields line up: same height, labels never push one box lower than its neighbour */
+.field > span { min-height: 17px; }
+select, input[type=number], input[type=text], input[type=password] { min-height: 38px; }
+label.check { align-items: flex-start; } label.check input { margin-top: 2px; }
+@media (max-width: 1000px) {
+  main.studio { grid-template-columns: 1fr; }
+  main.studio .side { position: static; max-height: none; overflow: visible; }
+}
 .agenttab { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px }
 .agenttab td, .agenttab th { border-bottom: 1px solid var(--line); padding: 5px 4px; text-align: left }
 .agenttab td.r, .agenttab th.r { text-align: right }
@@ -87,8 +115,9 @@ main { display: grid; grid-template-columns: minmax(340px, 430px) 1fr; gap: 18px
 .panel + .panel { margin-top: 14px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
 h2 .n { color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 600; }
-.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }  /* boxes side by side line up at the bottom */
 .row + .row, .row + .field, .field + .row, .field + .field { margin-top: 10px; }
+.row > .field + .field { margin-top: 0; }
 .field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 120px; }
 .field > span { font-size: 12px; color: var(--muted); }
 select, input[type=number], input[type=text], input[type=password] {
@@ -191,42 +220,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div id="keyRows"></div>
     <p class="e" id="keysErr"></p>
   </section>
-  <section class="panel hide" id="accountPanel">
-    <h2>My account</h2>
-    <p>Signed in as <b id="meName"></b> <span class="hint" id="meRole"></span></p>
-    <div class="row">
-      <input type="password" id="pwCur" placeholder="Current password" autocomplete="current-password" style="flex:1">
-      <input type="password" id="pwNew" placeholder="New password (8 or more)" autocomplete="new-password" style="flex:1">
-      <input type="password" id="pwNew2" placeholder="New password again" autocomplete="new-password" style="flex:1">
-      <button class="btn primary" id="pwSave">Change password</button>
-    </div>
-    <p class="hint" id="pwMsg"></p>
-  </section>
-  <section class="panel hide" id="usersPanel">
-    <h2>Users</h2>
-    <p class="hint">Users can make photos, recolour and use the agent. Only admins can change API keys, Google Drive and users.</p>
-    <table class="agenttab" id="usersTable"></table>
-    <div class="sub2">Add a user</div>
-    <div class="row">
-      <input type="text" id="nuName" placeholder="User name, e.g. ravi" autocomplete="off" autocapitalize="none" style="flex:1">
-      <input type="password" id="nuPw" placeholder="Password (8 or more)" autocomplete="new-password" style="flex:1">
-      <select id="nuRole"><option value="user">User</option><option value="admin">Admin</option></select>
-      <button class="btn primary" id="nuAdd">Add user</button>
-    </div>
-    <p class="hint" id="usersMsg"></p>
-  </section>
-</div>
-<main id="studioTab">
-  <div>
-    <section class="panel hide" id="agentPanel">
-      <h2>Agent</h2>
-      <p class="hint">Say what to make, e.g. <i>"1000 Men models in half sleeve and hoodie, all Pure Cotton colours, front and back"</i>. It shows the plan and cost first; nothing is made until you press Start. It uses the engine settings below.</p>
-      <textarea id="agentMsg" rows="3" style="width:100%" placeholder="What should I make?"></textarea>
-      <div class="row"><button class="btn primary" id="agentPlan">Plan it</button></div>
-      <div id="agentOut"></div>
-      <div id="agentRuns"></div>
-    </section>
-    <section class="panel hide" id="drivePanel">
+<section class="panel hide" id="drivePanel">
       <h2>Google Drive</h2>
       <div id="driveState" class="hint">–</div>
       <div id="driveSetup" class="hide">
@@ -252,8 +246,50 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <button class="btn" id="driveOff">Disconnect</button>
       </div>
     </section>
-    <section class="panel">
-      <h2>Category</h2>
+  <section class="panel hide" id="accountPanel">
+    <h2>My account</h2>
+    <p>Signed in as <b id="meName"></b> <span class="hint" id="meRole"></span></p>
+    <div class="row">
+      <input type="password" id="pwCur" placeholder="Current password" autocomplete="current-password" style="flex:1">
+      <input type="password" id="pwNew" placeholder="New password (8 or more)" autocomplete="new-password" style="flex:1">
+      <input type="password" id="pwNew2" placeholder="New password again" autocomplete="new-password" style="flex:1">
+      <button class="btn primary" id="pwSave">Change password</button>
+    </div>
+    <p class="hint" id="pwMsg"></p>
+  </section>
+  <section class="panel hide" id="usersPanel">
+    <h2>Users</h2>
+    <p class="hint">Users can make photos, recolour and use the agent. Only admins can change API keys, Google Drive and users.</p>
+    <table class="agenttab" id="usersTable"></table>
+    <div class="sub2">Add a user</div>
+    <div class="row">
+      <input type="text" id="nuName" placeholder="User name, e.g. ravi" autocomplete="off" autocapitalize="none" style="flex:1">
+      <input type="password" id="nuPw" placeholder="Password (8 or more)" autocomplete="new-password" style="flex:1">
+      <select id="nuRole"><option value="user">User</option><option value="admin">Admin</option></select>
+      <button class="btn primary" id="nuAdd">Add user</button>
+    </div>
+    <p class="hint" id="usersMsg"></p>
+  </section>
+</div>
+<main id="studioTab" class="studio">
+  <div class="studiohead">
+    <div><h2 class="title">New batch</h2>
+      <nav class="steps" aria-label="Steps"><a href="#stepProduct">1 Product</a><a href="#stepColours">2 Colours</a><a href="#stepModels">3 Models and poses</a><a href="#stepCheck">4 Check</a><a href="#stepSave">5 Save to</a><a href="#runCard">Run</a></nav>
+    </div>
+  </div>
+  <section class="panel hide" id="agentPanel">
+      <h2>Ask the Agent <span class="n">optional</span></h2>
+      <p class="hint">Say what to make, e.g. <i>"1000 Men models in half sleeve and hoodie, all Pure Cotton colours, front and back"</i>. It shows the plan and cost first; nothing is made until you press Start. It uses the engine in Settings.</p>
+      <textarea id="agentMsg" rows="3" style="width:100%" placeholder="What should I make?"></textarea>
+      <div class="row"><button class="btn primary" id="agentPlan">Plan it</button></div>
+      <div id="agentOut"></div>
+      <div id="agentRuns"></div>
+    </section>
+  <div class="builder">
+    <section class="panel step" id="stepProduct">
+      <div class="stephead"><span class="num">1</span><div><h2>Product</h2><p class='hint'>What the models wear.</p></div></div>
+
+      <div class="sub2" style="margin-top:0">Category</div>
       <div class="seg" id="category"></div>
       <div class="sub2">Shot</div>
       <div class="seg" id="shot"></div>
@@ -266,20 +302,20 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="sub2">Same models in more styles</div>
       <div class="chips" id="moreTops"></div>
       <p class="hint">Each style gets its own AI base photos (a hoodie isn't a tee), so the AI cost adds up per style. The models keep the same faces in every style.</p>
-    </section>
+        </section>
+    <section class="panel step" id="stepColours">
+      <div class="stephead"><span class="num">2</span><div><h2>Colours</h2><p class='hint'>Each colour becomes a finished photo, recoloured to the exact shade.</p></div></div>
 
-    <section class="panel">
-      <h2>Top colours <span class="n" id="topCount"></span></h2>
+      <div class="sub2" style="margin-top:0">Top colours <span class="n" id="topCount"></span></div>
       <div class="row" style="justify-content:space-between;margin-bottom:8px">
         <div class="seg" id="topPal"></div>
         <span><button class="mini" data-all="top">All</button> · <button class="mini" data-none="top">None</button></span>
       </div>
       <div class="chips" id="topChips"></div>
       <div class="row"><input type="text" id="topHex" placeholder="Custom colour, e.g. #3A7D44" style="flex:1"><button class="btn" id="topAdd">Add</button></div>
-    </section>
+          <div id="bottomPanel">
 
-    <section class="panel" id="bottomPanel">
-      <h2>Bottom colours <span class="n" id="bottomCount"></span></h2>
+      <div class="sub2">Bottom colours <span class="n" id="bottomCount"></span></div>
       <div class="seg" id="pairing">
         <button data-v="match" class="on">Same colour as the top</button>
         <button data-v="each">Choose bottom colours</button>
@@ -298,10 +334,12 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <label class="field"><span>Bottom colour (made by the AI, not recoloured: it only completes the look above the knee)</span>
           <select id="bottomColour"></select></label>
       </div>
+          </div>
     </section>
+    <section class="panel step" id="stepModels">
+      <div class="stephead"><span class="num">3</span><div><h2>Models and poses</h2><p class='hint'>Every model is a different person; their face is kept in every photo.</p></div></div>
 
-    <section class="panel">
-      <h2>Models and poses</h2>
+      
       <div class="row">
         <label class="field"><span>Different models</span><input type="number" id="models" min="1" max="5000" value="10"></label>
         <label class="field"><span>Start at model no.</span><input type="number" id="firstModel" min="1" placeholder="Automatic"></label>
@@ -312,7 +350,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="check" style="margin-top:12px"><input type="checkbox" id="handsFree" checked> Hands free: hands never touch the clothes, arms a little away from the body (not for the hand-in-pocket pose)</label>
       <div class="sub2">Poses (tap to include)</div>
       <div class="chips" id="poses"></div>
+      <p class="hint" id="posesHint"></p>
 
+      <details class="adv"><summary>Advanced: write your own pose, extra instructions</summary>
       <div class="sub2">Write a pose</div>
       <div class="row">
         <label class="field"><span>Pose</span><select id="poseEdit"></select></label>
@@ -329,7 +369,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="sub2">Extra instructions for every photo</div>
       <textarea id="extra" placeholder="e.g. big laughing expression, hair slightly messy (keep it about the model, not the clothes)"></textarea>
 
-      <div class="sub2">Prompt preview</div>
+      </details>
+    </section>
+    <section class="panel step" id="stepCheck">
+      <div class="stephead"><span class="num">4</span><div><h2>Check before spending</h2><p class='hint'>Optional: see the AI instruction, or make one test photo first.</p></div></div>
+      
       <div class="row">
         <label class="field"><span>Pose</span><select id="previewPose"></select></label>
         <label class="field"><span>Model no.</span><input type="number" id="previewModel" min="1" placeholder="First of batch"></label>
@@ -344,11 +388,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <div class="hint" id="testStatus"></div>
         <div class="gallery" id="testImgs" style="margin-top:8px"></div>
       </div>
-    </section>
+        </section>
+    <section class="panel step" id="stepSave">
+      <div class="stephead"><span class="num">5</span><div><h2>Save to</h2><p class='hint'>Finished photos are always kept here and shown below; you can also copy them elsewhere.</p></div></div>
 
-
-    <section class="panel">
-      <h2>Save to</h2>
+      
       <label class="field"><span>Also save finished photos to</span>
         <select id="exportSel"></select></label>
       <label class="field hide" id="exportPathField"><span>Folder</span>
@@ -366,10 +410,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Working folder (bases, masks, all files)</summary>
         <div class="row" style="margin-top:8px"><input type="text" id="outDir" style="flex:1"><button class="btn" id="outSave">Use folder</button></div>
       </details>
-    </section>
-
-    <section class="panel">
-      <h2>Run</h2>
+        </section>
+  </div>
+  <aside class="side">
+    <section class="panel runcard" id="runCard">
+      <h2>Run this batch</h2>
       <p class="hint" id="engineSummary" style="margin:-4px 0 8px"></p>
       <div class="plan" id="plan">…</div>
       <div class="row">
@@ -387,9 +432,6 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       </div>
       <div class="err" id="err"></div>
     </section>
-  </div>
-
-  <div>
     <section class="panel" id="progress">
       <h2>Progress <span class="n" id="jobName"></span></h2>
       <div class="stat">
@@ -408,7 +450,8 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       </div>
       <div class="log" id="log"></div>
     </section>
-
+  </aside>
+  <div class="results">
     <section class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h2 style="margin:0">Photos <span class="n" id="galTotal"></span></h2>
@@ -420,7 +463,6 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="gallery" id="gallery"></div>
       <div class="row" style="justify-content:center;margin-top:12px"><button class="btn" id="more">Load more</button></div>
     </section>
-
     <section class="panel">
       <h2>Batches on this computer</h2>
       <div class="batches" id="batches"></div>
@@ -569,9 +611,10 @@ function costLine(c) {
       : `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`);
 }
 function syncBottom() {
+  $("posesHint").textContent = S.shot === "top" ? "Top only: every pose is framed from the head to just above the knee (no legs or shoes)." : "Full body: every pose shows the model from head to shoes.";
   const top = S.shot === "top", fixed = top || S.opts.fixed_bottoms.includes($("bottom").value), jeans = S.opts.fixed_bottoms.includes($("bottom").value);
   $("topOnlyBottom").classList.toggle("hide", !top || jeans);
-  $("bottomPanel").querySelector("h2").firstChild.textContent = top ? "Bottom " : "Bottom colours ";
+  $("bottomPanel").querySelector(".sub2").firstChild.textContent = top ? "Bottom " : "Bottom colours ";
   $("shotHint").textContent = top ? "Framed from the head to just above the knee. Only the top is recoloured; the bottom is made by the AI in one colour. 1-2 AI photos per model."
     : "Full body, head to shoes. Top and bottom are each recoloured to your colours.";
   $("pairing").classList.toggle("hide", fixed); $("bottomPick").classList.toggle("hide", fixed || S.pairing === "match");
