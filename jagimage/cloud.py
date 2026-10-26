@@ -378,7 +378,9 @@ Allowed values:
 - shot: "outfit" (head to shoes, default) or "top" (head to above the knee, bottom not recoloured)
 - models: number of different people (1-5000); poses: subset of front_main, back, threequarter, side,
   front_main_white, handpocket (default front_main and back)
-- "the same models in all top styles / every top category" means one batch with all five tops
+- "same model(s) in / can wear all top styles / all categories top / every top" means ONE batch whose tops
+  list has all five: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt (a named style first),
+  e.g. "10 mens half sleeve tshirt same model can wear all categories top" -> Men, all five tops, 10 models
 - quality: "high" when the user asks for high or best quality, else "standard"
 Never invent other values. If something essential is unclear, ask in "reply" and return no batches.
 "reply" is one or two short plain sentences for the user."""
