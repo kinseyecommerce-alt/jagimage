@@ -280,7 +280,7 @@ class Studio:
         stage = "recolor" if redo else stage
         if stage not in ("all", "bases", "recolor"):
             raise ValueError("stage must be all, bases, recolor or redo")
-        workers = int(body.pop("workers", self.workers))
+        workers = max(1, min(16, int(body.pop("workers", self.workers) or 1)))  # parallel AI requests
         export, export_what = (body.pop("export", None) or "").strip() or None, body.pop("export_what", "jpg")
         if export:
             Path(export).expanduser().mkdir(parents=True, exist_ok=True)  # fail now, not after the AI calls

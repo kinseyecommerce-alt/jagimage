@@ -27,6 +27,7 @@ header .sub { color: var(--muted); font-size: 13px; }
 .cloudnav { display: flex; gap: 4px; margin-left: 12px }
 .cloudnav a { padding: 6px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 14px }
 .cloudnav a.on, .cloudnav a:hover { background: var(--accent-soft) }
+@media (max-width: 900px) { .cloudnav { margin-left: 0; flex-wrap: wrap; width: 100%; } .cloudnav a { padding: 6px 9px; } }
 /* ---------- Dashboard ---------- */
 #dashTab { max-width: 1320px; margin: 0 auto; padding: 22px 20px 40px; }
 .dhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -171,6 +172,19 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   <section class="panel" style="margin-top:14px"><h2>Needs attention</h2><p class="hint" style="margin:-4px 0 12px">Left: the photo. Right: where the problem is (cyan = colour bled onto skin or background, magenta = base colour left). Click to enlarge.</p><div id="dIssues"></div></section>
 </div>
 <div id="settingsTab" class="hide" style="max-width:860px;margin:0 auto;padding:18px 20px">
+  <section class="panel" id="enginePanel">
+    <h2>Engine</h2>
+    <p class="hint" style="margin:-4px 0 10px">The AI that makes the base photos, for every batch and the Agent. Its key goes in API keys below.</p>
+    <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="runpod">RunPod (own GPU)</button></div>
+    <div class="row">
+      <label class="field" id="modelField"><span>Gemini model</span><select id="geminiModel"><option value="flash" selected>Flash (cheaper, recommended)</option><option value="pro">Pro</option></select></label>
+      <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
+      <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
+      <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
+    </div>
+    <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, Google returns the photos within 24 hours (usually much sooner)</label>
+    <p class="hint hide" id="runpodHint">Your own GPU pod running the open Qwen-Image-Edit model (pilot/runpod/README.md). You pay RunPod per hour, so stop the pod when the batch is done. Set parallel requests to 1: the pod's web address gives up on a request after about 100 s, and extra requests only queue on the one GPU.</p>
+  </section>
   <section class="panel">
     <h2>API keys</h2>
     <p class="hint" id="keysHint">Saved keys are used by every batch. They stay on this computer or server and are never shown again.</p>
@@ -332,26 +346,6 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Engine</h2>
-      <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="runpod">RunPod (own GPU)</button></div>
-      <div class="row">
-        <label class="field" id="modelField"><span>Gemini model</span><select id="geminiModel"><option value="flash" selected>Flash (cheaper, recommended)</option><option value="pro">Pro</option></select></label>
-        <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
-        <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
-        <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
-      </div>
-      <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, Google returns the photos within 24 hours (usually much sooner)</label>
-      <p class="hint hide" id="runpodHint">Your own GPU pod running the open Qwen-Image-Edit model (pilot/runpod/README.md). You pay RunPod per hour, so stop the pod when the batch is done. Set parallel requests to 1: the pod's web address gives up on a request after about 100 s, and extra requests only queue on the one GPU.</p>
-      <div class="row hide" id="runpodUrlRow">
-        <input type="text" id="runpodUrl" placeholder="Pod address, e.g. https://abc123-8000.proxy.runpod.net" style="flex:1" autocomplete="off">
-      </div>
-      <div class="row">
-        <input type="password" id="key" placeholder="API key (kept on this computer only)" style="flex:1" autocomplete="off">
-        <button class="btn" id="saveKey">Save key</button>
-      </div>
-      <label class="check hide" id="rememberField"><input type="checkbox" id="rememberKey" checked> Remember on this computer (saved in your Windows user folder)</label>
-    </section>
 
     <section class="panel">
       <h2>Save to</h2>
@@ -376,6 +370,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 
     <section class="panel">
       <h2>Run</h2>
+      <p class="hint" id="engineSummary" style="margin:-4px 0 8px"></p>
       <div class="plan" id="plan">…</div>
       <div class="row">
         <label class="field"><span>What to do</span>
@@ -454,9 +449,15 @@ function engineFields() {
   const v = S.provider;
   $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini");
   $("qualityField").classList.toggle("hide", v !== "openai");
-  $("runpodHint").classList.toggle("hide", v !== "runpod"); $("runpodUrlRow").classList.toggle("hide", v !== "runpod");
+  $("runpodHint").classList.toggle("hide", v !== "runpod");
   if (v === "runpod") $("workers").value = 1;
-  $("key").placeholder = v === "runpod" ? "Pod token (JAGIMAGE_RUNPOD_TOKEN you started the pod with)" : "API key (kept on this computer only)";
+  engineSummary();
+}
+function engineSummary() {
+  const v = S.provider, have = S.opts && S.opts.providers && S.opts.providers[v];
+  const what = v === "gemini" ? `Gemini ${$("geminiModel").value === "pro" ? "Pro" : "Flash"} ${$("imageSize").value}${$("batchMode").checked ? ", batch mode" : ""}`
+    : v === "openai" ? `OpenAI, ${$("quality").value} quality` : "RunPod (own GPU)";
+  $("engineSummary").innerHTML = `Engine: <b>${esc(what)}</b>${have ? "" : ' · <span class="e">no key saved</span>'} · <a href="#settings">change in Settings</a>`;
 }
 function seg(el, values, current, onPick, text = label) {
   el.innerHTML = values.map((v) => `<button data-v="${esc(v)}" class="${v === current ? "on" : ""}">${esc(text(v))}</button>`).join("");
@@ -576,7 +577,10 @@ function syncBottom() {
   $("pairing").classList.toggle("hide", fixed); $("bottomPick").classList.toggle("hide", fixed || S.pairing === "match");
   $("fixedNote").classList.toggle("hide", !jeans);
 }
-function keys(p) { for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]); }
+function keys(p) {
+  for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]);
+  if (S.opts) { S.opts.providers = p; engineSummary(); }
+}
 
 // ---------- server version: agent and Google Drive ----------
 async function driveRefresh() {
@@ -773,7 +777,7 @@ function initSettings() {
 
 async function init() {
   S.opts = await api("/api/options");
-  if (S.opts.cloud) { S.me = await api("/api/me"); if (S.me.role !== "admin") ["key", "saveKey", "rememberField"].forEach((id) => $(id).closest(".row, label").classList.add("hide")); }
+  if (S.opts.cloud) S.me = await api("/api/me");
   initSettings(); initDashboard(); if (tabFromHash() === "settings") renderSettings(); if (tabFromHash() === "dashboard") loadDashboard();
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
@@ -809,14 +813,9 @@ async function init() {
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
   seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
-  $("runpodUrl").value = S.opts.runpod_url || "";
-  $("rememberField").classList.toggle("hide", !S.opts.can_remember);
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
-  $("saveKey").onclick = async () => {
-    const k = $("key").value.trim(), url = S.provider === "runpod" ? $("runpodUrl").value.trim() : "";
-    if (!k && !url) return;
-    try { keys(await api("/api/keys", { [S.provider]: k, runpod_url: url, remember: $("rememberKey").checked })); $("key").value = ""; $("err").textContent = ""; } catch (e) { $("err").textContent = e.message; }
-  };
+  for (const id of ["geminiModel", "imageSize", "quality", "batchMode"]) $(id).addEventListener("change", engineSummary);
+  setTimeout(engineSummary);  // once the size and quality lists are filled
   setupSave();
   $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };
   $("more").onclick = () => loadGallery(false);

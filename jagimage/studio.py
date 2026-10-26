@@ -54,6 +54,8 @@ HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 def colour_hex(name: str, fabric: str) -> str:
     """A palette colour name (this fabric's palette first, then the other) or a #RRGGBB hex."""
+    if not isinstance(name, str):
+        raise ValueError(f"colours are names or #RRGGBB codes, not {name!r}")
     if HEX.match(name):
         return name.upper()
     for f in [fabric] + [x for x in L.COLOURS if x != fabric]:
@@ -136,7 +138,11 @@ class Spec:
         bad = [p for p in self.poses if p not in self.pose_texts()]
         if bad or "front_main" not in self.poses:
             raise ValueError("poses must include front_main and come from: " + ", ".join(L.POSES))
-        if not 1 <= int(self.models) <= 5000:
+        try:
+            self.models, self.first_model = int(self.models), int(self.first_model or 0)
+        except (TypeError, ValueError):
+            raise ValueError("models and the first model number must be whole numbers") from None
+        if not 1 <= self.models <= 5000:
             raise ValueError("models must be between 1 and 5000")
         self.first_model = int(self.first_model)
         if self.first_model < 1 or self.first_model + int(self.models) - 1 > faces.capacity(self.category):
