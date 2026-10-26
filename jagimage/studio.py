@@ -256,7 +256,30 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
         negative += ", " + HANDS_FREE_AVOID
     if top_only:
         negative = negative.replace("cut-off feet, ", "") + ", full body shot, feet or shoes in frame, knees in frame"
-    return text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + (", top and bottom in the same colour." if bcol else ".")
+    text = text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + (", top and bottom in the same colour." if bcol else ".")
+    return child_safe(text) if kids and spec.provider == "openai" else text
+
+
+def child_safe(text: str) -> str:
+    """OpenAI's safety system refuses some children's photo requests (seen: a 4-5 year old girl in a tee and
+    shorts) when the wording describes the child's body closely. For OpenAI, children are described plainly
+    as a fully dressed child in a family-friendly clothing catalogue: no body proportions, lips or cheeks,
+    and no adult-body words in the avoid list. The face stays the same through the reference photo."""
+    for old, new in CHILD_SAFE:
+        text = text.replace(old, new)
+    return CHILD_SAFE_INTRO + text
+
+
+CHILD_SAFE_INTRO = ("Wholesome, family-friendly children's clothing catalogue photo for an e-commerce store; "
+                    "the child is fully dressed in the everyday clothes described. ")
+CHILD_SAFE = [
+    (", toddler proportions: baby face, large head relative to a small short body (head about one fifth of body height), "
+     "short chubby limbs", ", a happy young child"),
+    (", full little lips", ""), (", thin lips", ""), (", cupid's-bow lips", ""), (", rosy cheeks", ""),
+    ("round face with chubby cheeks", "round face"),
+    (L.NEGATIVE_KIDS, "adult, teenager, older child"),
+    (L.KIDS_RULE, " The child looks about 4-5 years old."),
+]
 
 
 def account_problem(exc: Exception) -> Optional[str]:

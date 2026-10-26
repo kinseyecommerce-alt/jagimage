@@ -579,3 +579,17 @@ def test_top_only_prompts_never_ask_for_a_full_body():
             assert not re.search(r"full[- ]body|one leg|head to shoes|sneaker", text, re.I), (pose, ref)
     full = studio.Spec(category="Women", top_colours=["Red"], models=1, poses=["front_main"])
     assert "Full body head to shoes" in studio.prompt(full, 1, full.bases()[0], "front_main", "none")
+
+
+def test_openai_gets_plain_childrens_wording_gemini_unchanged():
+    for cat in ("Kids_Girls", "Kids_Boys"):
+        for i in range(1, 30):  # every face variant
+            oa = studio.Spec(category=cat, top_colours=["Red"], models=1, first_model=i, poses=["front_main"], provider="openai")
+            text = studio.prompt(oa, i, oa.bases()[0], "front_main", "none")
+            assert text.startswith("Wholesome, family-friendly children's clothing catalogue photo")
+            for word in ("chubby", "lips", "rosy", "slim adult body", "mature proportions", "makeup on child", "long legs", "toddler proportions"):
+                assert word not in text, (cat, i, word)
+        ge = studio.Spec(category=cat, top_colours=["Red"], models=1, poses=["front_main"], provider="gemini")
+        assert "toddler proportions" in studio.prompt(ge, 1, ge.bases()[0], "front_main", "none")
+    men = studio.Spec(category="Men", top_colours=["Red"], models=1, poses=["front_main"], provider="openai")
+    assert not studio.prompt(men, 1, men.bases()[0], "front_main", "none").startswith("Wholesome")
