@@ -4,6 +4,7 @@ batch and recolours every colour pair. Runs on 127.0.0.1 only; API keys stay in 
 
 import io
 import json
+import re
 import os
 import threading
 import time
@@ -402,7 +403,34 @@ def make_handler(app: Studio):
 
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
-            return json.loads(self.rfile.read(n) or b"{}")
+            if n > 2_000_000:
+                raise ValueError("request too large")
+            raw = self.rfile.read(n)
+            # Only JSON from this app's own pages: a form or text/plain POST from another website (which a
+            # browser sends without asking) is refused, as JSON needs the browser's permission first.
+            if raw and "application/json" not in (self.headers.get("Content-Type") or ""):
+                raise ValueError("send JSON (Content-Type: application/json)")
+            body = json.loads(raw or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("send a JSON object")
+            return body
+
+        def _host_ok(self) -> bool:
+            """Desktop app: answer only pages opened on this computer (not a website pointing its own name at
+            127.0.0.1, "DNS rebinding"). The website version checks the sign-in instead."""
+            if app.cloud:
+                return True
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            if host in ("127.0.0.1", "localhost", "::1", ""):
+                return True
+            self._json({"error": "open Jag Studio at http://127.0.0.1"}, 403)
+            return False
+
+        def _client_ip(self) -> str:
+            """Behind Railway's proxy the real address is the last X-Forwarded-For entry (the ones before it are
+            whatever the visitor sent)."""
+            fwd = [x.strip() for x in (self.headers.get("X-Forwarded-For") or "").split(",") if x.strip()]
+            return fwd[-1] if fwd else self.client_address[0]
 
         def _redirect(self, where, extra=None):
             self._send(302, b"", "text/plain", {"Location": where, **(extra or {})})
@@ -462,7 +490,7 @@ def make_handler(app: Studio):
         def _cloud_post(self, parts, body):
             c = app.cloud
             if parts == ["login"]:
-                ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+                ip = self._client_ip()
                 name = str(body.get("username") or "admin").strip().lower()
                 if not c.login.try_login(ip, name, str(body.get("password", ""))):
                     return self._json({"error": "Wrong user name or password"}, 403)
@@ -545,7 +573,7 @@ def make_handler(app: Studio):
             parts = [unquote(p) for p in u.path.strip("/").split("/") if p]
             q = parse_qs(u.query)
             try:
-                if not self._signed_in(parts):
+                if not self._host_ok() or not self._signed_in(parts):
                     return
                 if app.cloud and self._cloud_get(parts, q) is not None:
                     return
@@ -577,11 +605,13 @@ def make_handler(app: Studio):
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "zip":
                     data = app.zip_bytes(parts[2], q.get("what", ["jpg"])[0])
                     return self._send(200, data, "application/zip",
-                                      {"Content-Disposition": f'attachment; filename="{parts[2]}.zip"'})
+                                      {"Content-Disposition": 'attachment; filename="%s.zip"' % re.sub(r"[^A-Za-z0-9_.-]", "_", parts[2])})
                 if parts[0] in ("files", "thumbs") and len(parts) >= 3:
-                    root = (Path(app.out) / parts[1]).resolve()
+                    out_root = Path(app.out).resolve()
+                    root = (out_root / parts[1]).resolve()
                     path = (root / "/".join(parts[2:])).resolve()
-                    if root not in path.parents or not path.is_file():
+                    # only files inside one batch folder of the photos folder
+                    if root.parent != out_root or root not in path.parents or not path.is_file():
                         return self._json({"error": "not found"}, 404)
                     if parts[0] == "thumbs":
                         return self._send(200, thumb(path), "image/jpeg")
@@ -598,7 +628,7 @@ def make_handler(app: Studio):
         def do_POST(self):
             parts = [p for p in urlparse(self.path).path.strip("/").split("/") if p]
             try:
-                if not self._signed_in(parts):
+                if not self._host_ok() or not self._signed_in(parts):
                     return
                 body = self._body()
                 if app.cloud and self._cloud_post(parts, body) is not None:
@@ -676,6 +706,8 @@ def make_handler(app: Studio):
                         save_keys(app.keys_file)
                     return self._json(ready())
                 if parts == ["api", "jobs"]:
+                    if body.get("export"):
+                        self._admin()  # writing to a folder of one's choice on the server
                     return self._json(app.start(body).status())
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "redo":
                     # Dashboard: recolour a whole batch again with the latest recolouring (no AI)
@@ -692,8 +724,10 @@ def make_handler(app: Studio):
                 return self._json({"error": str(exc)}, 403)
             except PermissionError as exc:
                 return self._json({"error": str(exc)}, 429)
-            except (TypeError, ValueError, OSError, RuntimeError) as exc:
+            except (TypeError, ValueError, OSError, RuntimeError, KeyError, AttributeError) as exc:
                 return self._json({"error": str(exc)}, 400)
+            except Exception as exc:  # never drop the connection without an answer
+                return self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
     return Handler
 

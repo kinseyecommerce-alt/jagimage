@@ -145,10 +145,14 @@ class Spec:
             colour_hex(c, self.fabric)
         if self.canvas:
             self.canvas = tuple(int(v) for v in self.canvas)
+            if len(self.canvas) != 2 or not all(200 <= v <= 6000 for v in self.canvas):
+                raise ValueError("canvas must be width and height between 200 and 6000 px")
         else:
             self.keep_png = True  # without a marketplace JPG the PNG is the only copy
         if not self.name:
             self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else ""))
+        if not SAFE_NAME.match(self.name) or ".." in self.name:  # a folder inside the photos folder, nothing else
+            raise ValueError("batch name: letters, digits, dot, dash and underscore only")
 
     def pose_texts(self) -> Dict[str, str]:
         return {**L.POSES, **self.custom_poses}
@@ -316,6 +320,7 @@ def garment_problem(lab, masks: dict, base) -> Optional[str]:
 
 
 _LEDGER_LOCK = threading.Lock()
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,150}$")
 DRIVE_LIST_LOCK = threading.Lock()  # guards each batch's _drive.txt (uploads listed by the Drive sync, redone photos removed)
 
 

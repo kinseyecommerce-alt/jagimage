@@ -61,7 +61,7 @@ header .sub { color: var(--muted); font-size: 13px; }
 .dtable .q { min-width: 170px; }
 .dtable .q .meter { margin-top: 6px; }
 .tablewrap { overflow-x: auto; }
-.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.issues { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
 .issue { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); display: flex; flex-direction: column; }
 .issue .pics { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--line); }
 .issue img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: var(--soft); cursor: zoom-in; }
@@ -441,7 +441,7 @@ const api = async (path, body) => {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
 };
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Number(n).toLocaleString();
 const label = (c) => c.replace(/_/g, " ");
 const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", Trackpants: "Track pants" };
@@ -689,7 +689,7 @@ async function loadDashboard() {
         <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button></td></tr>`; }).join("") + "</tbody>"
     : `<tbody><tr><td class="empty">${status("idle", "No batches yet")}<div class="hint" style="margin-top:6px">Start one in the Studio tab, or ask the Agent.</div></td></tr></tbody>`;
   // needs attention
-  $("dIssues").innerHTML = d.attention.length ? `<div class="gallery">` + d.attention.map((a) => {
+  $("dIssues").innerHTML = d.attention.length ? `<div class="issues">` + d.attention.map((a) => {
     const src = (rel) => `/thumbs/${encodeURIComponent(a.batch)}/${rel.split("/").map(encodeURIComponent).join("/")}`;
     const full = (rel) => `/files/${encodeURIComponent(a.batch)}/${rel.split("/").map(encodeURIComponent).join("/")}`;
     return `<article class="issue"><div class="pics"><img src="${src(a.photo)}" data-full="${full(a.photo)}" alt="${esc(a.colours)} photo" loading="lazy">${a.marks ? `<img src="${full(a.marks)}" data-full="${full(a.marks)}" alt="Where the problem is" loading="lazy">` : ""}</div>

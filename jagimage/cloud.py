@@ -86,7 +86,8 @@ class Users:
             if name in self.users:
                 raise ValueError(f"{name} already exists")
             salt = secrets.token_hex(16)
-            self.users[name] = {"hash": self._hash(password, salt), "salt": salt, "role": role, "ver": 1, "created": int(time.time())}
+            # a new start number for every account, so a deleted and re-made account never accepts old sign-ins
+            self.users[name] = {"hash": self._hash(password, salt), "salt": salt, "role": role, "ver": int(time.time() * 1000), "created": int(time.time())}
             self._save()
 
     def set_password(self, name: str, password: str):
@@ -143,7 +144,8 @@ class Login:
             if name != "jag_session" or value.count(".") < 3:
                 continue
             body, sig = value.rsplit(".", 1)
-            expires, user, ver = body.split(".", 2) if body.count(".") >= 2 else ("", "", "")
+            head, _, ver = body.rpartition(".")      # <expires>.<user name, may contain dots>.<version>
+            expires, _, user = head.partition(".")
             u = self.users.users.get(user)
             if (hmac.compare_digest(sig, self._sign(body)) and expires.isdigit() and int(expires) > time.time()
                     and u and str(u.get("ver", 1)) == ver):
@@ -154,6 +156,9 @@ class Login:
         return self.user(cookie_header) is not None
 
     def try_login(self, ip: str, name: str, password: str) -> bool:
+        if len(self.failures) > 5000:  # forget old addresses so the table can't grow without end
+            cutoff = time.time() - 3600
+            self.failures = {k: v for k, v in self.failures.items() if v[1] > cutoff}
         count, last = self.failures.get(ip, (0, 0.0))
         if count >= 5 and time.time() - last < 30 * (count - 4):
             raise PermissionError("Too many wrong passwords. Wait a minute and try again.")
@@ -472,14 +477,22 @@ class Agent:
 
         ans = self._ask(message)
         bodies, rows, problems = [], [], []
-        for b in ans.get("batches") or []:
+        if not isinstance(ans, dict):
+            ans = {}
+        for b in ans.get("batches") or [] if isinstance(ans.get("batches"), list) else []:
+            if not isinstance(b, dict):  # the AI answered something that isn't a batch
+                problems.append("Skipped an unreadable part of the plan")
+                continue
+            listed = lambda key: [v for v in (b.get(key) or []) if isinstance(v, str)] if isinstance(b.get(key), list) else []
             try:
-                tops = [t for t in b.get("tops") or [] if t in studio.TOPS] or ["HalfSleeveTee"]
+                tops = [t for t in listed("tops") if t in studio.TOPS] or ["HalfSleeveTee"]
                 category = b["category"]
+                if not isinstance(category, str) or category not in L.CATEGORIES:
+                    raise ValueError(f"unknown category {category!r}")
                 fabric = b.get("fabric") if b.get("fabric") in L.FABRICS else "PureCotton"
-                colours = [c for c in (b.get("top_colours") or []) if c in L.COLOURS[fabric]] or list(L.COLOURS[fabric])
+                colours = [c for c in listed("top_colours") if c in L.COLOURS[fabric]] or list(L.COLOURS[fabric])
                 bottom = b.get("bottom") if b.get("bottom") in studio.BOTTOMS else ("Shorts" if L.is_kids(category) else "Trackpants")
-                poses = [p for p in (b.get("poses") or []) if p in L.POSES] or ["front_main", "back"]
+                poses = [p for p in listed("poses") if p in L.POSES] or ["front_main", "back"]
                 if "front_main" not in poses:
                     poses = ["front_main"] + poses
                 engine = dict(base)
@@ -498,10 +511,10 @@ class Agent:
                              "cost_inr": cost.get("with_retries_inr"), "disk_gb": round(sum(p["disk_gb"] for p in plans), 1)})
                 body.pop("first_model", None)
                 bodies.append(body)
-            except (KeyError, TypeError, ValueError) as exc:
-                problems.append(f"Skipped {b.get('category', 'a batch')} {', '.join(b.get('tops') or [])}: {exc}")
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                problems.append(f"Skipped {b.get('category', 'a batch')} {', '.join(listed('tops'))}: {exc}")
         total = {k: sum((r[k] or 0) for r in rows) for k in ("ai_images", "photos", "cost_inr")}
-        return {"reply": ans.get("reply", ""), "batches": rows, "bodies": bodies, "total": total, "problems": problems}
+        return {"reply": str(ans.get("reply") or ""), "batches": rows, "bodies": bodies, "total": total, "problems": problems}
 
 
 def _specs(body: dict, ledger) -> list:

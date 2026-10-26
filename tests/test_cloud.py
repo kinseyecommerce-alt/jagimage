@@ -142,6 +142,10 @@ def test_admin_adds_users_who_cannot_change_settings(tmp_path):
         code, _, body = call(base + "/api/users", {"username": "Ravi", "password": "ravi-pass-1"}, cookie=admin)
         assert code == 200 and [u["name"] for u in json.loads(body)["users"]] == ["admin", "ravi"]
         assert call(base + "/api/users", {"username": "ravi", "password": "ravi-pass-1"}, cookie=admin)[0] == 400  # taken
+        assert call(base + "/api/users", {"username": "ravi.k", "password": "ravi-pass-9"}, cookie=admin)[0] == 200
+        dotted = signed(base, "Ravi.K", "ravi-pass-9")  # a dot in the name, typed in capitals
+        assert json.loads(call(base + "/api/me", cookie=dotted)[2])["user"] == "ravi.k"
+        assert call(base + "/api/users/ravi.k/delete", {}, cookie=admin)[0] == 200
         ravi = signed(base, "ravi", "ravi-pass-1")
         assert json.loads(call(base + "/api/me", cookie=ravi)[2])["role"] == "user"
         # a user makes photos, but keys, users, settings and Drive are for admins
