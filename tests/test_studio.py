@@ -344,6 +344,12 @@ def test_studio_server_runs_a_batch(tmp_path):
         assert plan2["first_model"] == 4 and plan2["auto"] and not plan2["clash"]
         code, clash = _post(base + "/api/jobs", {**body, "first_model": 2, "name": "other"})
         assert code == 400 and "already in batch" in clash["error"]
+        code, again = _post(base + "/api/jobs", {**body, "first_model": 2, "name": "other", "stage": "redo"})
+        assert code == 200  # recolouring again makes no faces, so models in another batch are fine
+        for _ in range(300):
+            if not json.loads(_get(f"{base}/api/jobs/{again['id']}")[1])["running"]:
+                break
+            time.sleep(0.1)
         z = zipfile.ZipFile(io.BytesIO(_get(f"{base}/api/batches/{st['name']}/zip?what=jpg")[1]))
         assert len(z.namelist()) == 6 and all(n.endswith(".jpg") for n in z.namelist())
         with pytest.raises(urllib.error.HTTPError):

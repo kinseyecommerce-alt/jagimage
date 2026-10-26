@@ -286,7 +286,7 @@ class Studio:
         ledger = studio.ModelLedger(self.out)
         specs = specs_from(body, ledger)
         spec = specs[0]
-        hit = ledger.clash(spec)
+        hit = ledger.clash(spec) if stage != "recolor" else None  # recolouring makes no new faces
         if hit:
             raise ValueError(f"Models {hit['first']}-{hit['last']} of {spec.category} are already in batch {hit['batch']}, "
                              f"so those faces would repeat. Start at model no. {ledger.next_free(spec.category)} "
