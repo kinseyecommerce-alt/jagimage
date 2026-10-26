@@ -147,7 +147,7 @@ def test_sleeve_hems_of_a_real_flash_photo_recolour_without_a_torn_fringe():
     after = rgb_to_lab(np.asarray(out.convert("RGB")))
     for y0, y1, x0, x1 in [(440, 540, 290, 400), (430, 530, 660, 770)]:  # left and right sleeve hem
         a, b, g = after[y0:y1, x0:x1, 0], before[y0:y1, x0:x1, 0], mask[y0:y1, x0:x1] > 0.5
-        near = ndimage.binary_dilation(g, iterations=4) & ~g
+        near = ndimage.binary_dilation(g, iterations=4) & ~ndimage.binary_dilation(g)  # past the 1 px blended edge
         assert not (near & (a < b - 0.15)).any()  # no skin painted dark
         dark = a < 0.3
         hem = np.array([np.nonzero(dark[:, x])[0].max() for x in range(dark.shape[1]) if dark[:, x].any()])

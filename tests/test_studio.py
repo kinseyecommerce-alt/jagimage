@@ -350,6 +350,18 @@ def test_studio_server_runs_a_batch(tmp_path):
             if not json.loads(_get(f"{base}/api/jobs/{again['id']}")[1])["running"]:
                 break
             time.sleep(0.1)
+        dash = json.loads(_get(base + "/api/dashboard")[1])
+        row = next(b for b in dash["batches"] if b["name"] == st["name"])
+        assert row["photos"] == 6 and row["checked"] == 6 and row["passed"] + row["flagged"] == 6 and row["ai_images"] == st["counts"]["ai_done"]
+        assert dash["totals"]["photos"] >= 6 and not dash["running"]
+        code, redo = _post(f"{base}/api/batches/{st['name']}/redo", {})  # the Dashboard's "Recolour again"
+        assert code == 200 and redo["stage"] == "recolor"
+        for _ in range(300):
+            st2 = json.loads(_get(f"{base}/api/jobs/{redo['id']}")[1])
+            if not st2["running"]:
+                break
+            time.sleep(0.1)
+        assert st2["counts"]["recoloured"] == 6 and st2["counts"]["errors"] == 0
         z = zipfile.ZipFile(io.BytesIO(_get(f"{base}/api/batches/{st['name']}/zip?what=jpg")[1]))
         assert len(z.namelist()) == 6 and all(n.endswith(".jpg") for n in z.namelist())
         with pytest.raises(urllib.error.HTTPError):
@@ -515,3 +527,42 @@ def test_one_base_per_model_halves_the_ai_images(tmp_path):
     for c in ["Navy", "Black", "White"]:
         qc = json.loads((tmp_path / small.name / "m0001" / f"{c}__{c}" / "qc.json").read_text())["front_main"]
         assert qc["top"]["deltaE"] < 3 and qc["bottom"]["deltaE"] < 3
+
+
+def test_every_photo_gets_a_quality_check_and_bleeding_is_flagged(tmp_path):
+    from jagimage.recolor import quality_check
+    spec = studio.Spec(top_colours=["Red", "Navy"], models=1, poses=["front_main"], keep_png=False)
+    b = studio.Batch(spec, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    for qc in b.root.glob("m0001/*/qc.json"):
+        check = json.loads(qc.read_text())["front_main"]["check"]
+        assert check["passed"] and check["bleed_px"] <= 10 and check["base_left_px"] == 0, (qc, check)
+    assert b.counts["qc_flagged"] == 0
+    # a recolour that spills onto the backdrop, and one that leaves the base colour in, are caught
+    before = Image.open(io.BytesIO(fake_generate("top mint (#8FD3A8), bottom lilac (#C4A3EE)", [])))
+    mask = np.zeros((400, 300), np.float32)
+    mask[125:245, 100:200] = 1
+    spilled = np.asarray(before).copy()
+    spilled[125:245, 100:200] = (205, 0, 26)
+    spilled[150:200, 203:212] = (205, 0, 26)  # 5-12 px beside the shirt
+    check = quality_check(before, Image.fromarray(spilled), [mask], ["#8FD3A8"], ["#CD001A"])
+    assert not check["passed"] and check["bleed_px"] > 60 and "bleeds" in check["problems"][0]
+    untouched = quality_check(before, before, [mask], ["#8FD3A8"], ["#CD001A"])
+    assert not untouched["passed"] and untouched["base_left_px"] > 40 and untouched["bleed_px"] == 0
+    assert quality_check(before, before, [mask], ["#8FD3A8"], ["#6CC24A"])["base_left_px"] == 0  # green on mint: its own hue
+
+
+def test_masks_from_older_code_are_made_again(tmp_path):
+    from jagimage.recolor import MASK_VERSION
+    spec = studio.Spec(top_colours=["Red"], models=1, poses=["front_main"], keep_png=False)
+    b = studio.Batch(spec, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    src = b.base_path(1, spec.bases()[0], "front_main")
+    ver, tm = src.parent / "front_main_mask_version.txt", src.parent / "front_main_top_mask.png"
+    assert ver.read_text() == str(MASK_VERSION)
+    ver.unlink()                         # as left by a version without mask versions
+    tm.write_bytes(b"")                  # and an outdated mask that must not be used
+    redo = studio.Batch(spec, out=tmp_path, generate=fake_generate, workers=1, redo=True)
+    redo.run(stage="recolor")
+    assert redo.counts["recoloured"] == 1 and redo.counts["errors"] == 0
+    assert ver.read_text() == str(MASK_VERSION) and tm.stat().st_size > 0

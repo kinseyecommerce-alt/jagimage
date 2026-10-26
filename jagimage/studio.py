@@ -392,7 +392,7 @@ class Batch:
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
-        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0}
+        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0}
         if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
             generate.set_usage_log(self.root / "_usage.jsonl")
 
@@ -597,7 +597,7 @@ class Batch:
         import numpy as np
         from PIL import Image
 
-        from .recolor import MaskError, garment_mask, rgb_to_lab, save_mask
+        from .recolor import MASK_VERSION, MaskError, garment_mask, rgb_to_lab, save_mask
 
         lab = rgb_to_lab(np.asarray(Image.open(path).convert("RGB")))
         why = backdrop_problem(lab)
@@ -623,6 +623,7 @@ class Batch:
         stem = path.name.replace(".tmp.png", "")
         for k, mk in masks.items():  # saved next to the base; edit them to fix an edge
             save_mask(path.parent / f"{stem}_{k}_mask.png", mk)
+        (path.parent / f"{stem}_mask_version.txt").write_text(str(MASK_VERSION))
 
     def _trim_fixed_bottom(self, lab, top):
         """Top-only shots: a black or grey bottom can carry a faint tint of the base green near the
@@ -657,11 +658,13 @@ class Batch:
     def masks(self, m, base, pose):
         from PIL import Image
 
-        from .recolor import load_mask
+        from .recolor import MASK_VERSION, load_mask
 
         src = self.base_path(m, base, pose)
         tm, bm = src.parent / f"{pose}_top_mask.png", src.parent / f"{pose}_bottom_mask.png"
-        if not tm.exists() or (base[1] and not bm.exists()):
+        ver = src.parent / f"{pose}_mask_version.txt"
+        old = not ver.exists() or ver.read_text().strip() != str(MASK_VERSION)  # made before masks improved
+        if old or not tm.exists() or (base[1] and not bm.exists()):
             self._check_base_existing(src, base)
         return Image.open(src), load_mask(tm), load_mask(bm) if base[1] else None
 
@@ -711,16 +714,22 @@ class Batch:
                 done.write_text("".join(f"{x}\n" for x in lines if x != rel))
 
     def _recolour_one(self, img, tmask, bmask, base, top, bottom, path: Path, pose):
-        from .recolor import fit_canvas, recolor_image, write_qc
+        from .recolor import fit_canvas, quality_check, recolor_image, write_qc
 
         spec = self.spec
         thex = colour_hex(top, spec.fabric)
         out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tmask, others=bmask if bottom else None)
         qc = {"top": {"colour": top, "hex": thex, "deltaE": round(de_t, 2), "on_shade": de_t < 3}}
+        masks, bases, targets = [tmask], [TOP_BASES[base[0]][1]], [thex]
         if bottom:
             bhex = colour_hex(bottom, spec.fabric)
             out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bmask, others=tmask)
             qc["bottom"] = {"colour": bottom, "hex": bhex, "deltaE": round(de_b, 2), "on_shade": de_b < 3}
+            masks, bases, targets = masks + [bmask], bases + [BOTTOM_BASES[base[1]][1]], targets + [bhex]
+        # the quality check every finished photo gets: colour accuracy, bleeding, base colour left
+        check = quality_check(img, out, masks, bases, targets)
+        problems = list(check["problems"]) + [f"{k} colour off by ΔE {v['deltaE']}" for k, v in qc.items() if not v["on_shade"]]
+        qc["check"] = {"passed": not problems, "problems": problems, "bleed_px": check["bleed_px"], "base_left_px": check["base_left_px"]}
         path.parent.mkdir(parents=True, exist_ok=True)
         if spec.keep_png:
             out.save(path)
@@ -730,7 +739,27 @@ class Batch:
         rows = json.loads(qc_path.read_text()) if qc_path.exists() else {}
         rows[pose] = qc
         write_qc(qc_path, rows)
+        marks = path.with_name(f"{pose}_qc.jpg")  # where the problems are, for the dashboard
+        if problems:
+            self._qc_marks(out, check, marks)
+            self._event("qc_flagged", model=path.parent.parent.name, path=str(path), problems=problems)
+        else:
+            marks.unlink(missing_ok=True)
         self._export(path, pose)
+
+    @staticmethod
+    def _qc_marks(img, check, dest: Path):
+        """A small copy of the photo with bled pixels in cyan and leftover base colour in magenta."""
+        import numpy as np
+        from PIL import Image
+        from scipy import ndimage
+
+        a = np.asarray(img.convert("RGB")).copy()
+        a[ndimage.binary_dilation(check["_bleed"], iterations=2)] = (0, 230, 255)
+        a[ndimage.binary_dilation(check["_left"], iterations=2)] = (255, 0, 200)
+        im = Image.fromarray(a)
+        im.thumbnail((800, 800))
+        im.save(dest, quality=85)
 
     def _export(self, path: Path, pose: str):
         if not self.export:

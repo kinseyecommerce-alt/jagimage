@@ -26,6 +26,10 @@ EDGE_ALPHA_BLUR = 0.8   # px: alpha along the edge is smoothed this much before 
 OUTLINE_SMOOTH = 1.5    # px: the garment outline is smoothed this much (removes notches and spikes)
 SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is smoothed
 SHADOW_SMOOTH = 1.2     # px blur for that ring
+MASK_VERSION = 2       # bump when garment_mask changes: masks saved by older code are made again
+QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
+QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
+QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
 SHADOW_LIKE = 0.12      # colour distance (OKLab) over which ring pixels stop being averaged together
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
@@ -336,7 +340,7 @@ def recolor_image(img: Image.Image, base_hex: str, target_hex: str, mode: str = 
     return Image.fromarray(rgba, "RGBA"), de, mask
 
 
-def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5, garment=None, backdrop=None):
+def _composite(rgb, new, mask, gain=1.0, inside=2, outside=3, garment=None, backdrop=None):
     """Inside the garment use the recoloured pixels. Near the edge, unmix each pixel from the photo
     itself: alpha = how far it sits from the nearby background colour towards the nearby garment
     colour. The edge then keeps the photo's own anti-aliasing and dark edge creases instead of
@@ -459,6 +463,43 @@ def load_mask(path: Path) -> np.ndarray:
 
 def save_mask(path: Path, mask: np.ndarray):
     Image.fromarray(np.round(mask * 255).astype(np.uint8), "L").save(path)
+
+
+def quality_check(before: Image.Image, after: Image.Image, masks: list, base_hexes: list, target_hexes: list) -> dict:
+    """What the eye catches when zooming in, measured on every finished photo:
+    bleed_px: skin or backdrop beside a garment (past its 2 px blended edge) that took on the new colour;
+    base_left_px: garment pixels still in the base colour (mint or lilac), unless the target is that hue.
+    passed is False, with the reasons in problems, when either is above its limit."""
+    b = rgb_to_lab(np.asarray(before.convert("RGB")))
+    a = rgb_to_lab(np.asarray(after.convert("RGB")))
+    if a.shape != b.shape:
+        raise ValueError("before and after must be the same size")
+    g = np.zeros(b.shape[:2], bool)
+    for m in masks:
+        g |= m > 0.5
+    ring = ndimage.binary_dilation(g, iterations=QC_RING) & ~ndimage.binary_dilation(g, iterations=2)
+    moved = np.linalg.norm(a - b, axis=-1) > 0.04
+    bleed = np.zeros_like(g)
+    for th in target_hexes:
+        T = render_target(th)
+        bleed |= ring & moved & ((np.linalg.norm(b - T, axis=-1) - np.linalg.norm(a - T, axis=-1)) > 0.03)
+    C = np.hypot(a[..., 1], a[..., 2])
+    H = np.arctan2(a[..., 2], a[..., 1])
+    left = np.zeros_like(g)
+    for m, bh, th in zip(masks, base_hexes, target_hexes):
+        B, T = hex_to_lab(bh), hex_to_lab(th)
+        hb, ht = np.arctan2(B[2], B[1]), np.arctan2(T[2], T[1])
+        if np.hypot(T[1], T[2]) > 0.04 and abs(np.angle(np.exp(1j * (hb - ht)))) < np.radians(35):
+            continue  # a green target on a mint base: its own hue isn't leftover base colour
+        left |= (m > 0.95) & (np.abs(np.angle(np.exp(1j * (H - hb)))) < np.radians(20)) & (C > 0.04)
+    out = {"bleed_px": int(bleed.sum()), "base_left_px": int(left.sum()), "problems": []}
+    if out["bleed_px"] > QC_BLEED_MAX:
+        out["problems"].append(f"colour bleeds onto skin or background ({out['bleed_px']} px)")
+    if out["base_left_px"] > QC_LEFT_MAX:
+        out["problems"].append(f"base colour left in the garment ({out['base_left_px']} px)")
+    out["passed"] = not out["problems"]
+    out["_bleed"], out["_left"] = bleed, left
+    return out
 
 
 def write_qc(path: Path, rows: dict):

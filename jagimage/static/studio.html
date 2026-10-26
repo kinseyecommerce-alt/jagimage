@@ -8,14 +8,14 @@
 <style>
 :root {
   --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1f24; --muted: #646a73; --line: #e2e2de; --soft: #f0f0ec;
-  --accent: #2f5bd3; --accent-ink: #ffffff; --ok: #2e7d4f; --warn: #b4441f; --chip: #ffffff;
+  --accent: #2f5bd3; --accent-ink: #ffffff; --accent-soft: #e4e8fb; --ok: #2e7d4f; --warn: #b4441f; --chip: #ffffff;
   --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #15171b; --panel: #1d2026; --ink: #e9eaee; --muted: #9aa0aa; --line: #2e323a; --soft: #23272e;
-    --accent: #6d90ff; --accent-ink: #0d1020; --ok: #5fc58c; --warn: #ff8a65; --chip: #23272e;
+    --accent: #6d90ff; --accent-ink: #0d1020; --accent-soft: #263258; --ok: #5fc58c; --warn: #ff8a65; --chip: #23272e;
     --shadow: none; color-scheme: dark;
   }
 }
@@ -26,7 +26,54 @@ header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
 header .sub { color: var(--muted); font-size: 13px; }
 .cloudnav { display: flex; gap: 4px; margin-left: 12px }
 .cloudnav a { padding: 6px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 14px }
-.cloudnav a.on, .cloudnav a:hover { background: var(--accent-soft, #e4e8fb) }
+.cloudnav a.on, .cloudnav a:hover { background: var(--accent-soft) }
+/* ---------- Dashboard ---------- */
+#dashTab { max-width: 1320px; margin: 0 auto; padding: 22px 20px 40px; }
+.dhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.dhead h2 { font-size: 22px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0; }
+.dhead .hint { margin-top: 2px; }
+.dgrid { display: grid; grid-template-columns: minmax(260px, 1.15fr) 2fr; gap: 14px; margin-bottom: 14px; }
+@media (max-width: 900px) { .dgrid { grid-template-columns: 1fr; } }
+.hero { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
+.hero .lbl, .tile .lbl { font-size: 12.5px; color: var(--muted); }
+.hero .big { font-size: 56px; font-weight: 650; line-height: 1; letter-spacing: -1px; }
+.hero .big small { font-size: 22px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+.meter { height: 8px; border-radius: 99px; background: var(--soft); overflow: hidden; display: flex; gap: 2px; }
+.meter i { display: block; height: 100%; border-radius: 99px; }
+.meter .good { background: #0ca30c; } .meter .bad { background: #d03b3b; } .meter .todo { background: var(--line); }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.status svg { width: 15px; height: 15px; flex: none; }
+.status.good { color: var(--ok); } .status.bad { color: #d03b3b; } .status.idle { color: var(--muted); }
+.dgrid .panel.panel, .tiles .panel.panel { margin-top: 0; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile .val { font-size: 26px; font-weight: 650; margin-top: 4px; letter-spacing: -.3px; }
+.tile .note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.running { display: flex; flex-direction: column; gap: 10px; }
+.runrow { display: grid; grid-template-columns: 1fr 120px; gap: 6px 14px; align-items: center; font-size: 13px; }
+.dtable { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px; }
+.dtable th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 0 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dtable td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.dtable tr:last-child td { border-bottom: 0; }
+.dtable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dtable .nm { font-weight: 600; }
+.dtable .meta { color: var(--muted); font-size: 12px; }
+.dtable .q { min-width: 170px; }
+.dtable .q .meter { margin-top: 6px; }
+.tablewrap { overflow-x: auto; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.issue { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); display: flex; flex-direction: column; }
+.issue .pics { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--line); }
+.issue img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: var(--soft); cursor: zoom-in; }
+.issue .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
+.issue .problem .status { align-items: flex-start; font-weight: 500; font-size: 12.5px; }
+.issue .problem .status svg { margin-top: 2px; }
+.empty { text-align: center; padding: 26px 10px; color: var(--muted); }
+.empty .status { font-size: 15px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.zoom { position: fixed; inset: 0; background: rgba(10,12,16,.82); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 .agenttab { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px }
 .agenttab td, .agenttab th { border-bottom: 1px solid var(--line); padding: 5px 4px; text-align: left }
 .agenttab td.r, .agenttab th.r { text-align: right }
@@ -95,10 +142,34 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#studio" role="tab" data-tab="studio" class="on">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
+<div id="dashTab" class="hide">
+  <div class="dhead">
+    <div><h2>Overview</h2><div class="hint" id="dSub">Every finished photo is checked: exact colour, no colour bleeding onto skin or background, no base colour left.</div></div>
+    <div class="row"><span class="hint" id="dUpdated"></span><button class="btn" id="dRefresh" type="button">Refresh</button></div>
+  </div>
+  <div class="dgrid">
+    <section class="panel hero" aria-live="polite">
+      <div><div class="lbl">Photos that passed the quality check</div><div class="big" id="dRate">–</div></div>
+      <div><div class="meter" id="dMeter" role="img"></div><div class="legend" style="margin-top:8px"><span style="--c:#0ca30c">Passed</span><span style="--c:#d03b3b">Needs attention</span><span style="--c:var(--line)">Made before checks</span></div></div>
+      <div id="dStatus"></div>
+    </section>
+    <div class="tiles">
+      <section class="panel tile"><div class="lbl">Finished photos</div><div class="val" id="dPhotos">–</div><div class="note" id="dPhotosNote"></div></section>
+      <section class="panel tile"><div class="lbl">Models</div><div class="val" id="dModels">–</div><div class="note" id="dModelsNote"></div></section>
+      <section class="panel tile"><div class="lbl">AI base photos</div><div class="val" id="dAi">–</div><div class="note">the only part that costs money</div></section>
+      <section class="panel tile"><div class="lbl">In Google Drive</div><div class="val" id="dDrive">–</div><div class="note" id="dDriveNote"></div></section>
+      <section class="panel tile"><div class="lbl">AI spend</div><div class="val" id="dCost">–</div><div class="note" id="dCostNote"></div></section>
+      <section class="panel tile"><div class="lbl">Need attention</div><div class="val" id="dFlagged">–</div><div class="note">photos flagged by the check</div></section>
+    </div>
+  </div>
+  <section class="panel running hide" id="dRunning"><h2>Running now</h2><div id="dRunRows"></div></section>
+  <section class="panel" style="margin-top:14px"><h2>Batches</h2><div class="tablewrap"><table class="dtable" id="dTable"></table></div></section>
+  <section class="panel" style="margin-top:14px"><h2>Needs attention</h2><p class="hint" style="margin:-4px 0 12px">Left: the photo. Right: where the problem is (cyan = colour bled onto skin or background, magenta = base colour left). Click to enlarge.</p><div id="dIssues"></div></section>
+</div>
 <div id="settingsTab" class="hide" style="max-width:860px;margin:0 auto;padding:18px 20px">
   <section class="panel">
     <h2>API keys</h2>
@@ -554,18 +625,93 @@ function initCloud() {
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
 function showTab(tab) {
-  const rec = tab === "recolor", set = tab === "settings", f = $("recolorTab");
+  const rec = tab === "recolor", set = tab === "settings", dash = tab === "dashboard", f = $("recolorTab");
   if (rec && !f.src) f.src = "/recolor/";
   if (rec) f.style.height = Math.max(400, innerHeight - document.querySelector("header").offsetHeight) + "px"; // fills the window under the header
-  f.classList.toggle("hide", !rec); $("settingsTab").classList.toggle("hide", !set); $("studioTab").classList.toggle("hide", rec || set);
+  f.classList.toggle("hide", !rec); $("settingsTab").classList.toggle("hide", !set); $("dashTab").classList.toggle("hide", !dash); $("studioTab").classList.toggle("hide", rec || set || dash);
   document.querySelectorAll("#tabs [data-tab]").forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle("on", on); a.setAttribute("aria-selected", on); });
-  document.title = rec ? "Jag Studio · Recolor" : set ? "Jag Studio · Settings" : "Jag Studio";
+  document.title = rec ? "Jag Studio · Recolor" : set ? "Jag Studio · Settings" : dash ? "Jag Studio · Dashboard" : "Jag Studio";
   if (set && S.opts) renderSettings();
+  if (dash) setTimeout(loadDashboard);  // after the whole script has loaded
 }
-const tabFromHash = () => ({ "#recolor": "recolor", "#settings": "settings" })[location.hash] || "studio";
+const tabFromHash = () => ({ "#recolor": "recolor", "#settings": "settings", "#studio": "studio" })[location.hash] || "dashboard";
 window.addEventListener("resize", () => { if (location.hash === "#recolor") showTab("recolor"); });
 window.addEventListener("hashchange", () => showTab(tabFromHash()));
 showTab(tabFromHash());
+
+// ---------- Dashboard ----------
+const ICON = {
+  good: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7.2" fill="currentColor"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  bad: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2l7 12.6H1z" fill="currentColor"/><path d="M8 6v3.6M8 11.6v.1" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  idle: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>' };
+const status = (kind, text) => `<span class="status ${kind}">${ICON[kind]}${esc(text)}</span>`;
+const compact = (n) => n >= 1e5 ? (n / 1e3).toFixed(0) + "K" : n >= 1e4 ? (n / 1e3).toFixed(1) + "K" : fmt(n);
+const meter = (passed, flagged, total) => {
+  const seg = (n, c) => n ? `<i class="${c}" style="flex:${n}"></i>` : "";
+  return seg(passed, "good") + seg(flagged, "bad") + seg(Math.max(0, total - passed - flagged), "todo") || '<i class="todo" style="flex:1"></i>';
+};
+const ago = (t) => { const s = Date.now() / 1000 - t; return s < 90 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : new Date(t * 1000).toLocaleDateString(); };
+let dashTimer = null;
+async function loadDashboard() {
+  clearTimeout(dashTimer);
+  let d; try { d = await api("/api/dashboard"); } catch (e) { $("dSub").textContent = e.message; return; }
+  const t = d.totals, checked = t.checked, rate = checked ? Math.round(100 * t.passed / checked) : null;
+  $("dRate").innerHTML = rate == null ? "–" : `${rate}<small>%</small>`;
+  $("dMeter").innerHTML = meter(t.passed, t.flagged, t.photos);
+  $("dMeter").setAttribute("aria-label", `${t.passed} passed, ${t.flagged} need attention, ${t.photos - checked} made before checks`);
+  $("dStatus").innerHTML = !t.photos ? status("idle", "No photos yet: start a batch in Studio")
+    : t.flagged ? status("bad", `${fmt(t.flagged)} photo${t.flagged > 1 ? "s" : ""} need${t.flagged > 1 ? "" : "s"} attention`)
+    : checked ? status("good", `All ${fmt(t.passed)} checked photos passed`) : status("idle", "Not checked yet: use Recolour again on a batch");
+  $("dPhotos").textContent = compact(t.photos); $("dPhotosNote").textContent = `${fmt(t.batches)} batch${t.batches === 1 ? "" : "es"}`;
+  $("dModels").textContent = compact(t.models); $("dModelsNote").textContent = "different faces";
+  $("dAi").textContent = compact(t.ai_images);
+  $("dDrive").textContent = compact(t.on_drive); $("dDriveNote").textContent = t.photos ? `${Math.round(100 * Math.min(t.on_drive, t.photos) / t.photos)}% of finished photos` : "uploads every minute";
+  $("dCost").textContent = "₹" + fmt(t.cost_inr);
+  $("dCostNote").textContent = t.photos ? `₹${(t.cost_inr / t.photos).toFixed(2)} per finished photo` : "";
+  $("dFlagged").innerHTML = t.flagged ? `<span style="color:#d03b3b">${fmt(t.flagged)}</span>` : "0";
+  $("dUpdated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // running jobs
+  $("dRunning").classList.toggle("hide", !d.running.length);
+  $("dRunRows").innerHTML = d.running.map((r) => { const done = r.counts.recoloured + r.counts.recolour_skipped, all = r.plan.recoloured_images || 1;
+    return `<div class="runrow"><div><b>${esc(r.name.replace(/_/g, " "))}</b><div class="meta hint">${fmt(r.counts.ai_done)} AI photos · ${fmt(done)} of ${fmt(all)} finished${r.counts.qc_flagged ? ` · ${fmt(r.counts.qc_flagged)} flagged` : ""}</div></div>
+      <div class="num">${Math.round(100 * done / all)}%</div><div class="meter" style="grid-column:1/-1">${meter(done, 0, all)}</div></div>`; }).join("");
+  // batches
+  $("dTable").innerHTML = d.batches.length ? `<thead><tr><th>Batch</th><th class="num">Models</th><th class="num">Photos</th><th>Quality check</th><th class="num">Colour accuracy</th><th class="num">In Drive</th><th class="num">AI spend</th><th>Updated</th><th></th></tr></thead><tbody>`
+    + d.batches.map((b) => {
+      const q = !b.checked ? status("idle", "Not checked yet") : b.flagged ? status("bad", `${fmt(b.flagged)} need attention`) : status("good", "All passed");
+      return `<tr><td><div class="nm">${esc(label(b.category || ""))} · ${esc(nice(b.top || ""))}${b.bottom ? " + " + esc(nice(b.bottom)) : ""}</div><div class="meta">${esc((S.opts && S.opts.fabrics[b.fabric] || b.fabric || "").split(" (")[0])} · ${esc(b.provider)}</div></td>
+        <td class="num">${fmt(b.models)}</td><td class="num">${fmt(b.photos)}</td>
+        <td class="q">${q}<div class="meter">${meter(b.passed, b.flagged, b.photos)}</div></td>
+        <td class="num" title="ΔE under 2 can't be seen; average / worst">${b.deltaE_avg == null ? "–" : `ΔE ${b.deltaE_avg}<div class="meta">worst ${b.deltaE_max}</div>`}</td>
+        <td class="num">${fmt(Math.min(b.on_drive, b.photos))}<div class="meta">of ${fmt(b.photos)}</div></td>
+        <td class="num">₹${fmt(b.cost_inr)}<div class="meta">${b.cost_is_real ? "billed" : "estimate"}</div></td>
+        <td class="meta" style="white-space:nowrap">${ago(b.updated)}</td>
+        <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button></td></tr>`; }).join("") + "</tbody>"
+    : `<tbody><tr><td class="empty">${status("idle", "No batches yet")}<div class="hint" style="margin-top:6px">Start one in the Studio tab, or ask the Agent.</div></td></tr></tbody>`;
+  // needs attention
+  $("dIssues").innerHTML = d.attention.length ? `<div class="gallery">` + d.attention.map((a) => {
+    const src = (rel) => `/thumbs/${encodeURIComponent(a.batch)}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+    const full = (rel) => `/files/${encodeURIComponent(a.batch)}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+    return `<article class="issue"><div class="pics"><img src="${src(a.photo)}" data-full="${full(a.photo)}" alt="${esc(a.colours)} photo" loading="lazy">${a.marks ? `<img src="${full(a.marks)}" data-full="${full(a.marks)}" alt="Where the problem is" loading="lazy">` : ""}</div>
+      <div class="body"><b>${esc(a.colours)}</b><span class="meta hint">${esc(a.batch.replace(/_/g, " "))} · ${esc(a.model)} · ${esc(label(a.pose))}</span>${a.problems.map((p) => `<span class="problem">${status("bad", p)}</span>`).join("")}</div></article>`; }).join("") + `</div>`
+    : `<div class="empty">${status("good", "Nothing needs attention")}<div class="hint" style="margin-top:6px">Every checked photo has exact colours, no bleeding and no base colour left.</div></div>`;
+  if (d.running.length || !$("dashTab").classList.contains("hide")) dashTimer = setTimeout(() => { if (!$("dashTab").classList.contains("hide")) loadDashboard(); }, d.running.length ? 5000 : 30000);
+}
+function initDashboard() {
+  $("dRefresh").onclick = loadDashboard;
+  $("dTable").addEventListener("click", async (e) => {
+    const name = e.target.dataset.redo; if (!name) return;
+    if (!confirm(`Recolour every photo in ${name.replace(/_/g, " ")} again with the latest recolouring and quality check? No AI is used, so it costs nothing. The photos in Google Drive are replaced.`)) return;
+    e.target.disabled = true;
+    try { await api(`/api/batches/${encodeURIComponent(name)}/redo`, {}); loadDashboard(); } catch (err) { alert(err.message); e.target.disabled = false; }
+  });
+  $("dIssues").addEventListener("click", (e) => {
+    const src = e.target.dataset && e.target.dataset.full; if (!src) return;
+    const z = document.createElement("div"); z.className = "zoom"; z.innerHTML = `<img src="${src}" alt="">`; z.onclick = () => z.remove();
+    document.addEventListener("keydown", function esc_(ev) { if (ev.key === "Escape") { z.remove(); document.removeEventListener("keydown", esc_); } });
+    document.body.appendChild(z);
+  });
+}
 
 // ---------- Settings: API keys, my password, users (admin) ----------
 const KEY_INFO = { gemini: ["Gemini", "AIza…  (aistudio.google.com/apikey)"], openai: ["OpenAI (GPT)", "sk-…  (platform.openai.com/api-keys)"], runpod: ["RunPod (own GPU)", "Pod token"] };
@@ -628,7 +774,7 @@ function initSettings() {
 async function init() {
   S.opts = await api("/api/options");
   if (S.opts.cloud) { S.me = await api("/api/me"); if (S.me.role !== "admin") ["key", "saveKey", "rememberField"].forEach((id) => $(id).closest(".row, label").classList.add("hide")); }
-  initSettings(); if (tabFromHash() === "settings") renderSettings();
+  initSettings(); initDashboard(); if (tabFromHash() === "settings") renderSettings(); if (tabFromHash() === "dashboard") loadDashboard();
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });

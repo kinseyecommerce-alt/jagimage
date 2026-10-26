@@ -311,6 +311,59 @@ class Studio:
                          "updated": spec_file.stat().st_mtime})
         return sorted(rows, key=lambda r: -r["updated"])
 
+    def dashboard(self) -> dict:
+        """Everything the Dashboard tab shows: totals, one row per batch with its quality-check results,
+        the photos that need attention, and what is running now."""
+        from .pricing import USD_INR, actual_cost, per_image
+
+        batches, attention = [], []
+        for row in self.folders():
+            name, spec = row["name"], row["spec"]
+            root = Path(self.out) / name
+            photos = passed = flagged = 0
+            de = []
+            for qc_file in root.glob("m[0-9][0-9][0-9][0-9]/*/qc.json"):
+                try:
+                    poses = json.loads(qc_file.read_text())
+                except ValueError:
+                    continue
+                for pose, qc in poses.items():
+                    photos += 1
+                    de += [v["deltaE"] for k, v in qc.items() if k in ("top", "bottom")]
+                    check = qc.get("check")
+                    if check is None:
+                        continue  # made before every photo was checked
+                    if check["passed"]:
+                        passed += 1
+                        continue
+                    flagged += 1
+                    rel = qc_file.parent.relative_to(root).as_posix()
+                    marks = qc_file.parent / f"{pose}_qc.jpg"
+                    attention.append({"batch": name, "model": qc_file.parent.parent.name, "colours": qc_file.parent.name.replace("__", " / ").replace("_", " "),
+                                      "pose": pose, "problems": check["problems"], "updated": qc_file.stat().st_mtime,
+                                      "photo": f"{rel}/{pose}_1500x1500.jpg", "marks": f"{rel}/{pose}_qc.jpg" if marks.exists() else None})
+            ai_images = sum(1 for f in root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png") if not f.stem.endswith("_mask"))
+            real = actual_cost(root / "_usage.jsonl", photos)
+            provider = spec.get("provider", "gemini")
+            setting = {"gemini": spec.get("image_size", "2K"), "openai": spec.get("quality", "medium")}.get(provider, "gpu")
+            try:
+                est = per_image(provider, setting, None) * ai_images * USD_INR
+            except Exception:
+                est = 0.0
+            uploaded = root / "_drive.txt"
+            batches.append({"name": name, "category": spec.get("category"), "top": spec.get("top"), "bottom": spec.get("bottom"),
+                            "fabric": spec.get("fabric"), "provider": provider, "updated": row["updated"],
+                            "models": len(list(root.glob("m[0-9][0-9][0-9][0-9]"))), "ai_images": ai_images, "photos": photos,
+                            "checked": passed + flagged, "passed": passed, "flagged": flagged,
+                            "deltaE_avg": round(sum(de) / len(de), 2) if de else None, "deltaE_max": round(max(de), 2) if de else None,
+                            "on_drive": len(uploaded.read_text().splitlines()) if uploaded.exists() else 0,
+                            "cost_inr": real["inr"] if real else round(est), "cost_is_real": bool(real)})
+        totals = {k: sum(b[k] for b in batches) for k in ("models", "ai_images", "photos", "checked", "passed", "flagged", "on_drive", "cost_inr")}
+        totals["batches"] = len(batches)
+        running = [j.status() for j in self.jobs.values() if j.finished is None]
+        return {"totals": totals, "batches": batches, "attention": sorted(attention, key=lambda a: -a["updated"])[:60],
+                "running": [{"id": r["id"], "name": r["name"], "counts": r["counts"], "plan": r["plan"]} for r in running]}
+
     def batch_for(self, name: str) -> studio.Batch:
         spec_file = Path(self.out) / name / "spec.json"
         if "/" in name or ".." in name or not spec_file.exists():
@@ -496,6 +549,8 @@ def make_handler(app: Studio):
                     return self._send(200, path.read_bytes(), ctype)
                 if parts == ["api", "options"]:
                     return self._json(options(app))
+                if parts == ["api", "dashboard"]:
+                    return self._json(app.dashboard())
                 if parts == ["api", "jobs"]:
                     return self._json({"jobs": [j.status() for j in app.jobs.values()], "folders": app.folders()})
                 if len(parts) == 3 and parts[:2] == ["api", "jobs"]:
@@ -611,6 +666,10 @@ def make_handler(app: Studio):
                     return self._json(ready())
                 if parts == ["api", "jobs"]:
                     return self._json(app.start(body).status())
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "redo":
+                    # Dashboard: recolour a whole batch again with the latest recolouring (no AI)
+                    spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())
+                    return self._json(app.start({**spec, "stage": "redo", "same_models": True}).status())
                 if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "stop":
                     job = app.jobs.get(parts[2])
                     if not job:
