@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import threading
 import time
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from jagimage import studio
-from jagimage.cloud import Agent, Cloud, Drive, DriveSync, Login
+from jagimage.cloud import Agent, Cloud, Drive, DriveSync, Login, Users
 from jagimage.server import serve
 from test_studio import fake_generate
 
@@ -100,18 +101,76 @@ def path_of(g, fid):
 
 
 # ---------------------------------------------------------------- tests
-def test_login_needs_a_real_password_and_slows_down_guessing():
+def test_login_needs_a_real_password_and_slows_down_guessing(tmp_path):
     with pytest.raises(ValueError):
-        Login("short", b"k" * 32)
-    lg = Login(PASSWORD, b"k" * 32)
-    assert not lg.valid("") and not lg.valid("jag_session=123.abc")
-    cookie = lg.cookie().split(";")[0]
-    assert lg.valid(cookie) and not Login(PASSWORD, b"x" * 32).valid(cookie)  # signed with the server's secret
+        Users(tmp_path / "a", "short")
+    users = Users(tmp_path / "b", PASSWORD)
+    lg = Login(users, b"k" * 32)
+    assert not lg.valid("") and not lg.valid("jag_session=123.admin.1.abc")
+    cookie = lg.cookie("admin").split(";")[0]
+    assert lg.user(cookie) == "admin" and not Login(users, b"x" * 32).valid(cookie)  # signed with the server's secret
     for _ in range(5):
-        assert not lg.try_password("1.2.3.4", "guess")
+        assert not lg.try_login("1.2.3.4", "admin", "guess")
     with pytest.raises(PermissionError):
-        lg.try_password("1.2.3.4", PASSWORD)
-    assert lg.try_password("5.6.7.8", PASSWORD)  # other addresses aren't blocked
+        lg.try_login("1.2.3.4", "admin", PASSWORD)
+    assert lg.try_login("5.6.7.8", "admin", PASSWORD)  # other addresses aren't blocked
+    users.set_password("admin", "new-password-1")
+    assert not lg.valid(cookie)  # old sessions end when the password changes
+    assert Users(tmp_path / "b", "ignored-now").check("admin", "new-password-1")  # the env password only starts things
+
+
+def signed(base, name="admin", password=PASSWORD):
+    code, headers, _ = call(base + "/login", {"username": name, "password": password})
+    assert code == 200, (name, code)
+    return headers["Set-Cookie"].split(";")[0]
+
+
+def test_admin_adds_users_who_cannot_change_settings(tmp_path):
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        admin = signed(base)
+        assert json.loads(call(base + "/api/me", cookie=admin)[2]) == {"user": "admin", "role": "admin"}
+        assert call(base + "/api/users", {"username": "Ravi", "password": "short"}, cookie=admin)[0] == 400
+        code, _, body = call(base + "/api/users", {"username": "Ravi", "password": "ravi-pass-1"}, cookie=admin)
+        assert code == 200 and [u["name"] for u in json.loads(body)["users"]] == ["admin", "ravi"]
+        assert call(base + "/api/users", {"username": "ravi", "password": "ravi-pass-1"}, cookie=admin)[0] == 400  # taken
+        ravi = signed(base, "ravi", "ravi-pass-1")
+        assert json.loads(call(base + "/api/me", cookie=ravi)[2])["role"] == "user"
+        # a user makes photos, but keys, users, settings and Drive are for admins
+        assert call(base + "/api/options", cookie=ravi)[0] == 200
+        for path, body in [("/api/keys", {"gemini": "k"}), ("/api/users", {"username": "x2", "password": "12345678"}),
+                           ("/api/settings", {"out": "/tmp"}), ("/api/drive/client", {}), ("/api/users/admin/delete", {})]:
+            assert call(base + path, body, cookie=ravi)[0] == 403, path
+        assert call(base + "/api/users", cookie=ravi)[0] == 403
+        # own password: needs the current one; afterwards the old one fails
+        assert call(base + "/api/account/password", {"current": "nope", "new": "ravi-pass-2"}, cookie=ravi)[0] == 400
+        code, headers, _ = call(base + "/api/account/password", {"current": "ravi-pass-1", "new": "ravi-pass-2"}, cookie=ravi)
+        assert code == 200 and call(base + "/api/me", cookie=headers["Set-Cookie"].split(";")[0])[0] == 200  # stays signed in
+        assert call(base + "/api/me", cookie=ravi)[0] == 401  # the old session elsewhere is signed out
+        assert call(base + "/login", {"username": "ravi", "password": "ravi-pass-1"})[0] == 403
+        ravi = signed(base, "ravi", "ravi-pass-2")
+        # admin resets a password, deletes the user; the last admin stays
+        assert call(base + "/api/users/ravi/password", {"password": "reset-pass-3"}, cookie=admin)[0] == 200
+        assert call(base + "/api/me", cookie=ravi)[0] == 401
+        assert call(base + "/api/users/admin/delete", {}, cookie=admin)[0] == 400
+        assert call(base + "/api/users/ravi/delete", {}, cookie=admin)[0] == 200
+        assert call(base + "/login", {"username": "ravi", "password": "reset-pass-3"})[0] == 403
+        # admin keys: save, then remove
+        assert json.loads(call(base + "/api/keys", {"openai": "sk-test", "remember": True}, cookie=admin)[2])["openai"] is True
+        assert json.loads(call(base + "/api/keys", {"clear": ["openai"]}, cookie=admin)[2])["openai"] is False
+        # Drive: the admin pastes the OAuth client in the website, then Connect goes to Google
+        assert call(base + "/api/drive/client", {"client_id": "x", "client_secret": "y"}, cookie=admin)[0] == 400
+        code, _, body = call(base + "/api/drive/client", {"client_id": "123-abc.apps.googleusercontent.com", "client_secret": "GOCSPX-secret-1"}, cookie=admin)
+        assert code == 200 and json.loads(body)["configured"] is True
+        code, headers, _ = call(base + "/drive/connect", cookie=admin)
+        assert code == 302 and headers["Location"].startswith("https://accounts.google.com/") and "123-abc.apps" in headers["Location"]
+        assert Drive("", "", tmp_path / "data").configured  # kept for the next start
+    finally:
+        os.environ.pop("OPENAI_API_KEY", None)
+        httpd.shutdown()
 
 
 def test_server_version_asks_for_the_password(tmp_path):
@@ -125,7 +184,7 @@ def test_server_version_asks_for_the_password(tmp_path):
         assert call(base + "/api/options")[0] == 401 and call(base + "/api/jobs", {})[0] == 401
         assert call(base + "/files/x/y.jpg")[0] == 302
         assert call(base + "/login", {"password": "nope"})[0] == 403
-        code, headers, _ = call(base + "/login", {"password": PASSWORD})
+        code, headers, _ = call(base + "/login", {"password": PASSWORD})  # user name left out: admin
         cookie = headers["Set-Cookie"].split(";")[0]
         assert code == 200 and "HttpOnly" in headers["Set-Cookie"]
         code, _, body = call(base + "/api/options", cookie=cookie)

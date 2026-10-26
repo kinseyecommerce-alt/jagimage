@@ -2,7 +2,9 @@
 and an agent that turns "make 1000 Men models in half sleeve and hoodie" into batches.
 
 Enabled by `jagimage serve --cloud` with these environment variables:
-  JAGIMAGE_PASSWORD              the website password (required)
+  JAGIMAGE_PASSWORD              the first password of the user "admin" (required on the first start;
+                                 later changed in Settings, where the admin also adds users)
+  JAGIMAGE_RESET_ADMIN           set to 1 to put the admin's password back to JAGIMAGE_PASSWORD
   JAGIMAGE_DATA                  folder for settings and the Drive sign-in (default: <out>/../jag-data)
   GOOGLE_OAUTH_CLIENT_ID/SECRET  a Google OAuth "Web application" client, for Drive (optional)
   JAGIMAGE_DRIVE_FOLDER          Drive folder the photos go into (default: kinsey models 2026)
@@ -13,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -26,39 +29,133 @@ DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"  # only files and fol
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
-# ---------------------------------------------------------------- login
-class Login:
-    """One shared password. A signed cookie keeps you signed in for SESSION_DAYS; repeated wrong
-    passwords from one address are slowed down."""
+# ---------------------------------------------------------------- users and login
+USER_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+HASH_ROUNDS = 200_000
 
-    def __init__(self, password: str, secret: bytes):
-        if not password or len(password) < 8:
-            raise ValueError("JAGIMAGE_PASSWORD must be at least 8 characters")
-        self.password = password.encode()
+
+class Forbidden(Exception):
+    """Signed in, but only an admin may do this."""
+
+
+class Users:
+    """Website accounts in users.json (data folder): name -> salted PBKDF2 hash, role ("admin" or "user")
+    and a version that changes with the password, which signs out that user's old sessions.
+    The first start makes the admin "admin" with JAGIMAGE_PASSWORD; after that the password is changed
+    in Settings. JAGIMAGE_RESET_ADMIN=1 sets the admin's password back to JAGIMAGE_PASSWORD (forgotten)."""
+
+    def __init__(self, data: Path, bootstrap_password: str = ""):
+        self.file = Path(data) / "users.json"
+        self.lock = threading.Lock()
+        self.users = json.loads(self.file.read_text()) if self.file.exists() else {}
+        if not self.users or os.environ.get("JAGIMAGE_RESET_ADMIN"):
+            if not bootstrap_password or len(bootstrap_password) < 8:
+                raise ValueError("JAGIMAGE_PASSWORD must be at least 8 characters")
+            if "admin" in self.users:
+                self.set_password("admin", bootstrap_password)
+                self.users["admin"]["role"] = "admin"
+            else:
+                self.create("admin", bootstrap_password, "admin")
+
+    def _save(self):
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.users, indent=1))
+        os.chmod(tmp, 0o600)
+        tmp.replace(self.file)
+
+    @staticmethod
+    def _hash(password: str, salt: str) -> str:
+        return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), HASH_ROUNDS).hex()
+
+    @staticmethod
+    def _check_password(password: str):
+        if not isinstance(password, str) or len(password) < 8:
+            raise ValueError("The password needs at least 8 characters")
+
+    def create(self, name: str, password: str, role: str = "user"):
+        name = str(name or "").strip().lower()
+        if not USER_NAME.match(name):
+            raise ValueError("User name: 2-32 letters or digits (a-z, 0-9, dot, dash, underscore)")
+        if role not in ("admin", "user"):
+            raise ValueError("Role is admin or user")
+        self._check_password(password)
+        with self.lock:
+            if name in self.users:
+                raise ValueError(f"{name} already exists")
+            salt = secrets.token_hex(16)
+            self.users[name] = {"hash": self._hash(password, salt), "salt": salt, "role": role, "ver": 1, "created": int(time.time())}
+            self._save()
+
+    def set_password(self, name: str, password: str):
+        self._check_password(password)
+        with self.lock:
+            u = self.users[name]
+            u["salt"] = secrets.token_hex(16)
+            u["hash"] = self._hash(password, u["salt"])
+            u["ver"] = u.get("ver", 1) + 1
+            self._save()
+
+    def delete(self, name: str):
+        with self.lock:
+            if name not in self.users:
+                raise ValueError(f"No user {name}")
+            if self.users[name]["role"] == "admin" and sum(u["role"] == "admin" for u in self.users.values()) == 1:
+                raise ValueError("Keep at least one admin")
+            del self.users[name]
+            self._save()
+
+    def check(self, name: str, password: str) -> bool:
+        u = self.users.get(name)
+        got = self._hash(password, u["salt"] if u else "00" * 16)  # same work for unknown names
+        return bool(u) and hmac.compare_digest(got, u["hash"])
+
+    def role(self, name: str) -> Optional[str]:
+        u = self.users.get(name)
+        return u and u["role"]
+
+    def listing(self) -> list:
+        return [{"name": n, "role": u["role"], "created": u.get("created")} for n, u in sorted(self.users.items())]
+
+
+class Login:
+    """Sign-in with a user name and password. A signed cookie keeps you signed in for SESSION_DAYS (until
+    your password changes); repeated wrong passwords from one address are slowed down."""
+
+    def __init__(self, users: Users, secret: bytes):
+        self.users = users
         self.secret = secret
         self.failures = {}  # ip -> (count, last time)
 
     def _sign(self, value: str) -> str:
         return hmac.new(self.secret, value.encode(), hashlib.sha256).hexdigest()
 
-    def cookie(self) -> str:
-        expires = str(int(time.time()) + SESSION_DAYS * 86400)
-        return f"jag_session={expires}.{self._sign(expires)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"
+    def cookie(self, name: str) -> str:
+        value = f"{int(time.time()) + SESSION_DAYS * 86400}.{name}.{self.users.users[name].get('ver', 1)}"
+        return f"jag_session={value}.{self._sign(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"
 
-    def valid(self, cookie_header: str) -> bool:
+    def user(self, cookie_header: str) -> Optional[str]:
+        """The signed-in user's name, or None."""
         for part in (cookie_header or "").split(";"):
             name, _, value = part.strip().partition("=")
-            if name == "jag_session" and "." in value:
-                expires, sig = value.split(".", 1)
-                if hmac.compare_digest(sig, self._sign(expires)) and expires.isdigit() and int(expires) > time.time():
-                    return True
-        return False
+            if name != "jag_session" or value.count(".") < 3:
+                continue
+            body, sig = value.rsplit(".", 1)
+            expires, user, ver = body.split(".", 2) if body.count(".") >= 2 else ("", "", "")
+            u = self.users.users.get(user)
+            if (hmac.compare_digest(sig, self._sign(body)) and expires.isdigit() and int(expires) > time.time()
+                    and u and str(u.get("ver", 1)) == ver):
+                return user
+        return None
 
-    def try_password(self, ip: str, password: str) -> bool:
+    def valid(self, cookie_header: str) -> bool:
+        return self.user(cookie_header) is not None
+
+    def try_login(self, ip: str, name: str, password: str) -> bool:
         count, last = self.failures.get(ip, (0, 0.0))
         if count >= 5 and time.time() - last < 30 * (count - 4):
             raise PermissionError("Too many wrong passwords. Wait a minute and try again.")
-        if hmac.compare_digest(password.encode(), self.password):
+        if self.users.check(str(name or "admin").strip().lower(), password):
             self.failures.pop(ip, None)
             return True
         self.failures[ip] = (count + 1, time.time())
@@ -74,6 +171,10 @@ class Drive:
     def __init__(self, client_id: str, client_secret: str, data: Path, folder: str = "kinsey models 2026",
                  opener: Callable = urllib.request.urlopen):
         self.client_id, self.client_secret = client_id, client_secret
+        self.client_file = Path(data) / "drive_client.json"  # the OAuth client pasted in the website (if not in the environment)
+        if not self.configured and self.client_file.exists():
+            saved = json.loads(self.client_file.read_text())
+            self.client_id, self.client_secret = saved.get("client_id", ""), saved.get("client_secret", "")
         self.file = Path(data) / "drive.json"
         self.folder = folder
         self.opener = opener
@@ -95,6 +196,23 @@ class Drive:
         tmp.write_text(json.dumps(self.state))
         os.chmod(tmp, 0o600)
         tmp.replace(self.file)
+
+    def set_client(self, client_id: str, client_secret: str):
+        """Keep the Google OAuth client the admin pasted in the website; a new client needs a new sign-in."""
+        client_id, client_secret = str(client_id or "").strip(), str(client_secret or "").strip()
+        if not client_id.endswith(".apps.googleusercontent.com") or len(client_secret) < 10:
+            raise ValueError("Paste the Client ID (ends in .apps.googleusercontent.com) and the Client secret from Google Cloud")
+        with self.lock:
+            self.client_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.client_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}))
+            os.chmod(tmp, 0o600)
+            tmp.replace(self.client_file)
+            if client_id != self.client_id:
+                self.state.pop("refresh_token", None)
+                self._access = (None, 0.0)
+                self._save()
+            self.client_id, self.client_secret = client_id, client_secret
 
     def auth_url(self, redirect_uri: str, state: str) -> str:
         return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
@@ -344,7 +462,8 @@ class Cloud:
         if not secret_file.exists():
             secret_file.write_bytes(secrets.token_bytes(32))
             os.chmod(secret_file, 0o600)
-        self.login = Login(password or os.environ.get("JAGIMAGE_PASSWORD", ""), secret_file.read_bytes())
+        self.users = Users(self.data, password or os.environ.get("JAGIMAGE_PASSWORD", ""))
+        self.login = Login(self.users, secret_file.read_bytes())
         self.drive = drive or Drive(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""), os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
                                     self.data, os.environ.get("JAGIMAGE_DRIVE_FOLDER", "kinsey models 2026"))
         self.sync = DriveSync(self.drive, out_dir)

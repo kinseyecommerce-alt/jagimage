@@ -95,10 +95,42 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#studio" role="tab" data-tab="studio" class="on">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#studio" role="tab" data-tab="studio" class="on">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
+<div id="settingsTab" class="hide" style="max-width:860px;margin:0 auto;padding:18px 20px">
+  <section class="panel">
+    <h2>API keys</h2>
+    <p class="hint" id="keysHint">Saved keys are used by every batch. They stay on this computer or server and are never shown again.</p>
+    <div id="keyRows"></div>
+    <p class="e" id="keysErr"></p>
+  </section>
+  <section class="panel hide" id="accountPanel">
+    <h2>My account</h2>
+    <p>Signed in as <b id="meName"></b> <span class="hint" id="meRole"></span></p>
+    <div class="row">
+      <input type="password" id="pwCur" placeholder="Current password" autocomplete="current-password" style="flex:1">
+      <input type="password" id="pwNew" placeholder="New password (8 or more)" autocomplete="new-password" style="flex:1">
+      <input type="password" id="pwNew2" placeholder="New password again" autocomplete="new-password" style="flex:1">
+      <button class="btn primary" id="pwSave">Change password</button>
+    </div>
+    <p class="hint" id="pwMsg"></p>
+  </section>
+  <section class="panel hide" id="usersPanel">
+    <h2>Users</h2>
+    <p class="hint">Users can make photos, recolour and use the agent. Only admins can change API keys, Google Drive and users.</p>
+    <table class="agenttab" id="usersTable"></table>
+    <div class="sub2">Add a user</div>
+    <div class="row">
+      <input type="text" id="nuName" placeholder="User name, e.g. ravi" autocomplete="off" autocapitalize="none" style="flex:1">
+      <input type="password" id="nuPw" placeholder="Password (8 or more)" autocomplete="new-password" style="flex:1">
+      <select id="nuRole"><option value="user">User</option><option value="admin">Admin</option></select>
+      <button class="btn primary" id="nuAdd">Add user</button>
+    </div>
+    <p class="hint" id="usersMsg"></p>
+  </section>
+</div>
 <main id="studioTab">
   <div>
     <section class="panel hide" id="agentPanel">
@@ -112,6 +144,23 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <section class="panel hide" id="drivePanel">
       <h2>Google Drive</h2>
       <div id="driveState" class="hint">–</div>
+      <div id="driveSetup" class="hide">
+        <p class="hint" style="margin:8px 0 4px">One-time setup (about 5 minutes): Google needs an "OAuth client" from your own Google account.</p>
+        <ol class="hint" style="margin:0 0 8px;padding-left:18px;line-height:1.6">
+          <li>Open <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a> (sign in, pick or create a project), press <b>Get started</b>: app name <b>Jag Studio</b>, your email, <b>External</b>, Create.</li>
+          <li>In <b>Audience</b>, press <b>Publish app</b> (so the connection doesn't expire after 7 days).</li>
+          <li>Open <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Drive API</a> and press <b>Enable</b>.</li>
+          <li>In <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Clients</a>, <b>Create client</b>: type <b>Web application</b>, and under <b>Authorized redirect URIs</b> add:<br>
+            <code id="driveRedirect" style="user-select:all"></code> <button class="btn" id="driveCopy" type="button" style="padding:3px 8px">Copy</button></li>
+          <li>Press Create, then paste the Client ID and Client secret here:</li>
+        </ol>
+        <div class="row">
+          <input type="text" id="driveCid" placeholder="Client ID (…apps.googleusercontent.com)" autocomplete="off" style="flex:1;min-width:200px">
+          <input type="password" id="driveSecret" placeholder="Client secret" autocomplete="off" style="flex:1;min-width:160px">
+          <button class="btn primary" id="driveSave" type="button">Save and connect</button>
+        </div>
+        <p class="e" id="driveErr"></p>
+      </div>
       <div class="row">
         <a class="btn primary" id="driveConnect" href="/drive/connect">Connect Google Drive</a>
         <button class="btn" id="driveSync">Upload now</button>
@@ -461,10 +510,11 @@ function keys(p) { for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k)
 async function driveRefresh() {
   try {
     const d = await api("/api/drive");
-    $("driveState").innerHTML = !d.configured ? "Drive isn't set up on this server yet (see the setup guide)."
+    const admin = isAdmin(); $("driveSetup").classList.toggle("hide", d.configured || !admin);
+    $("driveState").innerHTML = !d.configured ? (admin ? "Not set up yet." : "Not set up yet: ask an admin to connect Google Drive.")
       : !d.connected ? `Not connected. Connect once and every finished photo uploads to the <b>${esc(d.folder)}</b> folder by itself.`
       : `Connected: photos upload to <b>${esc(d.folder)}</b>. ${fmt(d.uploaded)} uploaded since the server started, ${fmt(d.pending)} waiting.` + (d.last_error ? `<br><span class="e">Last problem: ${esc(d.last_error)} (it retries every minute)</span>` : "");
-    $("driveConnect").classList.toggle("hide", !d.configured || d.connected); $("driveSync").classList.toggle("hide", !d.connected); $("driveOff").classList.toggle("hide", !d.connected);
+    $("driveConnect").classList.toggle("hide", !d.configured || d.connected || !admin); $("driveSync").classList.toggle("hide", !d.connected); $("driveOff").classList.toggle("hide", !d.connected || !admin);
   } catch (e) { $("driveState").textContent = e.message; }
 }
 async function agentRuns() {
@@ -476,6 +526,12 @@ async function agentRuns() {
 function initCloud() {
   ["signOut", "agentPanel", "drivePanel"].forEach((id) => $(id).classList.remove("hide"));
   driveRefresh(); agentRuns(); setInterval(() => { driveRefresh(); agentRuns(); }, 15000);
+  $("driveRedirect").textContent = location.origin + "/drive/callback";
+  $("driveCopy").onclick = () => navigator.clipboard.writeText($("driveRedirect").textContent).then(() => { $("driveCopy").textContent = "Copied"; });
+  $("driveSave").onclick = async () => {
+    try { await api("/api/drive/client", { client_id: $("driveCid").value, client_secret: $("driveSecret").value }); location.href = "/drive/connect"; }
+    catch (e) { $("driveErr").textContent = e.message; }
+  };
   $("driveSync").onclick = async () => { await api("/api/drive/sync", {}); driveRefresh(); };
   $("driveOff").onclick = async () => { if (confirm("Disconnect Google Drive? Photos stop uploading until you connect again.")) { await api("/api/drive/disconnect", {}); driveRefresh(); } };
   $("agentPlan").onclick = async () => {
@@ -497,19 +553,81 @@ function initCloud() {
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
 function showTab(tab) {
-  const rec = tab === "recolor", f = $("recolorTab");
+  const rec = tab === "recolor", set = tab === "settings", f = $("recolorTab");
   if (rec && !f.src) f.src = "/recolor/";
   if (rec) f.style.height = Math.max(400, innerHeight - document.querySelector("header").offsetHeight) + "px"; // fills the window under the header
-  f.classList.toggle("hide", !rec); $("studioTab").classList.toggle("hide", rec);
+  f.classList.toggle("hide", !rec); $("settingsTab").classList.toggle("hide", !set); $("studioTab").classList.toggle("hide", rec || set);
   document.querySelectorAll("#tabs [data-tab]").forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle("on", on); a.setAttribute("aria-selected", on); });
-  document.title = rec ? "Jag Studio · Recolor" : "Jag Studio";
+  document.title = rec ? "Jag Studio · Recolor" : set ? "Jag Studio · Settings" : "Jag Studio";
+  if (set && S.opts) renderSettings();
 }
+const tabFromHash = () => ({ "#recolor": "recolor", "#settings": "settings" })[location.hash] || "studio";
 window.addEventListener("resize", () => { if (location.hash === "#recolor") showTab("recolor"); });
-window.addEventListener("hashchange", () => showTab(location.hash === "#recolor" ? "recolor" : "studio"));
-showTab(location.hash === "#recolor" ? "recolor" : "studio");
+window.addEventListener("hashchange", () => showTab(tabFromHash()));
+showTab(tabFromHash());
+
+// ---------- Settings: API keys, my password, users (admin) ----------
+const KEY_INFO = { gemini: ["Gemini", "AIza…  (aistudio.google.com/apikey)"], openai: ["OpenAI (GPT)", "sk-…  (platform.openai.com/api-keys)"], runpod: ["RunPod (own GPU)", "Pod token"] };
+const isAdmin = () => !S.opts.cloud || (S.me && S.me.role === "admin");
+async function renderSettings() {
+  if (S.opts.cloud && !S.me) S.me = await api("/api/me");
+  const admin = isAdmin(), have = S.opts.providers;
+  $("keysHint").textContent = admin ? "Saved keys are used by every batch. They stay on " + (S.opts.cloud ? "this server" : "this computer") + " and are never shown again; save a new one to replace it."
+    : "Only an admin can change the API keys.";
+  $("keyRows").innerHTML = Object.entries(KEY_INFO).map(([k, [name, ph]]) => `<div class="row" style="margin-top:10px" data-key="${k}">
+      <span style="width:150px;font-weight:600">${name}</span><span class="hint" style="width:70px"><span class="dot ${have[k] ? "on" : ""}"></span>${have[k] ? "Saved" : "Not set"}</span>
+      ${admin ? `<input type="password" placeholder="${esc(ph)}" autocomplete="off" style="flex:1;min-width:180px">${k === "runpod" ? `<input type="text" class="rpurl" placeholder="Pod address https://…proxy.runpod.net" style="flex:1;min-width:180px">` : ""}
+      <button class="btn primary" data-save="${k}">Save</button>${have[k] ? `<button class="btn" data-clear="${k}">Remove</button>` : ""}` : ""}</div>`).join("");
+  if (!S.opts.cloud) return;
+  $("accountPanel").classList.remove("hide"); $("meName").textContent = S.me.user; $("meRole").textContent = "(" + S.me.role + ")";
+  $("usersPanel").classList.toggle("hide", !admin);
+  if (admin) renderUsers((await api("/api/users")).users);
+}
+function renderUsers(users) {
+  $("usersTable").innerHTML = `<tr><th>User</th><th>Role</th><th>Added</th><th></th></tr>` + users.map((u) => `<tr><td><b>${esc(u.name)}</b>${u.name === S.me.user ? ' <span class="hint">(you)</span>' : ""}</td><td>${esc(u.role)}</td>
+    <td class="hint">${u.created ? new Date(u.created * 1000).toLocaleDateString() : ""}</td>
+    <td class="r"><button class="btn" data-upw="${esc(u.name)}">Set password</button>${u.name === S.me.user ? "" : ` <button class="btn" data-udel="${esc(u.name)}">Delete</button>`}</td></tr>`).join("");
+}
+function initSettings() {
+  $("keyRows").addEventListener("click", async (e) => {
+    const save = e.target.dataset.save, clear = e.target.dataset.clear; if (!save && !clear) return;
+    const row = e.target.closest("[data-key]"); $("keysErr").textContent = "";
+    try {
+      if (save) {
+        const k = row.querySelector("input[type=password]").value.trim(), url = row.querySelector(".rpurl");
+        if (!k) { $("keysErr").textContent = "Paste the key first."; return; }
+        S.opts.providers = await api("/api/keys", { [save]: k, runpod_url: url ? url.value.trim() : "", remember: true });
+      } else if (confirm(`Remove the saved ${KEY_INFO[clear][0]} key?`)) S.opts.providers = await api("/api/keys", { clear: [clear] });
+      keys(S.opts.providers); renderSettings();
+    } catch (err) { $("keysErr").textContent = err.message; }
+  });
+  $("pwSave").onclick = async () => {
+    const msg = $("pwMsg"); msg.className = "hint";
+    if ($("pwNew").value !== $("pwNew2").value) { msg.className = "e"; msg.textContent = "The two new passwords are different."; return; }
+    try { await api("/api/account/password", { current: $("pwCur").value, new: $("pwNew").value }); ["pwCur", "pwNew", "pwNew2"].forEach((id) => { $(id).value = ""; });
+      msg.textContent = "Password changed. Other devices signed in as you are signed out."; }
+    catch (err) { msg.className = "e"; msg.textContent = err.message; }
+  };
+  $("nuAdd").onclick = async () => {
+    const msg = $("usersMsg"); msg.className = "hint";
+    try { renderUsers((await api("/api/users", { username: $("nuName").value, password: $("nuPw").value, role: $("nuRole").value })).users);
+      msg.textContent = `Added ${$("nuName").value.trim().toLowerCase()}. Give them the website address, their user name and password.`; $("nuName").value = $("nuPw").value = ""; }
+    catch (err) { msg.className = "e"; msg.textContent = err.message; }
+  };
+  $("usersTable").addEventListener("click", async (e) => {
+    const pw = e.target.dataset.upw, del = e.target.dataset.udel, msg = $("usersMsg"); msg.className = "hint";
+    try {
+      if (pw) { const p = prompt(`New password for ${pw} (8 or more characters):`); if (!p) return;
+        renderUsers((await api(`/api/users/${encodeURIComponent(pw)}/password`, { password: p })).users); msg.textContent = `Password for ${pw} changed; they sign in again with it.`; }
+      if (del && confirm(`Delete the user ${del}? They can't sign in any more.`)) { renderUsers((await api(`/api/users/${encodeURIComponent(del)}/delete`, {})).users); msg.textContent = `Deleted ${del}.`; }
+    } catch (err) { msg.className = "e"; msg.textContent = err.message; }
+  });
+}
 
 async function init() {
   S.opts = await api("/api/options");
+  if (S.opts.cloud) { S.me = await api("/api/me"); if (S.me.role !== "admin") ["key", "saveKey", "rememberField"].forEach((id) => $(id).closest(".row, label").classList.add("hide")); }
+  initSettings(); if (tabFromHash() === "settings") renderSettings();
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });

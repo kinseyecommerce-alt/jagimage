@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import library as L
 from . import studio
+from .cloud import Forbidden
 
 PAGE = Path(__file__).with_name("static") / "studio.html"
 RECOLOR = Path(__file__).resolve().parents[1] / "web" / "recolor"  # the Jag Recolor web app (index.html + samples)
@@ -24,8 +25,8 @@ LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 <title>Jag Studio: sign in</title><style>body{font:16px system-ui,sans-serif;background:#eef0f3;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
 form{background:#fff;border:1px solid #d9dde4;border-radius:12px;padding:24px;display:grid;gap:12px;width:min(340px,100%)}h1{margin:0;font-size:22px}
 input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #d9dde4}button{background:#3346a8;color:#fff;border:0}p{color:#a13;margin:0;min-height:1.2em}</style></head>
-<body><form id="f"><h1>Jag Studio</h1><input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus><button>Sign in</button><p id="e"></p></form>
-<script>f.onsubmit=async(ev)=>{ev.preventDefault();const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw.value})});
+<body><form id="f"><h1>Jag Studio</h1><input id="un" placeholder="User name" value="admin" autocomplete="username" autocapitalize="none"><input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus><button>Sign in</button><p id="e"></p></form>
+<script>f.onsubmit=async(ev)=>{ev.preventDefault();const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:un.value,password:pw.value})});
 if(r.ok)location.href="/";else e.textContent=(await r.json()).error||"Wrong password"}</script></body></html>"""
 KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "runpod": "JAGIMAGE_RUNPOD_TOKEN"}
 RUNPOD_URL_ENV = "JAGIMAGE_RUNPOD_URL"
@@ -353,13 +354,19 @@ def make_handler(app: Studio):
 
         def _signed_in(self, parts) -> bool:
             """Server version: everything but the sign-in page needs the session cookie."""
-            if not app.cloud or parts[:1] == ["login"] or app.cloud.login.valid(self.headers.get("Cookie", "")):
+            self.user = app.cloud and app.cloud.login.user(self.headers.get("Cookie", ""))
+            if not app.cloud or parts[:1] == ["login"] or self.user:
                 return True
             if parts[:1] == ["api"]:
                 self._json({"error": "Sign in first"}, 401)
             else:
                 self._redirect("/login")
             return False
+
+        def _admin(self):
+            """Server version: settings, keys, users and Drive are for admins only."""
+            if app.cloud and app.cloud.users.role(self.user) != "admin":
+                raise Forbidden("Only an admin can do this")
 
         def _origin(self) -> str:
             host = self.headers.get("Host", "localhost")
@@ -374,9 +381,15 @@ def make_handler(app: Studio):
                 return self._redirect("/login", {"Set-Cookie": "jag_session=; Path=/; Max-Age=0"})
             if parts == ["api", "drive"]:
                 return self._json(c.drive_status())
+            if parts == ["api", "me"]:
+                return self._json({"user": self.user, "role": c.users.role(self.user)})
+            if parts == ["api", "users"]:
+                self._admin()
+                return self._json({"users": c.users.listing()})
             if parts == ["drive", "connect"]:
+                self._admin()
                 if not c.drive.configured:
-                    return self._json({"error": "Google Drive isn't set up on this server (GOOGLE_OAUTH_CLIENT_ID/SECRET)"}, 400)
+                    return self._json({"error": "Google Drive isn't set up yet: an admin pastes the Google OAuth client in the Google Drive panel"}, 400)
                 state = uuid.uuid4().hex
                 c.oauth_states[state] = time.time()
                 return self._redirect(c.drive.auth_url(self._origin() + "/drive/callback", state))
@@ -395,10 +408,37 @@ def make_handler(app: Studio):
             c = app.cloud
             if parts == ["login"]:
                 ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
-                if not c.login.try_password(ip, str(body.get("password", ""))):
-                    return self._json({"error": "Wrong password"}, 403)
-                return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie()})
+                name = str(body.get("username") or "admin").strip().lower()
+                if not c.login.try_login(ip, name, str(body.get("password", ""))):
+                    return self._json({"error": "Wrong user name or password"}, 403)
+                return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie(name)})
+            if parts == ["api", "account", "password"]:
+                if not c.users.check(self.user, str(body.get("current", ""))):
+                    raise ValueError("Your current password is wrong")
+                c.users.set_password(self.user, str(body.get("new", "")))
+                return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie(self.user)})  # stay signed in here
+            if parts == ["api", "users"]:
+                self._admin()
+                c.users.create(body.get("username"), str(body.get("password", "")), body.get("role", "user"))
+                return self._json({"users": c.users.listing()})
+            if len(parts) == 4 and parts[:2] == ["api", "users"] and parts[3] in ("password", "delete"):
+                self._admin()
+                name = unquote(parts[2])
+                if name not in c.users.users:
+                    return self._json({"error": "no such user"}, 404)
+                if parts[3] == "password":
+                    c.users.set_password(name, str(body.get("password", "")))
+                else:
+                    if name == self.user:
+                        raise ValueError("You can't delete yourself")
+                    c.users.delete(name)
+                return self._json({"users": c.users.listing()})
+            if parts == ["api", "drive", "client"]:
+                self._admin()
+                c.drive.set_client(body.get("client_id"), body.get("client_secret"))
+                return self._json(c.drive_status())
             if parts == ["api", "drive", "disconnect"]:
+                self._admin()
                 c.drive.disconnect()
                 return self._json(c.drive_status())
             if parts == ["api", "drive", "sync"]:
@@ -482,6 +522,8 @@ def make_handler(app: Studio):
                 return self._json({"error": "not found"}, 404)
             except FileNotFoundError:
                 return self._json({"error": "not found"}, 404)
+            except Forbidden as exc:
+                return self._json({"error": str(exc)}, 403)
             except Exception as exc:
                 return self._json({"error": str(exc)}, 400)
 
@@ -539,6 +581,7 @@ def make_handler(app: Studio):
                                        "clash": hit and f"Models {hit['first']}-{hit['last']} are already in batch {hit['batch']}: faces would repeat. Next free: {ledger.next_free(spec.category)}.", "bases": [studio.base_dir(b) for b in spec.bases()],
                                        "pairs": spec.pairs(), "name": spec.name})
                 if parts == ["api", "settings"]:
+                    self._admin()
                     out = (body.get("out") or "").strip()
                     if out:
                         if any(j.finished is None for j in app.jobs.values()):
@@ -547,15 +590,21 @@ def make_handler(app: Studio):
                         app.out = str(Path(out).expanduser())
                     return self._json(options(app))
                 if parts == ["api", "keys"]:
+                    self._admin()
                     for p, env in KEY_ENV.items():
                         if body.get(p):
                             os.environ[env] = body[p].strip()
+                    for p in body.get("clear") or []:  # remove a saved key
+                        if p in KEY_ENV:
+                            os.environ.pop(KEY_ENV[p], None)
+                            if p == "runpod":
+                                os.environ.pop(RUNPOD_URL_ENV, None)
                     url = (body.get("runpod_url") or "").strip().rstrip("/")
                     if url:
                         if not url.startswith(("https://", "http://")):
                             raise ValueError("The RunPod address starts with https://, e.g. https://abc123-8000.proxy.runpod.net")
                         os.environ[RUNPOD_URL_ENV] = url
-                    if app.keys_file and body.get("remember"):
+                    if app.keys_file and (body.get("remember") or body.get("clear")):
                         save_keys(app.keys_file)
                     return self._json(ready())
                 if parts == ["api", "jobs"]:
@@ -567,6 +616,8 @@ def make_handler(app: Studio):
                     job.stop()
                     return self._json(job.status())
                 return self._json({"error": "not found"}, 404)
+            except Forbidden as exc:
+                return self._json({"error": str(exc)}, 403)
             except PermissionError as exc:
                 return self._json({"error": str(exc)}, 429)
             except (TypeError, ValueError, OSError, RuntimeError) as exc:
