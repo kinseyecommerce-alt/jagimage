@@ -24,6 +24,8 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
+from .studio import DRIVE_LIST_LOCK
+
 SESSION_DAYS = 30
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"  # only files and folders this app makes
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -283,12 +285,19 @@ class Drive:
             return parent
 
     def upload(self, local: Path, parts: list, name: str) -> str:
+        """Upload a photo into its folder; a photo of the same name there (an earlier recolour) is replaced."""
         parent = self.folder_id(parts)
+        q = f"name = '{name.replace(chr(39), chr(92) + chr(39))}' and mimeType != '{FOLDER_MIME}' and '{parent}' in parents and trashed = false"
+        found = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(
+            {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files") or []
         boundary = "jag" + secrets.token_hex(8)
-        meta = json.dumps({"name": name, "parents": [parent]}).encode()
+        meta = json.dumps({"name": name} if found else {"name": name, "parents": [parent]}).encode()
         mime = "image/png" if local.suffix == ".png" else "image/jpeg"
         body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode() + meta +
                 f"\r\n--{boundary}\r\nContent-Type: {mime}\r\n\r\n".encode() + local.read_bytes() + f"\r\n--{boundary}--\r\n".encode())
+        if found:
+            return self._call("PATCH", f"https://www.googleapis.com/upload/drive/v3/files/{found[0]['id']}?uploadType=multipart&fields=id",
+                              body, f"multipart/related; boundary={boundary}")["id"]
         return self._call("POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
                           body, f"multipart/related; boundary={boundary}")["id"]
 
@@ -309,7 +318,8 @@ class DriveSync:
         for spec in Path(self.out_dir()).glob("*/spec.json"):
             batch = spec.parent
             done_file = batch / "_drive.txt"
-            done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
+            with DRIVE_LIST_LOCK:
+                done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
             for jpg in sorted(batch.glob("m[0-9][0-9][0-9][0-9]/*/*_1500x1500.jpg")):  # <model>/<Top__Bottom>/<pose>
                 rel = jpg.relative_to(batch).as_posix()
                 if rel not in done and not jpg.parent.name.startswith("_"):
@@ -331,8 +341,9 @@ class DriveSync:
                 except Exception as exc:  # network, quota, revoked access: try again next round
                     self.status["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
                     break
-                with open(batch / "_drive.txt", "a") as f:
-                    f.write(rel + "\n")
+                with DRIVE_LIST_LOCK:
+                    with open(batch / "_drive.txt", "a") as f:
+                        f.write(rel + "\n")
                 sent += 1
                 self.status["uploaded"] += 1
                 self.status["pending"] = len(todo) - sent

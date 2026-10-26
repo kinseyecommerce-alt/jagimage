@@ -39,7 +39,7 @@ class FakeGoogle:
     """Just enough of oauth2.googleapis.com and the Drive v3 API for the uploader."""
 
     def __init__(self, fail_uploads=0):
-        self.folders, self.files, self.fail_uploads, self.tokens = {}, [], fail_uploads, 0
+        self.folders, self.files, self.fail_uploads, self.tokens, self.replaced = {}, [], fail_uploads, 0, []
 
     def __call__(self, req, timeout=None):
         url, data = req.full_url, req.data or b""
@@ -54,6 +54,8 @@ class FakeGoogle:
         if url.startswith("https://www.googleapis.com/drive/v3/files?q="):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["q"][0]
             name, parent = re.search(r"name = '(.*?)'", q).group(1), re.search(r"'([^']+)' in parents", q).group(1)
+            if "mimeType != " in q:  # a photo of this name already in the folder?
+                return self._resp({"files": [{"id": f"file{i + 1}"} for i, f in enumerate(self.files) if f[0] == name and f[1] == parent]})
             hit = [i for i, (n, p) in self.folders.items() if n == name and p == parent]
             return self._resp({"files": [{"id": h} for h in hit]})
         if url.startswith("https://www.googleapis.com/drive/v3/files?fields=id"):
@@ -61,6 +63,9 @@ class FakeGoogle:
             fid = f"folder{len(self.folders) + 1}"
             self.folders[fid] = (meta["name"], meta["parents"][0])
             return self._resp({"id": fid})
+        if url.startswith("https://www.googleapis.com/upload/drive/v3/files/") and req.get_method() == "PATCH":
+            self.replaced.append(url.split("/files/")[1].split("?")[0])
+            return self._resp({"id": self.replaced[-1]})
         if url.startswith("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"):
             if self.fail_uploads:
                 self.fail_uploads -= 1
@@ -218,6 +223,12 @@ def test_drive_connect_then_photos_upload_once_into_the_right_folders(tmp_path):
     names = sorted((path_of(g, parent), name) for name, parent, _ in g.files)
     assert names[0] == (f"kinsey models 2026/{spec.name}/Navy__Navy", "m0001_back.jpg")
     assert len({p for p, _ in names}) == 2 and len([f for f in g.folders.values() if f[0] == "kinsey models 2026"]) == 1
+    # recolouring again remakes the photos; Drive gets them as replacements, not duplicates
+    redo = studio.Batch(spec, out=tmp_path / "out", generate=fake_generate, workers=1, redo=True)
+    redo.run()
+    assert redo.counts["recoloured"] == 4 and redo.counts["recolour_skipped"] == 0
+    assert len(sync.pending()) == 4 and sync.run_once() == 4
+    assert len(g.files) == 4 and sorted(g.replaced) == ["file1", "file2", "file3", "file4"]
 
 
 class FakeLLM:

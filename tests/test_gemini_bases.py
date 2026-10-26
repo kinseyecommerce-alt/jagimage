@@ -133,6 +133,27 @@ def test_tinted_or_coloured_backdrop_is_never_the_garment():
         assert m[250, 150] > 0.95, studio                                           # the garment is still in
 
 
+def test_sleeve_hems_of_a_real_flash_photo_recolour_without_a_torn_fringe():
+    """A real Gemini/OpenAI base (tests/data): the AI draws a thin, uneven brown shadow on the arm under
+    each sleeve hem. Recoloured black, its darkest pixels used to be painted one by one, so the hem
+    looked torn. Nothing outside the shirt may be painted dark, and the hem line stays even."""
+    from pathlib import Path
+    from scipy import ndimage
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    img = Image.open(Path(__file__).parent / "data" / "men_flash_base.jpg").convert("RGB")
+    before = rgb_to_lab(np.asarray(img))
+    bottom, _ = garment_mask(before, "#C4A3EE")
+    out, _, mask = recolor_image(img, "#8FD3A8", "#000000", others=bottom)
+    after = rgb_to_lab(np.asarray(out.convert("RGB")))
+    for y0, y1, x0, x1 in [(440, 540, 290, 400), (430, 530, 660, 770)]:  # left and right sleeve hem
+        a, b, g = after[y0:y1, x0:x1, 0], before[y0:y1, x0:x1, 0], mask[y0:y1, x0:x1] > 0.5
+        near = ndimage.binary_dilation(g, iterations=4) & ~g
+        assert not (near & (a < b - 0.15)).any()  # no skin painted dark
+        dark = a < 0.3
+        hem = np.array([np.nonzero(dark[:, x])[0].max() for x in range(dark.shape[1]) if dark[:, x].any()])
+        assert (np.abs(np.diff(hem)) > 1).sum() <= 8  # an even hem line, not a ragged one
+
+
 def test_white_keeps_knit_and_stitches():
     from jagimage.recolor import rgb_to_lab
     img = fake_photo("#8FD3A8")

@@ -22,6 +22,11 @@ CROP_MARGIN = 32   # px around the garment kept when recolouring (edge band + bl
 CREASE_DROP = 0.15  # crease pixels are at least this much darker than the garment
 CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
+EDGE_ALPHA_BLUR = 0.8   # px: alpha along the edge is smoothed this much before it is steepened
+OUTLINE_SMOOTH = 1.5    # px: the garment outline is smoothed this much (removes notches and spikes)
+SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is smoothed
+SHADOW_SMOOTH = 1.2     # px blur for that ring
+SHADOW_LIKE = 0.12      # colour distance (OKLab) over which ring pixels stop being averaged together
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or skin is mistaken for it
@@ -122,7 +127,11 @@ def _fill_holes(m, lab, centre):
         hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
         same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
         m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same) & ~backdrop(hm)])
-    return m
+    # Smooth the outline: a hem's dark underside or the shadow just below it is half in, half out of the
+    # colour match, leaving 1-3 px notches and spikes that show as a torn edge once recoloured.
+    # Never grows into backdrop.
+    smooth = ndimage.gaussian_filter(m.astype(np.float32), OUTLINE_SMOOTH) > 0.5
+    return smooth & ~(~m & backdrop(lab))
 
 
 def _feather(m, lab, centre):
@@ -178,7 +187,11 @@ def _with_creases(m, lab, centre):
     the garment (hair) fails the opening test and stays out."""
     dark = lab[..., 0] < centre[0] - CREASE_DROP
     thin = dark & ~ndimage.binary_opening(dark, structure=np.ones((CREASE_MAX, CREASE_MAX), bool))
-    return m | (thin & ndimage.binary_dilation(m, iterations=3))
+    add = thin & ndimage.binary_dilation(m, iterations=3)
+    # Only whole runs of a line join, never single pixels: where the line is a shadow on the skin just
+    # under a hem, its darkest pixels alone would poke into the arm as spikes once recoloured.
+    add &= ndimage.median_filter((m | add).astype(np.uint8), size=3).astype(bool)
+    return m | add
 
 
 def _cleanup(m, lab, centre):
@@ -367,6 +380,15 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5, garment=None, back
         # how much the lightness contrast grows, so the new edge is as crisp as the AI drew it.
         grow = np.abs(rgb_to_lab(Fn)[:, 0] - lb[:, 0]) / np.maximum(np.abs(lf[:, 0] - lb[:, 0]), 0.04)
         k = np.clip(grow, 1.0, EDGE_SHARPEN_MAX)
+        # A pixel just outside the garment that is darker than both the garment and the skin or backdrop
+        # beside it is not a mix of the two: it's the shadow under a hem. It keeps its own colour.
+        shade = rim & (lp[:, 0] < np.minimum(lf[:, 0], lb[:, 0]) - 0.05)
+        a = np.where(shade, 0.0, a)
+        # Smooth alpha along the edge first: steepening per-pixel alpha (noise from the knit, a shadow
+        # line beside a hem) would turn it into a torn, stair-stepped edge on a dark or bright colour.
+        A = inner.astype(np.float32)
+        A[ys, xs] = a
+        a = ndimage.gaussian_filter(A, EDGE_ALPHA_BLUR)[ys, xs]
         a = np.clip((a - 0.5) * k + 0.5, 0, 1)[:, None]
         # The pure garment colour behind this pixel, recoloured: the neighbour's new colour with
         # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
@@ -382,6 +404,28 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=5, garment=None, back
         spill = ((lp[:, 1:] - lb[:, 1:] - a * dab) * u).sum(-1, keepdims=True)
         res[:, 1:] -= np.clip(spill, 0, None) * u * (a <= 0.05)  # larger alphas were already unmixed
         out[ys, xs] = lab_to_rgb(res).astype(np.float32)
+        # The thin shadow the AI draws on the skin just outside a hem is noisy. Next to the soft base
+        # colour that doesn't show; next to black or white it reads as a torn fringe or dirt. Smooth
+        # that ring from its own outside pixels (never from the garment) into an even shadow.
+        ring = ndimage.binary_dilation(m, iterations=SHADOW_RING) & ~m
+        if garment is not None:
+            ring &= ~garment
+        if ring.any():
+            # edge-aware: each ring pixel averages only nearby outside pixels of a similar colour, so a
+            # noisy shadow line evens out while backdrop and a hand beside it stay apart
+            src = ~m if garment is None else ~(m | garment)
+            ry, rx = np.nonzero(ring)
+            lab0 = rgb_to_lab(rgb)
+            num, den = np.zeros((len(ry), 3), np.float32), np.zeros(len(ry), np.float32)
+            r = SHADOW_RING + 1
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    qy, qx = np.clip(ry + dy, 0, m.shape[0] - 1), np.clip(rx + dx, 0, m.shape[1] - 1)
+                    dist = np.linalg.norm(lab0[qy, qx] - lab0[ry, rx], axis=-1)
+                    wgt = src[qy, qx] * np.exp(-(dy * dy + dx * dx) / (2 * SHADOW_SMOOTH ** 2) - (dist / SHADOW_LIKE) ** 2)
+                    num += wgt[:, None] * out[qy, qx]
+                    den += wgt
+            out[ry, rx] = num / np.maximum(den, 1e-6)[:, None]
     return np.round(np.clip(out, 0, 255)).astype(np.uint8)
 
 

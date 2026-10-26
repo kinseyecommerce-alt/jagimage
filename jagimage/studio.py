@@ -316,6 +316,7 @@ def garment_problem(lab, masks: dict, base) -> Optional[str]:
 
 
 _LEDGER_LOCK = threading.Lock()
+DRIVE_LIST_LOCK = threading.Lock()  # guards each batch's _drive.txt (uploads listed by the Drive sync, redone photos removed)
 
 
 class ModelLedger:
@@ -372,7 +373,7 @@ class Batch:
 
     def __init__(self, spec: Spec, out="output/studio", generate: Optional[Callable[[str, List[str]], bytes]] = None,
                  workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
-                 export: Optional[str] = None, export_what="jpg"):
+                 export: Optional[str] = None, export_what="jpg", redo: bool = False):
         """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
         photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
@@ -386,6 +387,7 @@ class Batch:
         self.batch_runner = getattr(generate, "run_batch", None) if spec.batch else None
         self.workers = workers
         self.retries = retries
+        self.redo = redo  # recolour again even where a finished photo exists (after recolouring improves)
         self.on_event = on_event or (lambda e: None)
         self.stop = threading.Event()
         self.lock = threading.Lock()
@@ -685,14 +687,28 @@ class Batch:
             if self.stop.is_set():
                 return
             path = self.out_path(m, t, b, pose)
-            if self.made(path, pose):
+            if self.made(path, pose) and not self.redo:
                 self._event("recolour_skipped", model=m, path=str(path))
                 continue
             try:
                 self._recolour_one(img, tmask, bmask, base, t, b, path, pose)
+                if self.redo:
+                    self._forget_upload(path, pose)
                 self._event("recoloured", model=m, path=str(path), top=t, bottom=b, pose=pose)
             except Exception as exc:
                 self._event("errors", model=m, path=str(path), error=f"recolour: {exc}")
+
+    def _forget_upload(self, path: Path, pose: str):
+        """A remade photo is uploaded to Google Drive again (replacing the old one there)."""
+        done = self.root / "_drive.txt"
+        c = self.spec.canvas
+        if not c or not done.exists():
+            return
+        rel = path.with_name(f"{pose}_{c[0]}x{c[1]}.jpg").relative_to(self.root).as_posix()
+        with DRIVE_LIST_LOCK:
+            lines = done.read_text().splitlines()
+            if rel in lines:
+                done.write_text("".join(f"{x}\n" for x in lines if x != rel))
 
     def _recolour_one(self, img, tmask, bmask, base, top, bottom, path: Path, pose):
         from .recolor import fit_canvas, recolor_image, write_qc

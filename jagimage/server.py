@@ -108,7 +108,7 @@ def default_engine(spec: studio.Spec):
 class Job:
     """One or more batches run one after another, e.g. the same models in several top styles."""
 
-    def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg"):
+    def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg", redo=False):
         specs = specs if isinstance(specs, list) else [specs]
         self.id = uuid.uuid4().hex[:8]
         self.specs, self.spec, self.stage = specs, specs[0], stage
@@ -118,7 +118,7 @@ class Job:
         self.batch_state = None
         self.recent = deque(maxlen=48)
         self.batches = [studio.Batch(sp, out=out, generate=engine(sp) if stage != "recolor" else None,
-                                     workers=workers, on_event=self.event, export=export, export_what=export_what)
+                                     workers=workers, on_event=self.event, export=export, export_what=export_what, redo=redo)
                         for sp in specs]
         self.batch = self.batches[0]
         self.export = str(self.batch.export) if self.batch.export else None
@@ -275,8 +275,10 @@ class Studio:
 
     def start(self, body: dict) -> Job:
         stage = body.pop("stage", "all")
+        redo = stage == "redo"  # recolour again over finished photos (no AI)
+        stage = "recolor" if redo else stage
         if stage not in ("all", "bases", "recolor"):
-            raise ValueError("stage must be all, bases or recolor")
+            raise ValueError("stage must be all, bases, recolor or redo")
         workers = int(body.pop("workers", self.workers))
         export, export_what = (body.pop("export", None) or "").strip() or None, body.pop("export_what", "jpg")
         if export:
@@ -294,7 +296,7 @@ class Studio:
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
-            job = Job(specs, self.out, self.engine, workers, stage, export, export_what)
+            job = Job(specs, self.out, self.engine, workers, stage, export, export_what, redo=redo)
             for sp in specs:
                 ledger.reserve(sp)
             self.jobs[job.id] = job
