@@ -378,6 +378,8 @@ Allowed values:
 - shot: "outfit" (head to shoes, default) or "top" (head to above the knee, bottom not recoloured)
 - models: number of different people (1-5000); poses: subset of front_main, back, threequarter, side,
   front_main_white, handpocket (default front_main and back)
+- "the same models in all top styles / every top category" means one batch with all five tops
+- quality: "high" when the user asks for high or best quality, else "standard"
 Never invent other values. If something essential is unclear, ask in "reply" and return no batches.
 "reply" is one or two short plain sentences for the user."""
 
@@ -390,7 +392,7 @@ AGENT_SCHEMA = {
             "bottom": {"type": "string"}, "fabric": {"type": "string"},
             "top_colours": {"type": "array", "items": {"type": "string"}}, "pairing": {"type": "string"},
             "shot": {"type": "string"}, "models": {"type": "integer"},
-            "poses": {"type": "array", "items": {"type": "string"}}},
+            "poses": {"type": "array", "items": {"type": "string"}}, "quality": {"type": "string"}},
             "required": ["category", "tops", "models"]}},
     },
     "required": ["reply", "batches"],
@@ -401,23 +403,65 @@ class Agent:
     """Turns a request in plain words into Studio batch requests with their cost. It only plans:
     nothing is made until the person presses Start on the plan."""
 
-    def __init__(self, client=None, model: Optional[str] = None):
-        self.client = client
+    OPENAI_MODELS = ("gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini")  # first one the account can use
+
+    def __init__(self, client=None, model: Optional[str] = None, openai_client=None):
+        self.client, self.openai_client = client, openai_client
         self.model = model or os.environ.get("JAGIMAGE_AGENT_MODEL", "gemini-flash-latest")
+        self.used = None  # "gemini" or "openai": which one answered last
 
     def _ask(self, message: str) -> dict:
+        """Plans with whichever AI has a key: Gemini first, OpenAI when there is no Gemini key or Gemini
+        can't be used (e.g. out of credits)."""
+        gemini = self.client is not None or bool(os.environ.get("GEMINI_API_KEY"))
+        openai = self.openai_client is not None or bool(os.environ.get("OPENAI_API_KEY"))
+        if not gemini and not openai:
+            raise RuntimeError("The agent needs an AI key: add a Gemini or OpenAI key in Settings → API keys")
+        if gemini:
+            try:
+                ans = self._ask_gemini(message)
+                self.used = "gemini"
+                return ans
+            except Exception:
+                if not openai:
+                    raise
+        ans = self._ask_openai(message)
+        self.used = "openai"
+        return ans
+
+    def _ask_gemini(self, message: str) -> dict:
         from google.genai import types
 
         client = self.client
         if client is None:
             from google import genai
 
-            client = genai.Client()
+            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         resp = client.models.generate_content(
             model=self.model, contents=message,
             config=types.GenerateContentConfig(system_instruction=AGENT_SYSTEM, response_mime_type="application/json",
                                                response_schema=AGENT_SCHEMA, temperature=0.1))
         return json.loads(resp.text)
+
+    def _ask_openai(self, message: str) -> dict:
+        client = self.openai_client
+        if client is None:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        system = AGENT_SYSTEM + "\nAnswer with one JSON object only, shaped like this JSON schema:\n" + json.dumps(AGENT_SCHEMA)
+        models = [os.environ["JAGIMAGE_AGENT_OPENAI_MODEL"]] if os.environ.get("JAGIMAGE_AGENT_OPENAI_MODEL") else self.OPENAI_MODELS
+        last = None
+        for model in models:
+            try:
+                resp = client.chat.completions.create(model=model, response_format={"type": "json_object"},
+                                                      messages=[{"role": "system", "content": system}, {"role": "user", "content": message}])
+                return json.loads(resp.choices[0].message.content)
+            except Exception as exc:  # a model this account can't use: try the next one
+                last = exc
+                if "model" not in str(exc).lower():
+                    raise
+        raise last
 
     def plan(self, message: str, ledger, base: dict) -> dict:
         """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...)."""
@@ -436,7 +480,10 @@ class Agent:
                 poses = [p for p in (b.get("poses") or []) if p in L.POSES] or ["front_main", "back"]
                 if "front_main" not in poses:
                     poses = ["front_main"] + poses
-                body = {**base, "category": category, "top": tops[0], "tops": tops[1:], "bottom": bottom, "fabric": fabric,
+                engine = dict(base)
+                if b.get("quality") == "high":  # "high quality": OpenAI high, or Gemini Pro
+                    engine.update(quality="high") if engine.get("provider") == "openai" else engine.update(gemini_model="pro")
+                body = {**engine, "category": category, "top": tops[0], "tops": tops[1:], "bottom": bottom, "fabric": fabric,
                         "top_colours": colours, "pairing": b.get("pairing") if b.get("pairing") in ("match", "each") else "match",
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else "outfit",
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses}

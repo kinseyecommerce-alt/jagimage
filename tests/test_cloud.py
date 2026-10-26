@@ -241,7 +241,8 @@ class FakeLLM:
         return SimpleNamespace(text=json.dumps(self.answer))
 
 
-def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path):
+def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
     llm = FakeLLM({"reply": "Two styles for 3 Men models.", "batches": [
         {"category": "Men", "tops": ["HalfSleeveTee", "Hoodie", "Tuxedo"], "models": 3, "top_colours": ["Red", "Navy", "Gold"]},
         {"category": "Aliens", "tops": ["HalfSleeveTee"], "models": 2}]})
@@ -272,5 +273,50 @@ def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path):
         jobs = json.loads(call(base + "/api/jobs", cookie=cookie)[2])["jobs"]
         assert jobs[0]["counts"]["recoloured"] == 24 and jobs[0]["counts"]["errors"] == 0
         assert call(base + "/api/agent/start", {"plan_id": plan["plan_id"]}, cookie=cookie)[0] == 400  # used once
+    finally:
+        httpd.shutdown()
+
+
+class FakeOpenAIChat:
+    """client.chat.completions.create, answering like gpt-*-mini; the first model "doesn't exist"."""
+
+    def __init__(self, answer):
+        self.answer, self.models = answer, []
+        self.chat = SimpleNamespace(completions=self)
+
+    def create(self, model, messages, response_format):
+        self.models.append(model)
+        if len(self.models) == 1:
+            raise RuntimeError(f"The model `{model}` does not exist or you do not have access to it.")
+        assert response_format == {"type": "json_object"} and "JSON schema" in messages[0]["content"]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(self.answer)))])
+
+
+def test_agent_uses_the_openai_key_when_there_is_no_gemini_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    chat = FakeOpenAIChat({"reply": "10 Men models in every top style.", "batches": [
+        {"category": "Men", "tops": ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"],
+         "models": 10, "top_colours": ["Red"], "poses": ["front_main"], "quality": "high"}]})
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD,
+                  drive=Drive("", "", tmp_path / "data"), agent=Agent(openai_client=chat))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        # the Studio still has Gemini selected, but only an OpenAI key is saved
+        code, _, body = call(base + "/api/agent", {"message": "10 mens half sleeve, same model in all tops, high quality",
+                                                   "provider": "gemini", "gemini_model": "flash", "batch": True}, cookie=cookie)
+        plan = json.loads(body)
+        assert code == 200, plan
+        assert len(chat.models) == 2 and cloud.agent.used == "openai"
+        assert plan["batches"][0]["styles"] == ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]
+        assert "OpenAI" in plan["reply"]
+        bodies = cloud.plans[plan["plan_id"]]["bodies"]
+        assert bodies[0]["provider"] == "openai" and bodies[0]["quality"] == "high" and bodies[0]["batch"] is False
+        monkeypatch.delenv("OPENAI_API_KEY")
+        code, _, body = call(base + "/api/agent", {"message": "10 men", "provider": "gemini"}, cookie=cookie)
+        assert code == 400 and "API key" in json.loads(body)["error"]
     finally:
         httpd.shutdown()

@@ -504,7 +504,18 @@ def make_handler(app: Studio):
                 if not message:
                     raise ValueError("Tell the agent what to make")
                 base = {k: body[k] for k in ("provider", "gemini_model", "image_size", "quality", "batch", "one_base", "keep_png", "hands_free") if k in body}
+                have, note = ready(), ""
+                if not have.get(base.get("provider", "gemini")):  # the chosen engine has no key: use one that has
+                    other = next((p for p in ("gemini", "openai") if have[p]), None)
+                    if not other:
+                        raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
+                    note = f"The photos will be made with {dict(gemini='Gemini', openai='OpenAI')[other]}, the AI that has a key saved."
+                    base.update(provider=other, batch=bool(base.get("batch")) and other == "gemini")
+                    if other == "openai":
+                        base["quality"] = base.get("quality") if base.get("quality") in ("medium", "high") else "medium"
                 plan = c.agent.plan(message, studio.ModelLedger(app.out), base)
+                if note:
+                    plan["reply"] = (plan["reply"] + " " + note).strip()
                 plan_id = uuid.uuid4().hex[:10]
                 c.plans[plan_id] = {"bodies": plan.pop("bodies"), "label": message[:120], "time": time.time()}
                 return self._json({**plan, "plan_id": plan_id})
