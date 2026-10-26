@@ -389,16 +389,6 @@ def make_handler(app: Studio):
                 return self._redirect("/?drive=connected")
             if parts == ["api", "agent", "runs"]:
                 return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
-            if parts[:1] == ["recolor"]:
-                rel = "/".join(parts[1:]) or "index.html"
-                path = (RECOLOR / rel).resolve()
-                if RECOLOR.resolve() not in path.parents or not path.is_file():
-                    return self._json({"error": "not found"}, 404)
-                ctype = {".html": "text/html; charset=utf-8", ".jpg": "image/jpeg", ".png": "image/png"}.get(path.suffix, "application/octet-stream")
-                data = path.read_bytes()
-                if path.name == "index.html":  # a way back to the Studio
-                    data = data.replace(b"<body>", b'<body><a href="/" style="display:inline-block;margin:10px 16px 0;font:600 14px system-ui,sans-serif;color:#3346a8;text-decoration:none">&larr; Jag Studio</a>', 1)
-                return self._send(200, data, ctype)
             return None
 
         def _cloud_post(self, parts, body):
@@ -455,6 +445,13 @@ def make_handler(app: Studio):
                     return
                 if not parts:
                     return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+                if parts[:1] == ["recolor"]:  # Jag Recolor, shown in the Studio page's Recolor tab
+                    rel = "/".join(parts[1:]) or "index.html"
+                    path = (RECOLOR / rel).resolve()
+                    if RECOLOR.resolve() not in path.parents or not path.is_file():
+                        return self._json({"error": "not found"}, 404)
+                    ctype = {".html": "text/html; charset=utf-8", ".jpg": "image/jpeg", ".png": "image/png"}.get(path.suffix, "application/octet-stream")
+                    return self._send(200, path.read_bytes(), ctype)
                 if parts == ["api", "options"]:
                     return self._json(options(app))
                 if parts == ["api", "jobs"]:

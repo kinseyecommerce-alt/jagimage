@@ -95,10 +95,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav hide" id="cloudNav"><a href="/" class="on">Studio</a><a href="/recolor/">Recolor</a><a href="/logout">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#studio" role="tab" data-tab="studio" class="on">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
-<main>
+<iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
+<main id="studioTab">
   <div>
     <section class="panel hide" id="agentPanel">
       <h2>Agent</h2>
@@ -473,7 +474,7 @@ async function agentRuns() {
   if (r.runs.some((x) => x.running)) loadJobs();
 }
 function initCloud() {
-  ["cloudNav", "agentPanel", "drivePanel"].forEach((id) => $(id).classList.remove("hide"));
+  ["signOut", "agentPanel", "drivePanel"].forEach((id) => $(id).classList.remove("hide"));
   driveRefresh(); agentRuns(); setInterval(() => { driveRefresh(); agentRuns(); }, 15000);
   $("driveSync").onclick = async () => { await api("/api/drive/sync", {}); driveRefresh(); };
   $("driveOff").onclick = async () => { if (confirm("Disconnect Google Drive? Photos stop uploading until you connect again.")) { await api("/api/drive/disconnect", {}); driveRefresh(); } };
@@ -493,6 +494,19 @@ function initCloud() {
   };
   $("agentRuns").addEventListener("click", async (e) => { const id = e.target.dataset.stoprun; if (id) { await api(`/api/agent/runs/${id}/stop`, {}); agentRuns(); } });
 }
+
+// Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
+function showTab(tab) {
+  const rec = tab === "recolor", f = $("recolorTab");
+  if (rec && !f.src) f.src = "/recolor/";
+  if (rec) f.style.height = Math.max(400, innerHeight - document.querySelector("header").offsetHeight) + "px"; // fills the window under the header
+  f.classList.toggle("hide", !rec); $("studioTab").classList.toggle("hide", rec);
+  document.querySelectorAll("#tabs [data-tab]").forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle("on", on); a.setAttribute("aria-selected", on); });
+  document.title = rec ? "Jag Studio · Recolor" : "Jag Studio";
+}
+window.addEventListener("resize", () => { if (location.hash === "#recolor") showTab("recolor"); });
+window.addEventListener("hashchange", () => showTab(location.hash === "#recolor" ? "recolor" : "studio"));
+showTab(location.hash === "#recolor" ? "recolor" : "studio");
 
 async function init() {
   S.opts = await api("/api/options");

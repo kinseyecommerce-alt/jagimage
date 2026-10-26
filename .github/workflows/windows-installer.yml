@@ -25,7 +25,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --console --name "Jag Studio"
           --icon packaging/windows/jagstudio.ico
-          --paths . --add-data "jagimage/static;jagimage/static" --collect-submodules google.genai
+          --paths . --add-data "jagimage/static;jagimage/static" --add-data "web/recolor;web/recolor" --collect-submodules google.genai
           packaging/windows/jag_studio.py
 
       - name: Check the app starts

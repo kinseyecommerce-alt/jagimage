@@ -100,7 +100,9 @@ def main(argv=None) -> int:
     if a.smoke:
         with urllib.request.urlopen(url + "/", timeout=10) as r:
             page = r.read().decode("utf-8", "replace")
-        ok = "Jag Studio" in page and running_studio(port) and engines_work()
+        with urllib.request.urlopen(url + "/recolor/", timeout=10) as r:
+            recolor = r.read().decode("utf-8", "replace")
+        ok = "Jag Studio" in page and "Jag Recolor" in recolor and running_studio(port) and engines_work()
         print(f"smoke test {'passed' if ok else 'FAILED'}: {url}, photos in {out}")
         httpd.shutdown()
         return 0 if ok else 1
