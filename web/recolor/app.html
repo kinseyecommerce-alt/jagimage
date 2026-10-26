@@ -425,14 +425,26 @@ function garmentMask(doc, baseHex) {
   const b = hexToLab(baseHex), hb = Math.atan2(b[2], b[1]);
   const dh = (h, r) => { let d = Math.abs(h - r); return d > Math.PI ? 2 * Math.PI - d : d; };
   const R40 = 40 * Math.PI / 180, R28 = 28 * Math.PI / 180;
+  // The backdrop is never garment, even when tinted (a faint mint or lilac cast, or a coloured
+  // studio): everything joined to the photo's border that keeps the backdrop's colour is left out.
+  const studio = studioLab(doc), bg = new Uint8Array(n), q = new Int32Array(n);
+  { const A = new Float32Array(n), B = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const o = i * 4; rgbToLab(src[o], src[o+1], src[o+2], lab); A[i] = lab[1]; B[i] = lab[2]; }
+    const tol = 0.012 + 0.6 * Math.hypot(studio[1], studio[2]); // a grey studio is tight, a coloured one varies more
+    const like = (i) => Math.hypot(A[i] - studio[1], B[i] - studio[2]) < tol && Math.abs(L[i] - studio[0]) < 0.12;
+    // it spreads only in small steps, so it follows the backdrop's soft shading but stops at a garment's edge
+    const step = (i, j) => Math.hypot(L[i] - L[j], A[i] - A[j], B[i] - B[j]) < 0.012;
+    let qh = 0, qt = 0; const push = (i, from) => { if (!bg[i] && like(i) && (from < 0 || step(i, from))) { bg[i] = 1; q[qt++] = i; } };
+    for (let x = 0; x < W; x++) { push(x, -1); push((H - 1) * W + x, -1); } for (let y = 0; y < H; y++) { push(y * W, -1); push(y * W + W - 1, -1); }
+    while (qh < qt) { const i = q[qh++], x = i % W; if (x > 0) push(i - 1, i); if (x < W - 1) push(i + 1, i); if (i >= W) push(i - W, i); if (i + W < n) push(i + W, i); } }
   let sx = 0, sy = 0, cnt = 0; const cs = [];
-  for (let i = 0; i < n; i++) if (C[i] > 0.025 && dh(Hh[i], hb) < R40) { sx += Math.cos(Hh[i]); sy += Math.sin(Hh[i]); cnt++; if ((i & 7) === 0) cs.push(C[i]); }
+  for (let i = 0; i < n; i++) if (!bg[i] && C[i] > 0.025 && dh(Hh[i], hb) < R40) { sx += Math.cos(Hh[i]); sy += Math.sin(Hh[i]); cnt++; if ((i & 7) === 0) cs.push(C[i]); }
   if (cnt < 0.01 * n) return null;
   const hc = Math.atan2(sy, sx); cs.sort((p, q) => p - q); const cc = cs[cs.length >> 1] || 0.05;
   let m = new Uint8Array(n);
-  for (let i = 0; i < n; i++) if (dh(Hh[i], hc) < R28 && C[i] > Math.max(0.02, 0.35 * cc)) m[i] = 1;
+  for (let i = 0; i < n; i++) if (!bg[i] && dh(Hh[i], hc) < R28 && C[i] > Math.max(0.02, 0.35 * cc)) m[i] = 1;
   // keep the big connected pieces (same-hue specks elsewhere stay out)
-  const lbl = new Int32Array(n), q = new Int32Array(n), sizes = [0];
+  const lbl = new Int32Array(n), sizes = [0];
   for (let s0 = 0; s0 < n; s0++) { if (!m[s0] || lbl[s0]) continue; const id = sizes.length; let qh = 0, qt = 0; lbl[s0] = id; q[qt++] = s0;
     while (qh < qt) { const i = q[qh++], x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && m[j] && !lbl[j]) { lbl[j] = id; q[qt++] = j; } }
     sizes.push(qt); }
@@ -440,11 +452,11 @@ function garmentMask(doc, baseHex) {
   let lmax = []; for (let i = 0; i < n; i++) { if (m[i] && sizes[lbl[i]] >= 0.5 * big) lmax.push(L[i]); else m[i] = 0; }
   lmax.sort((p, q) => p - q); const lit = lmax[Math.floor(lmax.length * 0.99)] + 0.03;
   // grow into connected shadows: same hue, less colour, never lighter than the lit fabric
-  const loose = (i) => dh(Hh[i], hc) < R40 && C[i] > Math.max(0.012, 0.18 * cc) && L[i] < lit;
+  const loose = (i) => !bg[i] && dh(Hh[i], hc) < R40 && C[i] > Math.max(0.012, 0.18 * cc) && L[i] < lit;
   let qh = 0, qt = 0; for (let i = 0; i < n; i++) if (m[i]) q[qt++] = i;
   while (qh < qt) { const i = q[qh++], x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && !m[j] && loose(j)) { m[j] = 1; q[qt++] = j; } }
   // fill holes (knit speckle, stitching, deep creases) that the border can't reach, unless backdrop
-  const studio = studioLab(doc), out = new Uint8Array(n); qh = qt = 0;
+  const out = new Uint8Array(n); qh = qt = 0;
   const push = (i) => { if (!m[i] && !out[i]) { out[i] = 1; q[qt++] = i; } };
   for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); } for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
   while (qh < qt) { const i = q[qh++], x = i % W; if (x > 0) push(i - 1); if (x < W - 1) push(i + 1); if (i >= W) push(i - W); if (i + W < n) push(i + W); }
@@ -454,7 +466,9 @@ function garmentMask(doc, baseHex) {
     while (qh < qt) { const i = q[qh++], x = i % W; sL += L[i]; sC += C[i]; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < n && !m[j] && !out[j] && !seen[j]) { seen[j] = 1; q[qt++] = j; } }
     const backdrop = sC / qt < 0.012 && Math.abs(sL / qt - studio[0]) < 0.08;
     if (!backdrop && qt <= 0.002 * area) for (let k = 0; k < qt; k++) m[q[k]] = 1; }
-  return m;
+  // a "garment" running along the photo's edges is a coloured backdrop, not clothing
+  let edge = 0; for (let x = 0; x < W; x++) edge += m[x]; for (let y = 0; y < H; y++) edge += m[y * W] + m[y * W + W - 1];
+  return edge > 0.15 * (W + 2 * H) ? null : m;
 }
 function detectGarments(doc) {
   if (doc.gmask) return doc.gmask;
@@ -868,11 +882,16 @@ function renderGarmentState() {
 function garmentRegions(doc) {
   const cs = doc.clusters || [], hueOf = (c) => Math.atan2(c.b, c.a) * 180 / Math.PI;
   const coloured = (c) => { const ch = Math.hypot(c.a, c.b), h = hueOf(c); return !(c.parent || c.parent === 0) && ch > 0.03 && !(h > 25 && h < 95 && ch < 0.13); };
+  // the backdrop fills the photo's top and side edges; a garment never does (even on a coloured studio)
+  const edge = new Float64Array(cs.length), lb = doc.maps.labels, W = doc.w, H = doc.h; let ne = 0;
+  const tally = (i) => { if (lb[i] !== 255) { edge[lb[i]]++; ne++; } };
+  for (let x = 0; x < W; x++) tally(x); for (let y = 0; y < H; y++) { tally(y * W); tally(y * W + W - 1); }
+  const backdrop = (i) => edge[i] > 0.2 * ne;
   let best = -1;
-  cs.forEach((c, i) => { if (coloured(c) && (best < 0 || c.share > cs[best].share)) best = i; });
-  if (best < 0) return [0];
+  cs.forEach((c, i) => { if (coloured(c) && !backdrop(i) && (best < 0 || c.share > cs[best].share)) best = i; });
+  if (best < 0) return []; // nothing safe to guess: the user taps the garment
   const h0 = hueOf(cs[best]), near = (h) => Math.abs(((h - h0 + 540) % 360) - 180) < 25;
-  return cs.map((c, i) => i).filter((i) => i === best || (coloured(cs[i]) && near(hueOf(cs[i]))));
+  return cs.map((c, i) => i).filter((i) => i === best || (coloured(cs[i]) && !backdrop(i) && near(hueOf(cs[i]))));
 }
 function openDoc(i) {
   const prev = cur(); if (prev && prev !== state.docs[i] && prev.maps && state.docs.length > 3) { prev.maps = null; prev.preview = null; } // free memory

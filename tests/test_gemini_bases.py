@@ -119,6 +119,20 @@ def test_pale_tinted_halo_and_shoes_beside_a_deep_base_stay_out():
     assert mask[250, 150] > 0.95  # the garment itself is still all in
 
 
+def test_tinted_or_coloured_backdrop_is_never_the_garment():
+    """A studio with a faint mint cast (or a maroon studio, for a lilac base's hue range) used to be
+    swallowed by the garment mask, so the whole background was recoloured."""
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    for studio, base in [("#D4E6DA", "#8FD3A8"), ("#E6DCEC", "#C4A3EE"), ("#6E1520", "#C4A3EE")]:
+        img = fake_photo(base)
+        arr = np.asarray(img).copy()
+        bg = (np.abs(arr.astype(int) - 0xED).sum(-1) < 6)
+        arr[bg] = np.array(Image.new("RGB", (1, 1), studio))[0, 0]
+        m, _ = garment_mask(rgb_to_lab(arr), base)
+        assert m[10, 10] < 0.5 and m[200, 20] < 0.5 and m[390, 280] < 0.5, studio  # backdrop stays out
+        assert m[250, 150] > 0.95, studio                                           # the garment is still in
+
+
 def test_white_keeps_knit_and_stitches():
     from jagimage.recolor import rgb_to_lab
     img = fake_photo("#8FD3A8")

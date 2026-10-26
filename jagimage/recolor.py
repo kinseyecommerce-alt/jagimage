@@ -191,22 +191,46 @@ def _cleanup(m, lab, centre):
     return _feather(_fill_holes(m, lab, centre), lab, centre)
 
 
+def backdrop_mask(lab):
+    """The backdrop: pixels joined to the photo's border that keep the border's colour, also when it is
+    tinted (a faint mint or lilac cast) or a coloured studio. It spreads only across smooth areas, so it
+    follows the backdrop's soft shading but stops at a garment's edge."""
+    edge = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
+    studio = np.median(edge, axis=0)
+    tol = 0.012 + 0.6 * float(np.hypot(studio[1], studio[2]))  # a grey studio is tight, a coloured one varies more
+    like = (np.hypot(lab[..., 1] - studio[1], lab[..., 2] - studio[2]) < tol) & (np.abs(lab[..., 0] - studio[0]) < 0.12)
+    step = np.zeros(lab.shape[:2], np.float32)
+    for ax in (0, 1):
+        d = np.linalg.norm(np.diff(lab, axis=ax), axis=-1)
+        pad = [(0, 0), (0, 0)]
+        pad[ax] = (1, 0)
+        step = np.maximum(step, np.pad(d, pad))
+        pad[ax] = (0, 1)
+        step = np.maximum(step, np.pad(d, pad))
+    smooth = like & (step < 0.012)
+    seed = np.zeros_like(smooth)
+    seed[0], seed[-1], seed[:, 0], seed[:, -1] = smooth[0], smooth[-1], smooth[:, 0], smooth[:, -1]
+    return ndimage.binary_propagation(seed, mask=smooth)
+
+
 def _hue_mask(lab, base, base_hex):
     """Coloured bases (e.g. mint or bottle green): find the garment by hue, which grey studio,
-    skin, black hair and white shoes never share, even when the AI made it paler or deeper."""
+    skin, black hair and white shoes never share, even when the AI made it paler or deeper.
+    The backdrop is left out first, so a tinted or coloured studio is never taken for the garment."""
+    bg = backdrop_mask(lab)
     C = np.hypot(lab[..., 1], lab[..., 2])
     H = np.arctan2(lab[..., 2], lab[..., 1])
     hb = np.arctan2(base[2], base[1])
     dh = np.abs(np.angle(np.exp(1j * (H - hb))))
-    cand = (dh < np.radians(40)) & (C > 0.025)
+    cand = (dh < np.radians(40)) & (C > 0.025) & ~bg
     if cand.sum() < 0.01 * cand.size:
         raise MaskError(f"Couldn't find the {base_hex} garment in this photo.")
     hc = np.angle(np.mean(np.exp(1j * H[cand])))      # the hue the AI actually produced
     cc = float(np.median(C[cand]))
     dh = np.abs(np.angle(np.exp(1j * (H - hc))))
-    m = (dh < np.radians(28)) & (C > max(0.02, 0.35 * cc))
+    m = (dh < np.radians(28)) & (C > max(0.02, 0.35 * cc)) & ~bg
     # shadows lose chroma but keep hue: grow into connected pixels with a looser chroma floor
-    loose = (dh < np.radians(40)) & (C > max(0.012, 0.18 * cc))
+    loose = (dh < np.radians(40)) & (C > max(0.012, 0.18 * cc)) & ~bg
     lbl, n = ndimage.label(m)
     if n:
         sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
@@ -214,6 +238,8 @@ def _hue_mask(lab, base, base_hex):
     if m.any():  # shadows are darker than the lit fabric: a pale tinted halo or white shoe beside a deep base is not
         loose &= lab[..., 0] < np.percentile(lab[..., 0][m], 99) + GROW_LIGHTER
     m = ndimage.binary_propagation(m, mask=m | loose)
+    if m[0].mean() + m[:, 0].mean() + m[:, -1].mean() > 0.45:  # running along the photo's edges: a coloured backdrop
+        raise MaskError(f"Couldn't find the {base_hex} garment in this photo (only a backdrop of that colour).")
     centre = lab[m].mean(axis=0) if m.any() else base
     return _cleanup(_with_creases(m, lab, centre), lab, centre)
 
