@@ -100,9 +100,19 @@ details.adv > summary { cursor: pointer; font-size: 13px; color: var(--accent); 
 select, input[type=number], input[type=text], input[type=password] { min-height: 38px; }
 label.check { align-items: flex-start; } label.check input { margin-top: 2px; }
 @media (max-width: 1000px) {
-  main.studio { grid-template-columns: 1fr; }
+  main.studio { grid-template-columns: 1fr; padding-bottom: 84px; }
   main.studio .side { position: static; max-height: none; overflow: visible; }
 }
+.plan { overflow-wrap: anywhere; }
+/* narrow screens: the run column sits below the steps, so a slim bar keeps the estimate and Run in view */
+.runbar { display: none; }
+@media (max-width: 1000px) {
+  .runbar { display: flex; align-items: center; gap: 12px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    padding: 10px 16px; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 14px rgba(0,0,0,.06); }
+  .runbar.away { display: none; }
+  .runbar span { flex: 1; font-size: 14px; min-width: 0; }
+}
+.savecloud { margin: 0 0 10px; }
 .agenttab { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px }
 .agenttab td, .agenttab th { border-bottom: 1px solid var(--line); padding: 5px 4px; text-align: left }
 .agenttab td.r, .agenttab th.r { text-align: right }
@@ -110,7 +120,7 @@ header .keys { margin-left: auto; display: flex; gap: 10px; font-size: 13px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 5px; vertical-align: 1px; }
 .dot.on { background: var(--ok); }
 main { display: grid; grid-template-columns: minmax(340px, 430px) 1fr; gap: 18px; padding: 18px 20px; max-width: 1600px; margin: 0 auto; }
-@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } header { flex-wrap: wrap; } header .keys { margin-left: 0; } }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } header { flex-wrap: wrap; position: static; } header .keys { margin-left: 0; } }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
 .panel + .panel { margin-top: 14px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
@@ -393,11 +403,12 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="stephead"><span class="num">5</span><div><h2>Save to</h2><p class='hint'>Finished photos are always kept here and shown below; you can also copy them elsewhere.</p></div></div>
 
       
-      <label class="field"><span>Also save finished photos to</span>
+      <p class="savecloud hide" id="saveCloud"></p>
+      <label class="field" id="exportSelField"><span>Also save finished photos to</span>
         <select id="exportSel"></select></label>
       <label class="field hide" id="exportPathField"><span>Folder</span>
         <input type="text" id="exportPath" placeholder="e.g. G:\My Drive\Jag Studio"></label>
-      <div class="row">
+      <div class="row" id="exportWhatRow">
         <label class="field"><span>Which files</span>
           <select id="exportWhat">
             <option value="jpg">1500×1500 marketplace JPG</option>
@@ -407,7 +418,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       </div>
       <p class="hint" id="driveHint"></p>
       <label class="check"><input type="checkbox" id="keepPng" checked> Also keep a full-size PNG of every photo (about 4 MB each; turn off for big batches)</label>
-      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Working folder (bases, masks, all files)</summary>
+      <details style="margin-top:8px" id="outDirBox"><summary class="hint" style="cursor:pointer">Working folder (bases, masks, all files)</summary>
         <div class="row" style="margin-top:8px"><input type="text" id="outDir" style="flex:1"><button class="btn" id="outSave">Use folder</button></div>
       </details>
         </section>
@@ -468,6 +479,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="batches" id="batches"></div>
     </section>
   </div>
+  <div class="runbar" id="runbar"><span id="runbarText">…</span><button class="btn primary" id="runbarGo">Run ▸</button></div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -551,9 +563,10 @@ function refreshPlan() {
       $("start").disabled = !!p.clash || (S.job && $("stop").disabled === false);
       const per = p.bases_per_model;
       $("plan").innerHTML = (p.styles > 1 ? `<b>${p.styles}</b> styles with the same models · totals below<br>` : "") + `<b>${fmt(p.models)}</b> models × <b>${per}</b> base shoot${per > 1 ? "s" : ""} × <b>${p.poses}</b> pose${p.poses > 1 ? "s" : ""}${p.styles > 1 ? ` × <b>${p.styles}</b> styles` : ""} = <b>${fmt(p.ai_images)}</b> AI images (${({ gemini: "Gemini " + ($("geminiModel").value === "pro" ? "Pro " : "Flash ") + $("imageSize").value, openai: "OpenAI " + $("quality").value })[S.provider] || "RunPod GPU"})<br>`
-        + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b>${p.styles > 1 ? ` × <b>${p.styles}</b>` : ""} = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, on this computer)`
+        + `<b>${fmt(p.models)}</b> × <b>${p.colour_pairs}</b> colour pair${p.colour_pairs > 1 ? "s" : ""} × <b>${p.poses}</b>${p.styles > 1 ? ` × <b>${p.styles}</b>` : ""} = <b>${fmt(p.recoloured_images)}</b> recoloured photos (free, ${S.opts.cloud ? "on the server" : "on this computer"})`
         + costLine(p.cost) + `<div class="bases">Disk space needed: about <b>${fmt(p.disk_gb)} GB</b>${$("keepPng").checked ? " (with full-size PNGs)" : ""}.</div>`
         + `<div class="bases">Bases per model: ${p.bases.map((b) => esc(b.replace("-", " top / ") + (b.includes("-") ? " bottom" : " top"))).join(", ")}. Batch folder: ${esc(p.name)}</div>`;
+      $("runbarText").innerHTML = `<b>${fmt(p.recoloured_images)}</b> photos` + (p.cost && p.cost.with_retries_inr != null ? ` · about <b>₹${fmt(p.cost.with_retries_inr)}</b>` : "") + ` · ${esc(engineName(S.provider))}`;
     } catch (e) { $("plan").textContent = "–"; $("err").textContent = e.message; }
   }, 150);
 }
@@ -608,7 +621,7 @@ function costLine(c) {
     + ` · <b>₹${c.per_photo_inr}</b> per finished photo</div>`
     + (c.gpu_usd_per_hour != null
       ? `<div class="bases">GPU estimate: $${c.gpu_usd_per_hour}/hour × ${c.gpu_seconds_per_image} s per image (a guess until the pilot measures it), plus the minutes the pod sits idle. 1 USD = ₹${c.usd_inr}.</div>`
-      : `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on this computer).</div>`);
+      : `<div class="bases">List prices checked ${esc(c.prices_checked)}; 1 USD = ₹${c.usd_inr}. Recolouring is free (runs on ${S.opts.cloud ? "the server" : "this computer"}).</div>`);
 }
 function syncBottom() {
   $("posesHint").textContent = S.shot === "top" ? "Top only: every pose is framed from the head to just above the knee (no legs or shoes)." : "Full body: every pose shows the model from head to shoes.";
@@ -633,6 +646,8 @@ async function driveRefresh() {
     $("driveState").innerHTML = !d.configured ? (admin ? "Not set up yet." : "Not set up yet: ask an admin to connect Google Drive.")
       : !d.connected ? `Not connected. Connect once and every finished photo uploads to the <b>${esc(d.folder)}</b> folder by itself.`
       : `Connected: photos upload to <b>${esc(d.folder)}</b>. ${fmt(d.uploaded)} uploaded since the server started, ${fmt(d.pending)} waiting.` + (d.last_error ? `<br><span class="e">Last problem: ${esc(d.last_error)} (it retries every minute)</span>` : "");
+    $("saveCloud").innerHTML = d.connected ? `<b>Google Drive:</b> connected. Every finished photo uploads by itself to the <b>${esc(d.folder)}</b> folder.`
+      : `<b>Google Drive:</b> <span class="e">not connected</span>. Photos stay here until you connect it in <a href="#settings">Settings</a>; then they upload by themselves.`;
     $("driveConnect").classList.toggle("hide", !d.configured || d.connected || !admin); $("driveSync").classList.toggle("hide", !d.connected); $("driveOff").classList.toggle("hide", !d.connected || !admin);
   } catch (e) { $("driveState").textContent = e.message; }
 }
@@ -643,7 +658,9 @@ async function agentRuns() {
   if (r.runs.some((x) => x.running)) loadJobs();
 }
 function initCloud() {
-  ["signOut", "agentPanel", "drivePanel"].forEach((id) => $(id).classList.remove("hide"));
+  ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
+  // on the server there's no local folder to copy to: photos go to Google Drive by themselves
+  ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
   driveRefresh(); agentRuns(); setInterval(() => { driveRefresh(); agentRuns(); }, 15000);
   $("driveRedirect").textContent = location.origin + "/drive/callback";
   $("driveCopy").onclick = () => navigator.clipboard.writeText($("driveRedirect").textContent).then(() => { $("driveCopy").textContent = "Copied"; });
@@ -856,6 +873,8 @@ async function init() {
   $("testBtn").onclick = testPhoto;
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
+  // start on an engine that has a key (e.g. OpenAI when no Gemini key is saved)
+  if (!S.opts.providers[S.provider]) S.provider = ["openai", "gemini", "runpod"].find((k) => S.opts.providers[k]) || S.provider;
   seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   for (const id of ["geminiModel", "imageSize", "quality", "batchMode"]) $(id).addEventListener("change", engineSummary);
@@ -863,6 +882,9 @@ async function init() {
   setupSave();
   $("start").onclick = start; $("stop").onclick = async () => { if (S.job) await api(`/api/jobs/${S.job}/stop`, {}); };
   $("more").onclick = () => loadGallery(false);
+  $("runbarGo").onclick = () => $("runCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  // the bar steps aside while the Run card itself is on screen
+  if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => $("runbar").classList.toggle("away", e.isIntersecting))).observe($("runCard"));
   syncBottom(); refreshPlan(); loadJobs();
 }
 function setupSave() {
