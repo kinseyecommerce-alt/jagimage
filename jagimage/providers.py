@@ -73,6 +73,99 @@ class OpenAIProvider:
             result = self.client.images.generate(**params)
         return base64.b64decode(result.data[0].b64_json)
 
+    TERMINAL = {"completed", "failed", "expired", "cancelled"}
+
+    def _params(self):
+        params = dict(model=self.model, size=self.size, quality=self.quality, background="opaque", output_format="png", n=1)
+        if self.fidelity:
+            params["input_fidelity"] = self.fidelity
+        return params
+
+    def run_batch(self, jobs, on_status=None, stop=None, state_file=None, poll=30, chunk=None):
+        """Batch mode (half price; OpenAI returns the photos within 24 hours, usually much sooner).
+        jobs: [(key, prompt, reference paths)] -> {key: PNG bytes or Exception}. Photos with reference
+        photos go to /v1/images/edits and those without to /v1/images/generations: a batch holds one
+        endpoint. The batch's id is kept in state_file until its results are read, so if the app
+        stops, the next start collects that batch instead of paying for it twice."""
+        chunk = int(chunk or os.environ.get("JAGIMAGE_BATCH_CHUNK", "400"))
+        out, sent = {}, False
+        for url in ("/v1/images/generations", "/v1/images/edits"):
+            mine = [j for j in jobs if bool(j[2]) == (url == "/v1/images/edits")]
+            for i in range(0, len(mine), chunk):
+                if sent and stop is not None and stop.is_set():
+                    return out
+                sent = True
+                out.update(self._run_batch_job(url, mine[i:i + chunk], on_status, stop, state_file, poll))
+        return out
+
+    def _run_batch_job(self, url, jobs, on_status=None, stop=None, state_file=None, poll=30):
+        import io
+        import json
+        import time
+        from pathlib import Path
+
+        say = on_status or (lambda s: None)
+        state = json.loads(Path(state_file).read_text()) if state_file and Path(state_file).exists() else {}
+        wanted = {k for k, _, _ in jobs}
+        pending = [name for name, keys in state.items() if name.startswith("openai:") and set(keys) & wanted]
+        if pending:  # an earlier batch (app stopped while waiting) covers some of these: collect it first
+            name = pending[0]
+        else:
+            ids = {}
+
+            def file_id(path):
+                if path not in ids:
+                    with open(path, "rb") as f:
+                        ids[path] = self.client.files.create(file=f, purpose="vision").id
+                return ids[path]
+
+            lines = []
+            for key, text, refs in jobs:
+                body = {**self._params(), "prompt": text}
+                if refs:
+                    body["images"] = [{"file_id": file_id(r)} for r in refs]
+                lines.append(json.dumps({"custom_id": key, "method": "POST", "url": url, "body": body}))
+            src = self.client.files.create(file=("jag-studio-batch.jsonl", io.BytesIO("\n".join(lines).encode())), purpose="batch")
+            batch = self.client.batches.create(input_file_id=src.id, endpoint=url, completion_window="24h",
+                                               metadata={"description": f"jag-studio {len(jobs)} images"})
+            name = "openai:" + batch.id
+            if state_file:
+                state[name] = sorted(wanted)
+                Path(state_file).write_text(json.dumps(state, indent=1))
+        while True:
+            batch = self.client.batches.retrieve(name.split(":", 1)[1])
+            say(str(batch.status).replace("_", " "))
+            if batch.status in self.TERMINAL:
+                break
+            if stop is not None and stop.wait(poll):
+                return {}
+            if stop is None:
+                time.sleep(poll)
+        out = {}
+        for fid in (batch.output_file_id, batch.error_file_id):
+            if not fid:
+                continue
+            for line in self.client.files.content(fid).text.splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                key, resp = row.get("custom_id"), row.get("response") or {}
+                data = ((resp.get("body") or {}).get("data") or [{}])[0] if resp.get("status_code") == 200 else {}
+                if data.get("b64_json"):
+                    out[key] = base64.b64decode(data["b64_json"])
+                else:
+                    err = row.get("error") or (resp.get("body") or {}).get("error") or "no image returned"
+                    out[key] = RuntimeError(f"OpenAI batch: {err.get('message') if isinstance(err, dict) else err}")
+        if batch.status != "completed":
+            errs = getattr(getattr(batch, "errors", None), "data", None) or []
+            why = "; ".join(getattr(e, "message", str(e)) for e in errs)
+            err = RuntimeError(f"OpenAI batch {batch.status}" + (f": {why}" if why else ""))
+            out.update({k: err for k in (state.get(name) or wanted) if k not in out})
+        if state_file and name in state:
+            del state[name]
+            Path(state_file).write_text(json.dumps(state, indent=1))
+        return out
+
 
 class GeminiProvider:
     name = "gemini"

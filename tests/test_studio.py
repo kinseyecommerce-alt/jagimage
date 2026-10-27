@@ -1,4 +1,5 @@
 import io
+import base64
 import json
 import re
 import threading
@@ -470,8 +471,103 @@ def test_batch_mode_is_half_price_and_gemini_only():
     full = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100))
     half = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100, batch=True))
     assert half["per_image_usd"] == round(full["per_image_usd"] / 2, 4) and half["batch"]
+    oa = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100, provider="openai", quality="medium"))
+    oa_half = pricing.estimate(studio.Spec(top_colours=["Navy"], models=100, provider="openai", quality="medium", batch=True))
+    assert oa_half["per_image_usd"] == round(oa["per_image_usd"] / 2, 4)
     with pytest.raises(ValueError):
-        studio.Spec(top_colours=["Navy"], provider="openai", batch=True)
+        studio.Spec(top_colours=["Navy"], provider="runpod", batch=True)
+
+
+class FakeOpenAIBatches:
+    """client.files / client.batches like OpenAI's Batch API, answering image requests with fake_generate."""
+
+    def __init__(self, polls_before_done=1, fail_key=None):
+        self.store, self.batches_made, self.uploads, self.fail_key = {}, [], [], fail_key
+        self.polls, outer = polls_before_done, self
+
+        class Files:
+            def create(self, file, purpose):
+                fid = f"file-{len(outer.store) + 1}"
+                data = file[1].read() if isinstance(file, tuple) else file.read()
+                outer.store[fid] = data
+                outer.uploads.append(purpose)
+                return SimpleNamespace(id=fid)
+
+            def content(self, fid):
+                return SimpleNamespace(text=outer.store[fid].decode())
+
+        class Batches:
+            def create(self, input_file_id, endpoint, completion_window, metadata=None):
+                assert completion_window == "24h"
+                ok, bad = [], []
+                for line in outer.store[input_file_id].decode().splitlines():
+                    row = json.loads(line)
+                    assert row["url"] == endpoint and row["method"] == "POST"
+                    body = row["body"]
+                    assert body["output_format"] == "png" and ("images" in body) == (endpoint == "/v1/images/edits")
+                    refs = [i["file_id"] for i in body.get("images", [])]
+                    if row["custom_id"] == outer.fail_key:
+                        bad.append(json.dumps({"custom_id": row["custom_id"], "response": {"status_code": 400, "body": {
+                            "error": {"message": "Your request was rejected by the safety system."}}}}))
+                        continue
+                    png = base64.b64encode(fake_generate(body["prompt"], refs)).decode()
+                    ok.append(json.dumps({"custom_id": row["custom_id"], "response": {"status_code": 200, "body": {"data": [{"b64_json": png}]}}}))
+                bid = f"batch_{len(outer.batches_made) + 1}"
+                outer.store[bid + "_out"] = "\n".join(ok).encode()
+                outer.store[bid + "_err"] = "\n".join(bad).encode()
+                outer.batches_made.append({"id": bid, "endpoint": endpoint, "n": len(ok) + len(bad), "left": outer.polls})
+                return SimpleNamespace(id=bid)
+
+            def retrieve(self, bid):
+                b = next(x for x in outer.batches_made if x["id"] == bid)
+                done = b["left"] <= 0
+                b["left"] -= 1
+                return SimpleNamespace(id=bid, status="completed" if done else "in_progress", errors=None,
+                                       output_file_id=bid + "_out" if done else None, error_file_id=bid + "_err" if done else None)
+
+        self.files, self.batches = Files(), Batches()
+
+
+def openai_batch_engine(client):
+    from jagimage.providers import OpenAIProvider
+    provider = OpenAIProvider(client=client, model="gpt-image-test", quality="medium")
+
+    def generate(p, refs):
+        raise AssertionError("batch mode must not make single calls")
+
+    generate.run_batch = lambda jobs, **kw: provider.run_batch(jobs, poll=0, **kw)
+    return generate
+
+
+def test_openai_batch_mode_makes_everything_in_rounds(tmp_path):
+    client = FakeOpenAIBatches()
+    s = studio.Spec(top_colours=["Navy", "Yellow"], models=2, poses=["front_main", "back"], provider="openai", batch=True)
+    counts = studio.Batch(s, out=tmp_path, generate=openai_batch_engine(client)).run()
+    assert counts["ai_done"] == 8 and counts["recoloured"] == 8 and counts["errors"] == 0
+    # first fronts have no reference photo (generations); everything after copies one (edits)
+    assert client.batches_made[0]["endpoint"] == "/v1/images/generations"
+    assert all(b["endpoint"] == "/v1/images/edits" for b in client.batches_made[1:])
+    assert "vision" in client.uploads and "batch" in client.uploads
+    assert not json.loads((tmp_path / s.name / "_batch_jobs.json").read_text())  # all collected
+
+
+def test_openai_batch_is_collected_after_a_restart_and_reports_refusals(tmp_path):
+    import threading as th
+    from jagimage.providers import OpenAIProvider
+    keys = ["m0001|dark-dark|front_main", "m0002|dark-dark|front_main"]
+    client = FakeOpenAIBatches(polls_before_done=5, fail_key=keys[1])
+    provider = OpenAIProvider(client=client, model="gpt-image-test", quality="medium")
+    state = tmp_path / "_batch_jobs.json"
+    stop = th.Event()
+    stop.set()  # the app stops while OpenAI is still working on the batch
+    text = studio.prompt(studio.Spec(top_colours=["Navy"]), 1, ("dark", "dark"), "front_main", "none")
+    jobs = [(k, text, []) for k in keys]
+    assert provider.run_batch(jobs, stop=stop, state_file=state, poll=0) == {}
+    assert list(json.loads(state.read_text())) == ["openai:batch_1"]
+    got = provider.run_batch(jobs, state_file=state, poll=0)  # next start: same batch, not a new one
+    assert len(client.batches_made) == 1 and got[keys[0]][:8] == b"\x89PNG\r\n\x1a\n"
+    assert isinstance(got[keys[1]], RuntimeError) and "safety system" in str(got[keys[1]])
+    assert json.loads(state.read_text()) == {}
 
 
 def test_same_models_in_another_style_keep_their_face(tmp_path):

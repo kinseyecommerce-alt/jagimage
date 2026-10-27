@@ -319,7 +319,7 @@ def test_agent_uses_the_openai_key_when_there_is_no_gemini_key(tmp_path, monkeyp
         assert plan["batches"][0]["styles"] == ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]
         assert "OpenAI" in plan["reply"]
         bodies = cloud.plans[plan["plan_id"]]["bodies"]
-        assert bodies[0]["provider"] == "openai" and bodies[0]["quality"] == "high" and bodies[0]["batch"] is False
+        assert bodies[0]["provider"] == "openai" and bodies[0]["quality"] == "high" and bodies[0]["batch"] is True  # OpenAI has batch mode too
         monkeypatch.delenv("OPENAI_API_KEY")
         code, _, body = call(base + "/api/agent", {"message": "10 men", "provider": "gemini"}, cookie=cookie)
         assert code == 400 and "API key" in json.loads(body)["error"]

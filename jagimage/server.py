@@ -538,7 +538,7 @@ def make_handler(app: Studio):
                     if not other:
                         raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
                     note = f"The photos will be made with {dict(gemini='Gemini', openai='OpenAI')[other]}, the AI that has a key saved."
-                    base.update(provider=other, batch=bool(base.get("batch")) and other == "gemini")
+                    base.update(provider=other, batch=bool(base.get("batch")) and other in ("gemini", "openai"))
                     if other == "openai":
                         base["quality"] = base.get("quality") if base.get("quality") in ("medium", "high") else "medium"
                 plan = c.agent.plan(message, studio.ModelLedger(app.out), base)

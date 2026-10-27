@@ -58,7 +58,7 @@ def estimate(spec) -> dict:
     model = gemini_model(getattr(spec, "gemini_model", None)) if spec.provider == "gemini" else None
     each = per_image(spec.provider, setting, model)
     if each is not None and getattr(spec, "batch", False):
-        each *= BATCH_DISCOUNT  # Gemini batch mode: output and input both half price
+        each *= BATCH_DISCOUNT  # batch mode (Gemini or OpenAI): half price
     if each is None:
         return {"per_image_usd": None, "note": f"No list price for {spec.provider} {setting}; pick another setting to estimate."}
     base = plan["ai_images"] * each

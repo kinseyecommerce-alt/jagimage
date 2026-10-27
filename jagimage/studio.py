@@ -127,8 +127,8 @@ class Spec:
             raise ValueError("provider must be gemini, openai or runpod")
         if self.gemini_model not in ("flash", "pro"):
             raise ValueError("gemini_model must be flash or pro")
-        if self.batch and self.provider != "gemini":
-            raise ValueError("Batch mode (half price) is available with Gemini")
+        if self.batch and self.provider not in ("gemini", "openai"):
+            raise ValueError("Batch mode (half price) is available with Gemini and OpenAI")
         if self.shot not in SHOTS:
             raise ValueError("shot must be outfit (top and bottom) or top (top only)")
         if self.shot == "top":
@@ -476,7 +476,7 @@ class Batch:
 
     def _run_batched(self):
         """Batch mode: each round sends every base photo whose reference photos already exist as one
-        Gemini batch job (half price). Round 1 makes each model's first front, round 2 the other fronts
+        Gemini or OpenAI batch job (half price). Round 1 makes each model's first front, round 2 the other fronts
         and the first base's poses, round 3 the remaining poses. Photos the AI got wrong go into the
         next round, up to `retries` times."""
         poses = ["front_main"] + [p for p in self.spec.poses if p != "front_main"]

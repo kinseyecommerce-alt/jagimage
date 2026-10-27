@@ -221,7 +221,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field hide" id="qualityField"><span>OpenAI quality</span><select id="quality"></select></label>
       <label class="field"><span>Parallel requests</span><input type="number" id="workers" min="1" max="16" value="4"></label>
     </div>
-    <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, Google returns the photos within 24 hours (usually much sooner)</label>
+    <label class="check" style="margin-top:10px" id="batchField"><input type="checkbox" id="batchMode"> Batch mode: half price, <span id="batchWho">Google</span> returns the photos within 24 hours (usually much sooner)</label>
     <p class="hint hide" id="runpodHint">Your own GPU pod running the open Qwen-Image-Edit model (pilot/runpod/README.md). You pay RunPod per hour, so stop the pod when the batch is done. Set parallel requests to 1: the pod's web address gives up on a request after about 100 s, and extra requests only queue on the one GPU.</p>
   </section>
   <section class="panel">
@@ -501,7 +501,7 @@ S.fabric = () => $("fabric").value;
 const engineName = (v) => ({ gemini: "Gemini", openai: "OpenAI", runpod: "RunPod (own GPU)" })[v] || v;
 function engineFields() {
   const v = S.provider;
-  $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v !== "gemini");
+  $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v === "runpod"); $("batchWho").textContent = v === "openai" ? "OpenAI" : "Google";
   $("qualityField").classList.toggle("hide", v !== "openai");
   $("runpodHint").classList.toggle("hide", v !== "runpod");
   if (v === "runpod") $("workers").value = 1;
@@ -510,7 +510,7 @@ function engineFields() {
 function engineSummary() {
   const v = S.provider, have = S.opts && S.opts.providers && S.opts.providers[v];
   const what = v === "gemini" ? `Gemini ${$("geminiModel").value === "pro" ? "Pro" : "Flash"} ${$("imageSize").value}${$("batchMode").checked ? ", batch mode" : ""}`
-    : v === "openai" ? `OpenAI, ${$("quality").value} quality` : "RunPod (own GPU)";
+    : v === "openai" ? `OpenAI, ${$("quality").value} quality${$("batchMode").checked ? ", batch mode" : ""}` : "RunPod (own GPU)";
   $("engineSummary").innerHTML = `Engine: <b>${esc(what)}</b>${have ? "" : ' · <span class="e">no key saved</span>'} · <a href="#settings">change in Settings</a>`;
 }
 function seg(el, values, current, onPick, text = label) {
@@ -545,7 +545,7 @@ function spec() {
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
-    batch: S.provider === "gemini" && $("batchMode").checked, keep_png: $("keepPng").checked,
+    batch: S.provider !== "runpod" && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
     one_base: $("oneBase").checked };
 }
