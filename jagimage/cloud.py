@@ -380,7 +380,9 @@ Allowed values:
   Beige, Grey, Royal Blue, Military Green, Pink, Green)
 - top_colours: colour names from that fabric; default all of them
 - pairing: "match" (bottom in the same colour as the top, default) or "each" (every top with every bottom colour)
-- shot: "outfit" (head to shoes, default) or "top" (head to above the knee, bottom not recoloured)
+- shot: "top" (head to above the knee, bottom not recoloured) or "outfit" (head to shoes, both recoloured).
+  Leave it out unless the user asks: Half Sleeve then gets "top", other tops "outfit". "full body", "head to
+  toe" or "with pants/shorts recoloured" -> "outfit"; "top only", "above knee", "half body" -> "top"
 - models: number of different people (1-5000); poses: subset of front_main, back, threequarter, side,
   front_main_white, handpocket (default front_main and back)
 - "same model(s) in / can wear all top styles / all categories top / every top" means ONE batch whose tops
@@ -500,7 +502,7 @@ class Agent:
                     engine.update(quality="high") if engine.get("provider") == "openai" else engine.update(gemini_model="pro")
                 body = {**engine, "category": category, "top": tops[0], "tops": tops[1:], "bottom": bottom, "fabric": fabric,
                         "top_colours": colours, "pairing": b.get("pairing") if b.get("pairing") in ("match", "each") else "match",
-                        "shot": b.get("shot") if b.get("shot") in studio.SHOTS else "outfit",
+                        "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses}
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]

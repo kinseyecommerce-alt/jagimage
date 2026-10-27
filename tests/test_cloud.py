@@ -276,6 +276,7 @@ def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path, monke
         assert runs[0]["done"] == 1 and runs[0]["error"] is None
         jobs = json.loads(call(base + "/api/jobs", cookie=cookie)[2])["jobs"]
         assert jobs[0]["counts"]["recoloured"] == 24 and jobs[0]["counts"]["errors"] == 0
+        assert jobs[0]["name"].endswith("_top_only")  # Half Sleeve starts as Top only unless asked for full body
         assert call(base + "/api/agent/start", {"plan_id": plan["plan_id"]}, cookie=cookie)[0] == 400  # used once
     finally:
         httpd.shutdown()

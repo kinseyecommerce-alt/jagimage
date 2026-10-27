@@ -593,3 +593,8 @@ def test_openai_gets_plain_childrens_wording_gemini_unchanged():
         assert "toddler proportions" in studio.prompt(ge, 1, ge.bases()[0], "front_main", "none")
     men = studio.Spec(category="Men", top_colours=["Red"], models=1, poses=["front_main"], provider="openai")
     assert not studio.prompt(men, 1, men.bases()[0], "front_main", "none").startswith("Wholesome")
+
+
+def test_half_sleeve_starts_as_top_only():
+    from jagimage.studio import default_shot
+    assert default_shot("HalfSleeveTee") == "top" and default_shot("Hoodie") == "outfit"

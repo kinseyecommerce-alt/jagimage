@@ -825,19 +825,20 @@ async function init() {
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });
-  seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
+  seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; S.shotPicked = true; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
   const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";
     $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
   bc(); $("fabric").addEventListener("input", bc); $("bottomColour").addEventListener("input", refreshPlan);
   $("top").innerHTML = S.opts.tops.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   const moreTops = () => { $("moreTops").innerHTML = S.opts.tops.filter((t) => t !== $("top").value).map((t) =>
     `<button class="chip ${S.moreTops.has(t) ? "on" : ""}" data-t="${t}"><i style="background:var(--soft)"></i>${esc(nice(t))}</button>`).join(""); };
-  moreTops(); $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); });
+  moreTops(); $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); autoShot(); refreshPlan(); });
   $("moreTops").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; const t = c.dataset.t;
     S.moreTops.has(t) ? S.moreTops.delete(t) : S.moreTops.add(t); moreTops(); refreshPlan(); };
   $("sameModels").addEventListener("change", refreshPlan); $("oneBase").addEventListener("change", refreshPlan);
   $("bottom").innerHTML = S.opts.bottoms.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
+  autoShot();
   $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");
   $("quality").innerHTML = S.opts.openai_qualities.map((s) => `<option ${s === "high" ? "selected" : ""}>${s}</option>`).join("");
   renderPoses();
@@ -927,12 +928,19 @@ async function loadJobs() {
     <span class="row"><button class="btn" data-open="${esc(f.name)}">Open</button><button class="btn" data-load="${esc(f.name)}">Load settings</button></span></div>`).join("") || '<p class="hint">None yet.</p>';
   $("batches").onclick = (e) => { const o = e.target.dataset.open, l = e.target.dataset.load; if (o) openBatch(o); if (l) loadSettings(r.folders.find((f) => f.name === l).spec); };
 }
+// Until the shot is picked by hand, it follows the top style: Half Sleeve starts as Top only.
+function autoShot() {
+  if (S.shotPicked) return;
+  S.shot = (S.opts.shot_defaults || {})[$("top").value] || "outfit";
+  [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
+  syncBottom();
+}
 function loadSettings(s) {
   S.category = s.category; [...$("category").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.category));
   $("top").value = s.top; $("bottom").value = s.bottom; $("fabric").value = s.fabric; S.topPal = S.bottomPal = s.fabric;
   S.top = new Set(s.top_colours); S.bottom = new Set(s.bottom_colours);
   for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
-  S.shot = s.shot || "outfit"; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
+  S.shot = s.shot || "outfit"; S.shotPicked = true; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
   if (s.bottom_colour) $("bottomColour").value = s.bottom_colour;
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
