@@ -26,7 +26,9 @@ EDGE_ALPHA_BLUR = 0.8   # px: alpha along the edge is smoothed this much before 
 OUTLINE_SMOOTH = 1.5    # px: the garment outline is smoothed this much (removes notches and spikes)
 SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is smoothed
 SHADOW_SMOOTH = 1.2     # px blur for that ring
-MASK_VERSION = 2       # bump when garment_mask changes: masks saved by older code are made again
+PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
+PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
+MASK_VERSION = 3       # bump when garment_mask changes: masks saved by older code are made again
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
@@ -100,13 +102,26 @@ def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) ->
     lbl, n = ndimage.label(m)
     if n == 0:
         raise MaskError(f"Couldn't find the {base_hex} garment in this photo.")
-    sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
-    keep = np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1
-    m = np.isin(lbl, keep)
+    m = _pieces(lbl, n)
     # grow into connected deep folds/shadows of the same fabric that the strict match missed
     loose = np.linalg.norm((lab - centre) * w, axis=-1) < tol * 2.2
     m = ndimage.binary_propagation(m, mask=m | loose)
     return _feather(_fill_holes(m, lab, centre), lab, centre)
+
+
+def _pieces(lbl, n):
+    """The garment's pieces: the largest one(s), plus smaller pieces lying close to them. A side or
+    three-quarter pose shows a strip of the shirt between the arm and the back, cut off from the rest
+    by the arm; it is the same garment and must change colour too. Far-off pieces stay out."""
+    sizes = ndimage.sum(lbl > 0, lbl, index=np.arange(1, n + 1))
+    big = sizes >= 0.5 * sizes.max()
+    main = np.isin(lbl, np.flatnonzero(big) + 1)
+    small = np.flatnonzero(~big & (sizes >= PIECE_MIN * sizes.max())) + 1
+    if not len(small):
+        return main
+    near = ndimage.distance_transform_edt(~main) <= PIECE_NEAR * lbl.shape[0]
+    close = np.unique(lbl[near & np.isin(lbl, small)])
+    return main | np.isin(lbl, close[close > 0])
 
 
 def _fill_holes(m, lab, centre):
@@ -203,8 +218,7 @@ def _cleanup(m, lab, centre):
     lbl, n = ndimage.label(m)
     if n == 0:
         raise MaskError("Couldn't find the garment in this photo.")
-    sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
-    m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
+    m = _pieces(lbl, n)
     return _feather(_fill_holes(m, lab, centre), lab, centre)
 
 
@@ -250,8 +264,7 @@ def _hue_mask(lab, base, base_hex):
     loose = (dh < np.radians(40)) & (C > max(0.012, 0.18 * cc)) & ~bg
     lbl, n = ndimage.label(m)
     if n:
-        sizes = ndimage.sum(m, lbl, index=np.arange(1, n + 1))
-        m = np.isin(lbl, np.flatnonzero(sizes >= 0.5 * sizes.max()) + 1)
+        m = _pieces(lbl, n)
     if m.any():  # shadows are darker than the lit fabric: a pale tinted halo or white shoe beside a deep base is not
         loose &= lab[..., 0] < np.percentile(lab[..., 0][m], 99) + GROW_LIGHTER
     m = ndimage.binary_propagation(m, mask=m | loose)

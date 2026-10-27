@@ -183,6 +183,18 @@ def test_thin_crease_joins_the_garment_but_hair_does_not():
     assert m[331, 150] > 0.5 and m[114, 150] < 0.5
 
 
+def test_shirt_strip_seen_past_the_arm_is_recoloured_but_far_specks_are_not():
+    """Side pose: a strip of the shirt shows between the arm and the back, cut off by the arm."""
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.rectangle((72, 230, 92, 320), fill="#C99B80")     # arm in front of the shirt's side
+    d.rectangle((58, 260, 70, 320), fill="#8FD3A8")     # the shirt behind the arm
+    d.rectangle((265, 300, 285, 330), fill="#8FD3A8")   # a far-off speck in the base colour
+    m, _ = garment_mask(rgb_to_lab(np.asarray(img)), "#8FD3A8")
+    assert m[290, 64] > 0.5 and m[290, 80] < 0.5 and m[315, 275] < 0.5
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)
