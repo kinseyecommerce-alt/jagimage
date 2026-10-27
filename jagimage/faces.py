@@ -14,8 +14,9 @@ PEOPLE = {
                    "to a small short body (head about one fifth of body height), short chubby limbs"),
 }
 
-SKIN = ["fair even skin", "light wheatish even skin", "wheatish even skin", "warm medium-brown even skin",
-        "dusky even skin", "olive-toned even skin"]
+# Fair models only (the shop's choice). Six shades of fair, so faces still differ from model to model.
+SKIN = ["fair even skin", "fair even skin with a warm golden undertone", "fair even skin with a soft pink undertone",
+        "light fair even skin", "fair even skin with a neutral beige undertone", "fair even skin with a light peachy glow"]
 NOSE = ["small button nose", "soft rounded nose", "slightly upturned nose", "small straight nose"]
 KID_CHEEKS = ["rosy cheeks", "deep dimples", "a few light freckles across the nose", "smooth plain cheeks"]
 KID_LIPS = ["full little lips", "thin lips", "cupid's-bow lips"]
