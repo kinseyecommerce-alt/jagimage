@@ -28,7 +28,7 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 3       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 4       # bump when garment_mask changes: masks saved by older code are made again
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
@@ -37,6 +37,7 @@ KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clip
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or skin is mistaken for it
 GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
+GROW_DARKER = 0.4    # shadow growth never takes pixels darker than this share of the garment's typical lightness
 
 
 class MaskError(RuntimeError):
@@ -267,6 +268,9 @@ def _hue_mask(lab, base, base_hex):
         m = _pieces(lbl, n)
     if m.any():  # shadows are darker than the lit fabric: a pale tinted halo or white shoe beside a deep base is not
         loose &= lab[..., 0] < np.percentile(lab[..., 0][m], 99) + GROW_LIGHTER
+        # ...and far darker than the fabric is not its shadow either: dark hair lying over a mint shoulder
+        # picks up a faint mint tint, and would otherwise be painted the new colour
+        loose &= lab[..., 0] > GROW_DARKER * np.median(lab[..., 0][m])
     m = ndimage.binary_propagation(m, mask=m | loose)
     if m[0].mean() + m[:, 0].mean() + m[:, -1].mean() > 0.45:  # running along the photo's edges: a coloured backdrop
         raise MaskError(f"Couldn't find the {base_hex} garment in this photo (only a backdrop of that colour).")

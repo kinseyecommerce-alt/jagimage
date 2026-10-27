@@ -195,6 +195,16 @@ def test_shirt_strip_seen_past_the_arm_is_recoloured_but_far_specks_are_not():
     assert m[290, 64] > 0.5 and m[290, 80] < 0.5 and m[315, 275] < 0.5
 
 
+def test_dark_hair_over_a_mint_shoulder_is_not_painted():
+    """Back pose: hair lies over the shoulders and picks up a faint tint of the mint shirt below."""
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    img = fake_photo("#8FD3A8")
+    d = ImageDraw.Draw(img)
+    d.rectangle((95, 112, 125, 140), fill="#26302B")    # dark hair with a faint mint tint, touching the shoulder
+    m, _ = garment_mask(rgb_to_lab(np.asarray(img)), "#8FD3A8")
+    assert m[126, 110] < 0.5 and m[200, 150] > 0.95
+
+
 def test_gemini_provider_sends_refs_then_prompt_and_returns_png(tmp_path):
     ref = tmp_path / "face.png"
     fake_photo("#8FD3A8").save(ref)
