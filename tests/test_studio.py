@@ -694,3 +694,14 @@ def test_openai_gets_plain_childrens_wording_gemini_unchanged():
 def test_half_sleeve_starts_as_top_only():
     from jagimage.studio import default_shot
     assert default_shot("HalfSleeveTee") == "top" and default_shot("Hoodie") == "outfit"
+
+
+def test_neighbouring_models_differ_in_what_the_eye_sees():
+    """Fair skin only, so hair, face shape, beard and age must carry the difference between models."""
+    for cat in faces.FEATURES:
+        looks = [faces.look(cat, i) for i in range(1, 11)]
+        assert all("fair" in f["skin"] for f in looks)
+        assert len({f["hair"] for f in looks}) >= 8 and len({f["face"] for f in looks}) >= 5
+        assert all(a["hair"] != b["hair"] and a["face"] != b["face"] for a, b in zip(looks, looks[1:]))
+    men = [faces.look("Men", i) for i in range(1, 11)]
+    assert len({f["beard"] for f in men}) >= 5 and len({f["age"] for f in men}) >= 4
