@@ -104,7 +104,7 @@ class Spec:
     same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
     one_base: bool = False   # one light base shoot per model; dark colours are recoloured from it too (half the AI images)
     provider: str = "gemini"  # gemini, openai, or runpod (your own GPU pod with an open model)
-    quality: str = "high"    # OpenAI
+    quality: str = "medium"  # OpenAI: medium looks right for catalogue photos at about half the cost of high
     image_size: str = "2K"   # Gemini
     gemini_model: str = "flash"  # Gemini: flash (default, cheaper) or pro
     canvas: Optional[Tuple[int, int]] = (1500, 1500)

@@ -857,7 +857,7 @@ async function init() {
   $("fabric").innerHTML = Object.entries(S.opts.fabrics).map(([k, v]) => `<option value="${k}">${esc(v.split(" (")[0])}</option>`).join("");
   autoShot();
   $("imageSize").innerHTML = S.opts.gemini_sizes.map((s) => `<option ${s === "2K" ? "selected" : ""}>${s}</option>`).join("");
-  $("quality").innerHTML = S.opts.openai_qualities.map((s) => `<option ${s === "high" ? "selected" : ""}>${s}</option>`).join("");
+  $("quality").innerHTML = S.opts.openai_qualities.map((s) => `<option ${s === "medium" ? "selected" : ""}>${s}</option>`).join("");
   renderPoses();
   $("poses").onclick = (e) => { const c = e.target.closest(".chip"); if (!c || c.dataset.p === "front_main") return;
     S.poses.has(c.dataset.p) ? S.poses.delete(c.dataset.p) : S.poses.add(c.dataset.p); renderPoses(); refreshPlan(); };
