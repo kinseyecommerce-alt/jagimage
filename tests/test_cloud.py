@@ -325,3 +325,113 @@ def test_agent_uses_the_openai_key_when_there_is_no_gemini_key(tmp_path, monkeyp
         assert code == 400 and "API key" in json.loads(body)["error"]
     finally:
         httpd.shutdown()
+
+
+MYNTRA = {"marketplace": "Myntra", "width": 1080, "height": 1440, "background": "light grey (#F2F2F2)", "framing": "full",
+          "poses": [{"name": "front", "direction": "Facing the camera, arms relaxed, neutral smile"},
+                    {"name": "back_view", "direction": "Back to the camera, head straight"},
+                    {"name": "walking", "direction": "Mid-stride walking towards the camera"},
+                    {"name": "front_close", "direction": "a second front shot"}],
+          "model": "Natural makeup, hair tied back, no jewellery", "avoid": "props, sunglasses",
+          "not_applied": "Name files by style code", "summary": "Full-length photos at 1080 x 1440 on light grey."}
+
+
+def test_guide_files_are_read_into_text_and_pictures(tmp_path):
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    from jagimage.cloud import guide_content
+    text, pics = guide_content("myntra.txt", b"Image size 1080 x 1440. Light grey background.")
+    assert "1080" in text and pics == []
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 800), "#cccccc").save(buf, "PNG")
+    doc = io.BytesIO()
+    with zipfile.ZipFile(doc, "w") as z:
+        z.writestr("word/document.xml", "<w:document><w:p><w:t>Front pose</w:t></w:p><w:p><w:t>Back pose</w:t></w:p></w:document>")
+        z.writestr("word/media/image1.png", buf.getvalue())
+    text, pics = guide_content("guide.docx", doc.getvalue())
+    assert "Front pose\nBack pose" in text and len(pics) == 1 and pics[0][1] == "image/jpeg"
+    text, pics = guide_content("page.png", buf.getvalue())
+    assert text == "" and len(pics) == 1
+    pdf = io.BytesIO()
+    Image.new("RGB", (600, 800), "#cccccc").save(pdf, "PDF")
+    text, pics = guide_content("scan.pdf", pdf.getvalue())  # a scanned page: its picture goes to the AI
+    assert len(pics) == 1
+    with pytest.raises(ValueError, match="Upload the guide as"):
+        guide_content("guide.exe", b"MZ")
+
+
+def test_guide_answer_becomes_checked_studio_settings():
+    from jagimage import library as L
+    from jagimage.cloud import clean_guide
+    g = clean_guide(MYNTRA, "myntra.pdf")
+    assert g["canvas"] == [1080, 1440] and g["shot"] == "outfit" and g["background"] == "light grey (#F2F2F2)"
+    assert g["poses"] == ["front_main", "back", "walking"]  # the second front shot is the same pose
+    assert g["custom_poses"]["back"].startswith(L.POSES["back"]) and "head straight" in g["custom_poses"]["back"]
+    assert g["custom_poses"]["walking"] == "Mid-stride walking towards the camera"
+    assert g["extra"] == "Natural makeup, hair tied back, no jewellery. Avoid: props, sunglasses"
+    bad = clean_guide({"marketplace": "", "width": 99999, "height": 5, "framing": "sideways", "poses": "x", "summary": ""}, "x.txt")
+    assert bad["canvas"] is None and bad["shot"] == "" and bad["poses"] == ["front_main"] and bad["marketplace"] == "x"
+    spec = studio.Spec(category="Women", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], poses=g["poses"],
+                       custom_poses=g["custom_poses"], extra=g["extra"], canvas=g["canvas"], background=g["background"],
+                       guide=g["marketplace"], shot="outfit")
+    text = studio.prompt(spec, 1, spec.bases()[0], "walking", "front")
+    assert "Plain seamless light grey (#F2F2F2) studio background" in text and "#EDEDED" not in text and "Mid-stride" in text
+    assert spec.name.endswith("_Myntra") and spec.canvas == (1080, 1440)
+
+
+def test_guide_upload_is_read_saved_and_listed(tmp_path, monkeypatch):
+    import base64
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+    llm = FakeLLM(MYNTRA)
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD,
+                  drive=Drive("", "", tmp_path / "data"), agent=Agent(client=llm, model="gemini-test"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        data = base64.b64encode(b"Myntra model guidelines: 1080 x 1440, light grey, front, back and walking.").decode()
+        code, _, body = call(base + "/api/guide", {"filename": "myntra.txt", "data": data}, cookie=cookie)
+        g = json.loads(body)["guide"]
+        assert code == 200 and g["id"] == "myntra" and g["canvas"] == [1080, 1440]
+        assert "1080 x 1440" in str(llm.asked[1])  # the AI got the guide's text
+        assert [x["id"] for x in json.loads(call(base + "/api/guides", cookie=cookie)[2])["guides"]] == ["myntra"]
+        assert call(base + "/api/guide", {"filename": "x.exe", "data": data}, cookie=cookie)[0] == 400
+        assert call(base + "/api/guide", {"filename": "x.txt", "data": "not base64!"}, cookie=cookie)[0] == 400
+        code, _, body = call(base + "/api/guides/myntra/delete", {}, cookie=cookie)
+        assert code == 200 and json.loads(body)["guides"] == []
+        # a guide batch: its own folder, photo size and backdrop, and its photos still go to the dashboard
+        spec = {"category": "Men", "top": "FullSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy"], "models": 1,
+                "poses": ["front_main"], "canvas": [1080, 1440], "background": "light grey (#F2F2F2)", "guide": "Myntra"}
+        code, _, body = call(base + "/api/jobs", spec, cookie=cookie)
+        name = json.loads(body)["name"]
+        assert code == 200 and name.endswith("_Myntra")
+        for _ in range(300):
+            if not json.loads(call(base + "/api/jobs", cookie=cookie)[2])["jobs"][0]["running"]:
+                break
+            time.sleep(0.1)
+        assert list((tmp_path / "out" / name).glob("m0001/*/front_main_1080x1440.jpg"))
+        from jagimage.cloud import JPG_SIZE
+        assert JPG_SIZE.search("front_main_1080x1440.jpg") and not JPG_SIZE.search("front_main_qc.jpg")
+    finally:
+        httpd.shutdown()
+
+
+def test_guide_screenshot_goes_to_openai_as_a_picture(monkeypatch):
+    import io
+
+    from PIL import Image
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    chat = FakeOpenAIChat(MYNTRA)
+    seen = []
+    real = chat.create
+    chat.create = lambda model, messages, response_format: (seen.append(messages), real(model, messages, response_format))[1]
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 800), "#cccccc").save(buf, "PNG")
+    g = Agent(openai_client=chat).read_guide("page1.png", buf.getvalue())
+    parts = seen[-1][1]["content"]
+    assert g["marketplace"] == "Myntra" and parts[0]["type"] == "text"
+    assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")

@@ -77,7 +77,8 @@ header .sub { color: var(--muted); font-size: 13px; }
 .zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 /* ---------- Studio: guided steps + sticky run column ---------- */
 main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
-main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
+main.studio > .studiohead, main.studio > #agentPanel, main.studio > #guidePanel, main.studio > .results { grid-column: 1 / -1; }
+.guideout { margin-top: 10px; font-size: 14px; } .guideout ul { margin: 6px 0 0 18px; padding: 0; } .guideout li { margin: 3px 0; }
 main.studio .builder, main.studio .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 main.studio .builder > .panel, main.studio .side > .panel, main.studio .results > .panel { margin-top: 0; }
 main.studio .side { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow: auto; }
@@ -295,6 +296,19 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div id="agentOut"></div>
       <div id="agentRuns"></div>
     </section>
+  <section class="panel hide" id="guidePanel">
+      <h2>Marketplace guide <span class="n">optional</span></h2>
+      <p class="hint">Upload a marketplace's model photo guidelines (e.g. Myntra) as PDF, Word, text or screenshots. The AI reads it and sets the photo size, background, poses and model directions in the steps below; you check them, then run as usual. The garments stay plain.</p>
+      <div class="row">
+        <label class="field"><span>Guide file</span><input type="file" id="guideFile" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
+        <button class="btn primary" id="guideRead">Read guide</button>
+      </div>
+      <div class="row" id="guideSaved">
+        <label class="field"><span>Saved guides</span><select id="guideSel"></select></label>
+        <button class="btn" id="guideUse">Use this guide</button><button class="btn" id="guideDel">Delete</button>
+      </div>
+      <div class="guideout" id="guideOut"></div>
+    </section>
   <div class="builder">
     <section class="panel step" id="stepProduct">
       <div class="stephead"><span class="num">1</span><div><h2>Product</h2><p class='hint'>What the models wear.</p></div></div>
@@ -401,6 +415,12 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         </section>
     <section class="panel step" id="stepSave">
       <div class="stephead"><span class="num">5</span><div><h2>Save to</h2><p class='hint'>Finished photos are always kept here and shown below; you can also copy them elsewhere.</p></div></div>
+      <div class="row">
+        <label class="field"><span>Photo width (px)</span><input type="number" id="photoW" min="200" max="6000" value="1500"></label>
+        <label class="field"><span>Photo height (px)</span><input type="number" id="photoH" min="200" max="6000" value="1500"></label>
+        <label class="field" style="flex:2"><span>Background</span><input type="text" id="background" maxlength="200" placeholder="Studio light grey (default)"></label>
+      </div>
+      <p class="hint" id="guideNote"></p>
 
       
       <p class="savecloud hide" id="saveCloud"></p>
@@ -411,7 +431,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="row" id="exportWhatRow">
         <label class="field"><span>Which files</span>
           <select id="exportWhat">
-            <option value="jpg">1500×1500 marketplace JPG</option>
+            <option value="jpg">Marketplace JPG (photo size above)</option>
             <option value="png">Full-size PNG</option>
             <option value="both">Both</option>
           </select></label>
@@ -467,7 +487,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h2 style="margin:0">Photos <span class="n" id="galTotal"></span></h2>
         <span class="row">
-          <a class="btn" id="zipJpg" href="#">Download 1500×1500 JPG (ZIP)</a>
+          <a class="btn" id="zipJpg" href="#">Download marketplace JPGs (ZIP)</a>
           <a class="btn" id="zipPng" href="#">Full-size PNG (ZIP)</a>
         </span>
       </div>
@@ -547,7 +567,8 @@ function spec() {
     provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
     batch: S.provider !== "runpod" && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
-    one_base: $("oneBase").checked };
+    one_base: $("oneBase").checked, canvas: [+$("photoW").value || 1500, +$("photoH").value || 1500],
+    background: $("background").value.trim(), guide: S.guide || "" };
 }
 let planTimer = null;
 function refreshPlan() {
@@ -657,7 +678,49 @@ async function agentRuns() {
     + (x.running ? ` · running <button class="btn" data-stoprun="${esc(x.id)}">Stop</button>` : x.error ? ` · stopped: <span class="e">${esc(x.error)}</span>` : x.stopped ? " · stopped" : " · finished") + `</div>`).join("");
   if (r.runs.some((x) => x.running)) loadJobs();
 }
+// ---------- marketplace guide (e.g. Myntra): the AI reads it into the settings below
+function guideHtml(g) {
+  const li = (k, v) => v ? `<li><b>${k}:</b> ${esc(v)}</li>` : "";
+  return `<p>${esc(g.summary || "")}</p><ul>`
+    + li("Photo size", g.canvas ? `${g.canvas[0]} × ${g.canvas[1]} px` : "") + li("Background", g.background)
+    + li("Framing", g.shot === "top" ? "Top only (head to above the knee)" : g.shot === "outfit" ? "Full length (head to shoes)" : "")
+    + li("Poses", g.poses.map(label).join(", ")) + li("Model directions", g.extra)
+    + `</ul>` + (g.not_applied ? `<p class="hint">Not done by the app (do these yourself): ${esc(g.not_applied)}</p>` : "");
+}
+function applyGuide(g) {
+  if (g.canvas) { $("photoW").value = g.canvas[0]; $("photoH").value = g.canvas[1]; }
+  $("background").value = g.background || "";
+  if (g.shot) { S.shot = g.shot; S.shotPicked = true; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot)); }
+  S.customPoses = { ...S.customPoses, ...g.custom_poses }; S.poses = new Set(g.poses);
+  $("extra").value = g.extra || ""; S.guide = g.marketplace;
+  $("guideNote").textContent = `Settings from the ${g.marketplace} guide: check them in steps 3 and 5 before you run.`;
+  renderPoses(); syncBottom(); refreshPlan();
+}
+async function guidesRefresh(pick) {
+  const r = await api("/api/guides"); S.guides = r.guides;
+  $("guideSaved").classList.toggle("hide", !r.guides.length);
+  $("guideSel").innerHTML = r.guides.map((g) => `<option value="${esc(g.id)}">${esc(g.marketplace)} (${esc(g.file || "")})</option>`).join("");
+  if (pick) $("guideSel").value = pick;
+}
+function initGuide() {
+  $("guidePanel").classList.remove("hide"); guidesRefresh();
+  $("guideRead").onclick = async () => {
+    const f = $("guideFile").files[0]; if (!f) { $("guideOut").innerHTML = '<p class="e">Choose the guide file first.</p>'; return; }
+    if (f.size > 15e6) { $("guideOut").innerHTML = '<p class="e">That file is too big: keep it under 15 MB (or upload screenshots of the pages).</p>'; return; }
+    $("guideOut").innerHTML = '<p class="hint">Reading the guide… (about half a minute)</p>'; $("guideRead").disabled = true;
+    try {
+      const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
+      const r = await api("/api/guide", { filename: f.name, data });
+      applyGuide(r.guide); await guidesRefresh(r.guide.id);
+      $("guideOut").innerHTML = guideHtml(r.guide) + '<p class="hint">Applied below and saved for next time.</p>';
+    } catch (e) { $("guideOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+    $("guideRead").disabled = false;
+  };
+  $("guideUse").onclick = () => { const g = (S.guides || []).find((x) => x.id === $("guideSel").value); if (g) { applyGuide(g); $("guideOut").innerHTML = guideHtml(g) + '<p class="hint">Applied below.</p>'; } };
+  $("guideDel").onclick = async () => { const id = $("guideSel").value; if (id && confirm("Delete this saved guide?")) { await api(`/api/guides/${encodeURIComponent(id)}/delete`, {}); guidesRefresh(); $("guideOut").innerHTML = ""; } };
+}
 function initCloud() {
+  initGuide();
   ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
@@ -868,6 +931,7 @@ async function init() {
     S.customPoses[name] = text; S.poses.add(name); $("err").textContent = ""; renderPoses(name); refreshPlan(); };
   $("poseReset").onclick = () => { delete S.customPoses[$("poseEdit").value]; renderPoses($("poseEdit").value); refreshPlan(); };
   $("poseDelete").onclick = () => { const p = $("poseEdit").value; delete S.customPoses[p]; S.poses.delete(p); renderPoses(); refreshPlan(); };
+  for (const id of ["photoW", "photoH", "background"]) $(id).addEventListener("input", refreshPlan);
   $("extra").addEventListener("input", refreshPlan); $("handsFree").addEventListener("change", refreshPlan); $("batchMode").addEventListener("change", refreshPlan); $("keepPng").addEventListener("change", refreshPlan);
   $("previewBtn").onclick = preview;
   $("testBtn").onclick = testPhoto;
@@ -964,6 +1028,8 @@ function loadSettings(s) {
   for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
   S.shot = s.shot || "outfit"; S.shotPicked = true; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
   if (s.bottom_colour) $("bottomColour").value = s.bottom_colour;
+  const cv = s.canvas || [1500, 1500]; $("photoW").value = cv[0]; $("photoH").value = cv[1]; $("background").value = s.background || "";
+  S.guide = s.guide || ""; $("guideNote").textContent = S.guide ? `Settings from the ${S.guide} guide.` : "";
   S.pairing = s.pairing; [...$("pairing").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.pairing));
   $("models").value = s.models; $("firstModel").value = s.first_model; S.poses = new Set(s.poses);
   S.customPoses = { ...(s.custom_poses || {}) }; $("extra").value = s.extra || ""; $("handsFree").checked = s.hands_free !== false; renderPoses();

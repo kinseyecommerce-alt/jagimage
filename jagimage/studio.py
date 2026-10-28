@@ -108,6 +108,8 @@ class Spec:
     image_size: str = "2K"   # Gemini
     gemini_model: str = "flash"  # Gemini: flash (default, cheaper) or pro
     canvas: Optional[Tuple[int, int]] = (1500, 1500)
+    background: str = ""     # a marketplace guide's backdrop, e.g. "pure white (#FFFFFF)"; empty: the studio grey
+    guide: str = ""          # the marketplace guide these settings came from (shown on the dashboard), e.g. "Myntra"
     name: str = ""
 
     def __post_init__(self):
@@ -140,6 +142,9 @@ class Spec:
         if empty:
             raise ValueError("each custom pose needs a name and a description")
         self.extra = " ".join(str(self.extra or "").split())
+        self.background, self.guide = " ".join(str(self.background).split()), " ".join(str(self.guide).split())
+        if len(self.background) > 200 or len(self.guide) > 80:
+            raise ValueError("background must be at most 200 characters and guide at most 80")
         if len(self.extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
             raise ValueError("keep pose descriptions and extra instructions under 1000 characters")
         bad = [p for p in self.poses if p not in self.pose_texts()]
@@ -163,7 +168,8 @@ class Spec:
         else:
             self.keep_png = True  # without a marketplace JPG the PNG is the only copy
         if not self.name:
-            self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else ""))
+            self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else "")
+                             + (f"_{self.guide}" if self.guide else ""))  # e.g. ..._Myntra: its own size and backdrop
         if not SAFE_NAME.match(self.name) or ".." in self.name:  # a folder inside the photos folder, nothing else
             raise ValueError("batch name: letters, digits, dot, dash and underscore only")
 
@@ -213,6 +219,12 @@ def pair_dir(top: str, bottom: Optional[str]) -> str:
     return slug(top) + ("__" + slug(bottom) if bottom else "")
 
 
+def backdrop(spec: Spec, pose: str) -> str:
+    if spec.background:  # a marketplace guide's backdrop, for every pose
+        return f"Plain seamless {spec.background.rstrip('.')} studio background, soft even shadow-free lighting."
+    return L.BACKGROUNDS.get(pose, L.GREY)
+
+
 def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     """reference: 'none' (first base front: new face from the text), 'face' (other base fronts:
     image 1 is the model's first front), 'front' (poses of the first base: image 1 is this base's
@@ -245,7 +257,7 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
             f"with {bottom_text}" + (f", fabric: {L.FABRIC_TEXT[spec.fabric]['bottom']}" if bcol else "") +
             ("" if top_only else f"; and {shoes}") +
             (". The top and the bottom are two clearly different colours, exactly as stated. " if bcol else ". ") +
-            f"{L.BACKGROUNDS.get(pose, L.GREY)} {rules}")
+            f"{backdrop(spec, pose)} {rules}")
     hands = spec.hands_free and pose not in NO_HANDS_FREE
     if hands:
         text += f" {HANDS_FREE}."

@@ -11,6 +11,7 @@ Enabled by `jagimage serve --cloud` with these environment variables:
   JAGIMAGE_AGENT_MODEL           Gemini text model for the agent (default: gemini-flash-latest)
 """
 
+import base64
 import hashlib
 import hmac
 import json
@@ -35,6 +36,8 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 USER_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 HASH_ROUNDS = 200_000
 
+
+JPG_SIZE = re.compile(r"_\d+x\d+\.jpg$")  # the marketplace JPG (1500x1500, or a guide's size such as 1080x1440)
 
 class Forbidden(Exception):
     """Signed in, but only an admin may do this."""
@@ -325,9 +328,9 @@ class DriveSync:
             done_file = batch / "_drive.txt"
             with DRIVE_LIST_LOCK:
                 done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
-            for jpg in sorted(batch.glob("m[0-9][0-9][0-9][0-9]/*/*_1500x1500.jpg")):  # <model>/<Top__Bottom>/<pose>
+            for jpg in sorted(batch.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg")):  # <model>/<Top__Bottom>/<pose>_<w>x<h>.jpg
                 rel = jpg.relative_to(batch).as_posix()
-                if rel not in done and not jpg.parent.name.startswith("_"):
+                if rel not in done and not jpg.parent.name.startswith("_") and JPG_SIZE.search(jpg.name):
                     rows.append((batch, rel, jpg))
         return rows
 
@@ -408,6 +411,134 @@ AGENT_SCHEMA = {
 }
 
 
+GUIDE_SYSTEM = """You read a clothing marketplace's guidelines for on-model catalogue photos (for example Myntra's
+model photography guide) for SPB Textile's Jag Studio. The studio makes AI photos of a real-looking live model
+wearing a plain, solid-colour garment (no print) on a plain studio backdrop; each photo is later recoloured to
+the exact shade. Pull out only what the guide itself says; never invent rules it does not state.
+- width, height: the final photo size in pixels it asks for (its stated size, or its minimum). If it gives
+  only an aspect ratio, use 1500 px on the long side (e.g. 3:4 -> 1125 x 1500). 0 when it says nothing.
+- background: the backdrop it asks for in plain words, with the hex code if it gives one (e.g. "pure white
+  (#FFFFFF)", "light grey (#F2F2F2)"). Empty when it says nothing.
+- framing: "full" when it wants full-length head-to-toe photos, "top" when it wants topwear shot from the head
+  to the waist or knee, empty when it says nothing.
+- poses: every on-model shot it asks for, in its order. name: a short English snake_case name such as front,
+  back, side, three_quarter, walking, detail_closeup. direction: one plain sentence for the model and camera
+  (body angle, head, arms, hands, expression) using only what the guide says. Leave out shots without a
+  model (flat lay, ghost mannequin, fabric swatch, size chart): name those in not_applied.
+- model: its directions about the model's look and manner (expression, makeup, hair, grooming, accessories,
+  footwear, body language), as one short paragraph.
+- avoid: what it forbids for the photo or the model, as a short comma-separated list.
+- not_applied: its rules this app cannot follow by itself (file naming, file size, number of images,
+  product-only shots, size charts, text overlays it allows, ...), briefly.
+- marketplace: the marketplace's name, e.g. Myntra.
+- summary: two to four short plain sentences for the shop owner saying what will be used."""
+
+GUIDE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "marketplace": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
+        "background": {"type": "string"}, "framing": {"type": "string"},
+        "poses": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string"}, "direction": {"type": "string"}}, "required": ["name", "direction"]}},
+        "model": {"type": "string"}, "avoid": {"type": "string"}, "not_applied": {"type": "string"},
+        "summary": {"type": "string"},
+    },
+    "required": ["marketplace", "poses", "summary"],
+}
+GUIDE_TYPES = ".pdf, .docx, .txt, .md, .png, .jpg, .jpeg, .webp"
+# a guide's shot names that mean one of the Studio's own poses (whose wording keeps e.g. a true rear view)
+POSE_ALIASES = [("front", "front_main"), ("straight", "front_main"), ("back", "back"), ("rear", "back"),
+                ("side", "side"), ("profile", "side"), ("three_quarter", "threequarter"), ("threequarter", "threequarter"),
+                ("angle", "threequarter"), ("45", "threequarter"), ("pocket", "handpocket")]
+
+
+def guide_content(filename: str, data: bytes):
+    """The guide's text, and up to six of its pictures (example photos, or the pages of a screenshot)."""
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    def picture(raw):
+        try:
+            im = Image.open(io.BytesIO(raw)).convert("RGB")
+        except Exception:
+            return None
+        if min(im.size) < 120:  # icons and logos say nothing about the photo
+            return None
+        im.thumbnail((1280, 1280))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=85)
+        return buf.getvalue(), "image/jpeg"
+
+    ext = os.path.splitext(filename.lower())[1]
+    text, pics = "", []
+    if ext == ".pdf":
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        text = "\n".join((page.extract_text() or "") for page in reader.pages[:40])
+        for page in reader.pages[:12]:
+            for img in getattr(page, "images", [])[:3]:
+                pics.append(picture(img.data))
+    elif ext == ".docx":
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8", "ignore")
+            text = re.sub(r"<[^>]+>", "", re.sub(r"</w:p>", "\n", xml))
+            pics = [picture(z.read(n)) for n in z.namelist() if n.startswith("word/media/")][:12]
+    elif ext in (".txt", ".md", ".csv"):
+        text = data.decode("utf-8", "ignore")
+    elif ext in (".png", ".jpg", ".jpeg", ".webp"):
+        pics = [picture(data)]
+        if not pics[0]:
+            raise ValueError("That picture can't be read")
+    else:
+        raise ValueError(f"Upload the guide as {GUIDE_TYPES}")
+    text = re.sub(r"[ \t]+", " ", text).strip()[:40000]
+    pics = [p for p in pics if p][:6]
+    if not text and not pics:
+        raise ValueError("Nothing readable in that file. If it is a scanned PDF, upload screenshots of its pages instead.")
+    return text, pics
+
+
+def clean_guide(ans: dict, filename: str) -> dict:
+    """The AI's reading of a guide as Studio settings, every value checked."""
+    from . import library as L
+
+    def words(v, n):
+        return " ".join(str(v or "").split())[:n]
+
+    w, h = int(ans.get("width") or 0), int(ans.get("height") or 0)
+    canvas = [w, h] if 200 <= w <= 6000 and 200 <= h <= 6000 else None
+    framing = str(ans.get("framing") or "").lower()
+    custom, poses = {}, []
+    for p in (ans.get("poses") or [])[:8]:
+        if not isinstance(p, dict):
+            continue
+        name = re.sub(r"[^a-z0-9_]+", "_", str(p.get("name") or "").lower()).strip("_")[:30]
+        direction = words(p.get("direction"), 500).rstrip(".")
+        if not name or not direction:
+            continue
+        ours = next((pose for word, pose in POSE_ALIASES if word in name), None)
+        if ours in poses or name in poses:
+            continue
+        if ours:  # the Studio's own wording stays (it keeps e.g. a true rear view), the guide's direction is added
+            custom[ours] = f"{L.POSES[ours]}; {direction}"
+            poses.append(ours)
+        else:
+            custom[name] = direction
+            poses.append(name)
+    if "front_main" not in poses:
+        poses.insert(0, "front_main")
+    model, avoid = words(ans.get("model"), 600).rstrip("."), words(ans.get("avoid"), 300).rstrip(".")
+    extra = (model + (". " if model and avoid else "") + (f"Avoid: {avoid}" if avoid else ""))[:1000]
+    return {"marketplace": words(ans.get("marketplace"), 60) or os.path.splitext(filename)[0][:60],
+            "canvas": canvas, "background": words(ans.get("background"), 200),
+            "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
+            "extra": extra, "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),
+            "file": filename[:120]}
+
+
 class Agent:
     """Turns a request in plain words into Studio batch requests with their cost. It only plans:
     nothing is made until the person presses Start on the plan."""
@@ -419,7 +550,7 @@ class Agent:
         self.model = model or os.environ.get("JAGIMAGE_AGENT_MODEL", "gemini-flash-latest")
         self.used = None  # "gemini" or "openai": which one answered last
 
-    def _ask(self, message: str) -> dict:
+    def _ask(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         """Plans with whichever AI has a key: Gemini first, OpenAI when there is no Gemini key or Gemini
         can't be used (e.g. out of credits)."""
         gemini = self.client is not None or bool(os.environ.get("GEMINI_API_KEY"))
@@ -428,17 +559,17 @@ class Agent:
             raise RuntimeError("The agent needs an AI key: add a Gemini or OpenAI key in Settings → API keys")
         if gemini:
             try:
-                ans = self._ask_gemini(message)
+                ans = self._ask_gemini(message, system, schema, images)
                 self.used = "gemini"
                 return ans
             except Exception:
                 if not openai:
                     raise
-        ans = self._ask_openai(message)
+        ans = self._ask_openai(message, system, schema, images)
         self.used = "openai"
         return ans
 
-    def _ask_gemini(self, message: str) -> dict:
+    def _ask_gemini(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         from google.genai import types
 
         client = self.client
@@ -447,24 +578,26 @@ class Agent:
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         resp = client.models.generate_content(
-            model=self.model, contents=message,
-            config=types.GenerateContentConfig(system_instruction=AGENT_SYSTEM, response_mime_type="application/json",
-                                               response_schema=AGENT_SCHEMA, temperature=0.1))
+            model=self.model, contents=[types.Part.from_bytes(data=d, mime_type=m) for d, m in images] + [message] if images else message,
+            config=types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json",
+                                               response_schema=schema, temperature=0.1))
         return json.loads(resp.text)
 
-    def _ask_openai(self, message: str) -> dict:
+    def _ask_openai(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         client = self.openai_client
         if client is None:
             from openai import OpenAI
 
             client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        system = AGENT_SYSTEM + "\nAnswer with one JSON object only, shaped like this JSON schema:\n" + json.dumps(AGENT_SCHEMA)
+        system = system + "\nAnswer with one JSON object only, shaped like this JSON schema:\n" + json.dumps(schema)
+        content = message if not images else [{"type": "text", "text": message}] + [
+            {"type": "image_url", "image_url": {"url": f"data:{m};base64," + base64.b64encode(d).decode()}} for d, m in images]
         models = [os.environ["JAGIMAGE_AGENT_OPENAI_MODEL"]] if os.environ.get("JAGIMAGE_AGENT_OPENAI_MODEL") else self.OPENAI_MODELS
         last = None
         for model in models:
             try:
                 resp = client.chat.completions.create(model=model, response_format={"type": "json_object"},
-                                                      messages=[{"role": "system", "content": system}, {"role": "user", "content": message}])
+                                                      messages=[{"role": "system", "content": system}, {"role": "user", "content": content}])
                 return json.loads(resp.choices[0].message.content)
             except Exception as exc:  # a model this account can't use: try the next one
                 last = exc
@@ -518,6 +651,14 @@ class Agent:
         total = {k: sum((r[k] or 0) for r in rows) for k in ("ai_images", "photos", "cost_inr")}
         return {"reply": str(ans.get("reply") or ""), "batches": rows, "bodies": bodies, "total": total, "problems": problems}
 
+    def read_guide(self, filename: str, data: bytes) -> dict:
+        """A marketplace's model photo guidelines (e.g. Myntra's) as Studio settings: photo size,
+        backdrop, framing, the poses it asks for, and its directions for the model."""
+        text, images = guide_content(filename, data)
+        ans = self._ask(f"Guideline file: {filename}\n\n{text}" if text else f"Guideline file: {filename} (see the images)",
+                        GUIDE_SYSTEM, GUIDE_SCHEMA, images)
+        return clean_guide(ans, filename)
+
 
 def _specs(body: dict, ledger) -> list:
     from .server import specs_from
@@ -548,3 +689,25 @@ class Cloud:
 
     def drive_status(self) -> dict:
         return {"configured": self.drive.configured, "connected": self.drive.connected, "folder": self.drive.folder, **self.sync.status}
+
+    # ---- marketplace guides (e.g. Myntra's model photo guidelines), read once and kept for everyone
+    def guides(self) -> list:
+        d = self.data / "guides"
+        rows = []
+        for f in sorted(d.glob("*.json")) if d.exists() else []:
+            try:
+                rows.append(json.loads(f.read_text()))
+            except ValueError:
+                continue
+        return sorted(rows, key=lambda g: -g.get("saved", 0))
+
+    def save_guide(self, guide: dict) -> dict:
+        d = self.data / "guides"
+        d.mkdir(exist_ok=True)
+        guide = {**guide, "id": re.sub(r"[^a-z0-9]+", "-", guide["marketplace"].lower()).strip("-") or "guide", "saved": time.time()}
+        (d / f"{guide['id']}.json").write_text(json.dumps(guide, indent=1))
+        return guide
+
+    def delete_guide(self, gid: str):
+        f = self.data / "guides" / f"{re.sub(r'[^a-z0-9-]+', '', gid.lower())}.json"
+        f.unlink(missing_ok=True)

@@ -87,6 +87,8 @@ def load_keys(path: Path):
             os.environ[env] = value
 
 
+GUIDE_LIMIT = 21_000_000  # a guide upload: about 15 MB of file once base64-encoded
+
 def default_engine(spec: studio.Spec):
     from .providers import make_provider
 
@@ -321,6 +323,7 @@ class Studio:
         for row in self.folders():
             name, spec = row["name"], row["spec"]
             root = Path(self.out) / name
+            size = "x".join(str(v) for v in (spec.get("canvas") or (1500, 1500)))  # the batch's marketplace JPG size
             photos = passed = flagged = 0
             de = []
             for qc_file in root.glob("m[0-9][0-9][0-9][0-9]/*/qc.json"):
@@ -342,7 +345,7 @@ class Studio:
                     marks = qc_file.parent / f"{pose}_qc.jpg"
                     attention.append({"batch": name, "model": qc_file.parent.parent.name, "colours": qc_file.parent.name.replace("__", " / ").replace("_", " "),
                                       "pose": pose, "problems": check["problems"], "updated": qc_file.stat().st_mtime,
-                                      "photo": f"{rel}/{pose}_1500x1500.jpg", "marks": f"{rel}/{pose}_qc.jpg" if marks.exists() else None})
+                                      "photo": f"{rel}/{pose}_{size}.jpg", "marks": f"{rel}/{pose}_qc.jpg" if marks.exists() else None})
             ai_images = sum(1 for f in root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png") if not f.stem.endswith("_mask"))
             real = actual_cost(root / "_usage.jsonl", photos)
             provider = spec.get("provider", "gemini")
@@ -401,10 +404,10 @@ def make_handler(app: Studio):
         def _json(self, data, code=200):
             self._send(code, json.dumps(data).encode())
 
-        def _body(self) -> dict:
+        def _body(self, limit: int = 2_000_000) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
-            if n > 2_000_000:
-                raise ValueError("request too large")
+            if n > limit:
+                raise ValueError("request too large" if limit == 2_000_000 else f"That file is too big: keep it under {limit // 1_400_000} MB")
             raw = self.rfile.read(n)
             # Only JSON from this app's own pages: a form or text/plain POST from another website (which a
             # browser sends without asking) is refused, as JSON needs the browser's permission first.
@@ -485,6 +488,8 @@ def make_handler(app: Studio):
                 return self._redirect("/?drive=connected")
             if parts == ["api", "agent", "runs"]:
                 return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
+            if parts == ["api", "guides"]:
+                return self._json({"guides": c.guides()})
             return None
 
         def _cloud_post(self, parts, body):
@@ -495,6 +500,23 @@ def make_handler(app: Studio):
                 if not c.login.try_login(ip, name, str(body.get("password", ""))):
                     return self._json({"error": "Wrong user name or password"}, 403)
                 return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie(name)})
+            if parts == ["api", "guide"]:
+                # a marketplace's model photo guidelines (e.g. Myntra's): read by the AI into Studio settings
+                import base64
+
+                name = str(body.get("filename") or "guide").strip()[:120]
+                try:
+                    data = base64.b64decode(str(body.get("data") or ""), validate=True)
+                except ValueError:
+                    raise ValueError("The file didn't arrive in one piece: upload it again")
+                if not data:
+                    raise ValueError("Choose the guide file first")
+                if not (ready().get("gemini") or ready().get("openai")):
+                    raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
+                return self._json({"guide": c.save_guide(c.agent.read_guide(name, data)), "guides": c.guides()})
+            if len(parts) == 4 and parts[:2] == ["api", "guides"] and parts[3] == "delete":
+                c.delete_guide(unquote(parts[2]))
+                return self._json({"guides": c.guides()})
             if parts == ["api", "account", "password"]:
                 if not c.users.check(self.user, str(body.get("current", ""))):
                     raise ValueError("Your current password is wrong")
@@ -630,7 +652,7 @@ def make_handler(app: Studio):
             try:
                 if not self._host_ok() or not self._signed_in(parts):
                     return
-                body = self._body()
+                body = self._body(GUIDE_LIMIT if parts == ["api", "guide"] else 2_000_000)
                 if app.cloud and self._cloud_post(parts, body) is not None:
                     return
                 if parts == ["api", "preview"]:
