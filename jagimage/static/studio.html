@@ -77,7 +77,9 @@ header .sub { color: var(--muted); font-size: 13px; }
 .zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 /* ---------- Studio: guided steps + sticky run column ---------- */
 main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
-main.studio > .studiohead, main.studio > #agentPanel, main.studio > #guidePanel, main.studio > .results { grid-column: 1 / -1; }
+main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
+.tabpage { max-width: 1040px; margin: 0 auto; padding: 18px 20px; }
+.guidebanner { margin: 8px 0 0; font-size: 14px; }
 .guideout { margin-top: 10px; font-size: 14px; } .guideout ul { margin: 6px 0 0 18px; padding: 0; } .guideout li { margin: 3px 0; }
 main.studio .builder, main.studio .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 main.studio .builder > .panel, main.studio .side > .panel, main.studio .results > .panel { margin-top: 0; }
@@ -183,7 +185,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
@@ -191,7 +193,6 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   <div class="dhead">
     <div><h2>Overview</h2><div class="hint" id="dSub">Every finished photo is checked: exact colour, no colour bleeding onto skin or background, no base colour left.</div></div>
     <div class="row"><span class="hint" id="dUpdated"></span>
-      <label class="hide" id="dPlaceBox" title="Where Add prints puts the print on the front photos"><span class="hint">Print position</span> <select id="dPlace"></select></label>
       <button class="btn" id="dRefresh" type="button">Refresh</button></div>
   </div>
   <div class="dgrid">
@@ -259,20 +260,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <button class="btn" id="driveOff">Disconnect</button>
       </div>
     </section>
-  <section class="panel hide" id="printPanel">
-    <h2>Print folders</h2>
-    <p class="hint">Where your prints (PNG artwork) are in Google Drive, for each category, top style and colour. On the Dashboard, <b>Add prints</b> puts every print from the matching folder on a batch's finished front photos: exactly as drawn, following the shirt's folds and light, no AI and no cost. A folder set for <i>All colours</i> is used for any colour that has no folder of its own.</p>
-    <p class="e hide" id="printRead">Google Drive is connected without permission to read your folders. An admin presses <a href="/drive/connect">Connect Google Drive</a> once more and allows it.</p>
-    <table class="agenttab" id="printRows"></table>
-    <div class="row" id="printAdd">
-      <label class="field"><span>Category</span><select id="pCat"></select></label>
-      <label class="field"><span>Top style</span><select id="pTop"></select></label>
-      <label class="field"><span>Colour</span><select id="pColour"></select></label>
-      <label class="field" style="flex:3"><span>Drive folder link</span><input type="text" id="pLink" placeholder="https://drive.google.com/drive/folders/…"></label>
-      <button class="btn primary" id="pAddBtn" type="button">Add</button>
-    </div>
-    <p class="e" id="printErr"></p>
-  </section>
+  
   <section class="panel hide" id="accountPanel">
     <h2>My account</h2>
     <p>Signed in as <b id="meName"></b> <span class="hint" id="meRole"></span></p>
@@ -298,9 +286,53 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <p class="hint" id="usersMsg"></p>
   </section>
 </div>
+<div id="printTab" class="hide tabpage">
+  <section class="panel" id="printRunPanel">
+    <h2>Put prints on photos</h2>
+    <p class="hint">Pick a finished batch. Every print from its matching print folder goes on each finished front photo, exactly as drawn: no AI, no cost. Printed photos sit next to the plain ones and upload to Google Drive too.</p>
+    <div class="row">
+      <label class="field" style="flex:2"><span>Batch</span><select id="prBatch"></select></label>
+      <label class="field"><span>Print position</span><select id="dPlace"></select></label>
+      <button class="btn primary" id="prStart" type="button">Add prints</button>
+    </div>
+    <p class="hint" id="prStatus"></p>
+    <div class="gallery" id="prGallery"></div>
+  </section>
+  <section class="panel" id="printPanel">
+    <h2>Print folders</h2>
+    <p class="hint">Where your prints (PNG artwork) are in Google Drive, for each category, top style and colour. <b>Add prints</b> above puts every print from the matching folder on a batch's finished front photos: exactly as drawn, following the shirt's folds and light, no AI and no cost. A folder set for <i>All colours</i> is used for any colour that has no folder of its own.</p>
+    <p class="e hide" id="printRead">Google Drive is connected without permission to read your folders. An admin presses <a href="/drive/connect">Connect Google Drive</a> once more and allows it.</p>
+    <table class="agenttab" id="printRows"></table>
+    <div class="row" id="printAdd">
+      <label class="field"><span>Category</span><select id="pCat"></select></label>
+      <label class="field"><span>Top style</span><select id="pTop"></select></label>
+      <label class="field"><span>Colour</span><select id="pColour"></select></label>
+      <label class="field" style="flex:3"><span>Drive folder link</span><input type="text" id="pLink" placeholder="https://drive.google.com/drive/folders/…"></label>
+      <button class="btn primary" id="pAddBtn" type="button">Add</button>
+    </div>
+    <p class="e" id="printErr"></p>
+  </section>
+</div>
+<div id="marketTab" class="hide tabpage">
+  <section class="panel" id="guidePanel">
+      <h2>Marketplace guide <span class="n">optional</span></h2>
+      <p class="hint">Upload a marketplace's model photo guidelines (e.g. Myntra) as PDF, Word, text or screenshots. The AI reads it, saves it, and sets up the Studio tab with its photo size, background, poses and model directions; you pick the product and colours there, check, and run as usual. The garments stay plain.</p>
+      <div class="row">
+        <label class="field"><span>Guide file</span><input type="file" id="guideFile" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
+        <button class="btn primary" id="guideRead">Read guide</button>
+      </div>
+      <div class="row" id="guideSaved">
+        <label class="field"><span>Saved guides</span><select id="guideSel"></select></label>
+        <button class="btn" id="guideUse">Use this guide</button><button class="btn" id="guideDel">Delete</button>
+      </div>
+      <div class="guideout" id="guideOut"></div>
+      <div class="row hide" id="guideGoRow"><a class="btn primary" id="guideGo" href="#studio">Make photos with this guide →</a></div>
+    </section>
+</div>
 <main id="studioTab" class="studio">
   <div class="studiohead">
     <div><h2 class="title">New batch</h2>
+      <p class="guidebanner hide" id="guideBanner"></p>
       <nav class="steps" aria-label="Steps"><a href="#stepProduct">1 Product</a><a href="#stepColours">2 Colours</a><a href="#stepModels">3 Models and poses</a><a href="#stepCheck">4 Check</a><a href="#stepSave">5 Save to</a><a href="#runCard">Run</a></nav>
     </div>
   </div>
@@ -312,19 +344,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div id="agentOut"></div>
       <div id="agentRuns"></div>
     </section>
-  <section class="panel hide" id="guidePanel">
-      <h2>Marketplace guide <span class="n">optional</span></h2>
-      <p class="hint">Upload a marketplace's model photo guidelines (e.g. Myntra) as PDF, Word, text or screenshots. The AI reads it and sets the photo size, background, poses and model directions in the steps below; you check them, then run as usual. The garments stay plain.</p>
-      <div class="row">
-        <label class="field"><span>Guide file</span><input type="file" id="guideFile" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
-        <button class="btn primary" id="guideRead">Read guide</button>
-      </div>
-      <div class="row" id="guideSaved">
-        <label class="field"><span>Saved guides</span><select id="guideSel"></select></label>
-        <button class="btn" id="guideUse">Use this guide</button><button class="btn" id="guideDel">Delete</button>
-      </div>
-      <div class="guideout" id="guideOut"></div>
-    </section>
+  
   <div class="builder">
     <section class="panel step" id="stepProduct">
       <div class="stephead"><span class="num">1</span><div><h2>Product</h2><p class='hint'>What the models wear.</p></div></div>
@@ -699,7 +719,6 @@ async function printsRefresh() {
   const r = await api("/api/prints"); S.printRows = r.rows;
   $("printRead").classList.toggle("hide", r.can_read);
   if (!$("dPlace").options.length) $("dPlace").innerHTML = Object.entries(r.places).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
-  $("dPlaceBox").classList.remove("hide");
   const admin = isAdmin(); $("printAdd").classList.toggle("hide", !admin);
   $("printRows").innerHTML = r.rows.length ? `<tr><th>Category</th><th>Top style</th><th>Colour</th><th>Folder</th><th></th></tr>` + r.rows.map((x, i) =>
     `<tr><td>${esc(label(x.category))}</td><td>${esc(nice(x.top))}</td><td>${esc(x.colour || "All colours")}</td><td><a href="${esc(x.link)}" target="_blank" rel="noopener">open</a></td><td class="r">${admin ? `<button class="btn" data-pdel="${i}">Remove</button>` : ""}</td></tr>`).join("")
@@ -709,8 +728,44 @@ async function printsSave(rows) {
   try { const r = await api("/api/prints", { rows }); $("printErr").textContent = ""; await printsRefresh(); return r; }
   catch (e) { $("printErr").textContent = e.message; }
 }
+async function printTabRefresh() {
+  const [d] = await Promise.all([api("/api/dashboard"), printsRefresh()]);
+  const cur = $("prBatch").value;
+  const rows = d.batches.filter((b) => S.opts.tops.includes(b.top));
+  $("prBatch").innerHTML = rows.length ? rows.map((b) => `<option value="${esc(b.name)}">${esc(label(b.category || ""))} · ${esc(nice(b.top || ""))} · ${fmt(b.photos)} photos (${esc(b.name.replace(/_/g, " "))})</option>`).join("")
+    : `<option value="">No finished batches yet: make some in Studio first</option>`;
+  if (cur && rows.some((b) => b.name === cur)) $("prBatch").value = cur;
+  $("prStart").disabled = !rows.length;
+  printGallery();
+}
+async function printGallery() {
+  const name = $("prBatch").value; if (!name) { $("prGallery").innerHTML = ""; return; }
+  const r = await api(`/api/batches/${encodeURIComponent(name)}/results?offset=0&limit=5000`);
+  const printed = r.rows.filter((x) => x.pose.includes("_print_")).slice(-120).reverse();
+  $("prGallery").innerHTML = printed.map((x) => { const src = `/thumbs/${encodeURIComponent(name)}/${x.jpg || x.png}`, full = `/files/${encodeURIComponent(name)}/${x.jpg || x.png}`;
+    return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}</b><span>${esc(x.model)} · print ${esc(x.pose.split("_print_")[1])}</span></span></a>`; }).join("");
+  if (!printed.length && !S.printJob) $("prStatus").textContent = "No printed photos in this batch yet.";
+}
+async function printWatch(id) {
+  S.printJob = id;
+  try {
+    const j = await api(`/api/jobs/${id}`), c = j.counts;
+    $("prStatus").innerHTML = (j.running ? "Printing… " : "Done: ") + `<b>${fmt(c.printed)}</b> printed photos` + (c.errors ? ` · <span class="e">${fmt(c.errors)} problems</span>` : "")
+      + (j.error ? ` · <span class="e">${esc(j.error.replace(/^\w+Error: (prints: )?/, ""))}</span>` : "");
+    if (j.running) { setTimeout(() => printWatch(id), 2000); if (c.printed % 6 === 0) printGallery(); }
+    else { S.printJob = null; printGallery(); }
+  } catch (e) { $("prStatus").innerHTML = `<span class="e">${esc(e.message)}</span>`; S.printJob = null; }
+}
 function initPrints() {
-  $("printPanel").classList.remove("hide");
+  $("prBatch").onchange = () => { $("prStatus").textContent = ""; printGallery(); };
+  $("prStart").onclick = async () => {
+    const name = $("prBatch").value; if (!name) return;
+    $("prStart").disabled = true; $("prStatus").textContent = "Starting…";
+    try { const j = await api(`/api/batches/${encodeURIComponent(name)}/prints`, { print_place: $("dPlace").value }); printWatch(j.id); }
+    catch (e) { $("prStatus").innerHTML = `<span class="e">${esc(e.message)}</span>`; }
+    $("prStart").disabled = false;
+  };
+  if (tabFromHash() === "prints") printTabRefresh().catch(() => {});
   $("pCat").innerHTML = S.opts.categories.map((c) => `<option value="${esc(c)}">${esc(label(c))}</option>`).join("");
   $("pTop").innerHTML = S.opts.tops.map((t) => `<option value="${esc(t)}">${esc(nice(t))}</option>`).join("");
   const colours = [...new Set(Object.values(S.opts.palettes).flatMap((p) => Object.keys(p)))];
@@ -740,7 +795,14 @@ function applyGuide(g) {
   S.customPoses = { ...S.customPoses, ...g.custom_poses }; S.poses = new Set(g.poses);
   $("extra").value = g.extra || ""; S.guide = g.marketplace;
   $("guideNote").textContent = `Settings from the ${g.marketplace} guide: check them in steps 3 and 5 before you run.`;
+  $("guideBanner").innerHTML = `Marketplace guide: <b>${esc(g.marketplace)}</b> (photo size, background, poses and model directions set below) · <a href="#" id="guideClear">Clear it</a>`;
+  $("guideBanner").classList.remove("hide"); $("guideGoRow").classList.remove("hide");
+  $("guideClear").onclick = (e) => { e.preventDefault(); clearGuide(); };
   renderPoses(); syncBottom(); refreshPlan();
+}
+function clearGuide() {  // back to the regular studio look
+  $("photoW").value = 1500; $("photoH").value = 1500; $("background").value = ""; $("extra").value = "";
+  S.guide = ""; $("guideNote").textContent = ""; $("guideBanner").classList.add("hide"); refreshPlan();
 }
 async function guidesRefresh(pick) {
   const r = await api("/api/guides"); S.guides = r.guides;
@@ -758,14 +820,15 @@ function initGuide() {
       const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
       const r = await api("/api/guide", { filename: f.name, data });
       applyGuide(r.guide); await guidesRefresh(r.guide.id);
-      $("guideOut").innerHTML = guideHtml(r.guide) + '<p class="hint">Applied below and saved for next time.</p>';
+      $("guideOut").innerHTML = guideHtml(r.guide) + '<p class="hint">Saved for next time. Studio is set up with it: pick the product and colours there, then run.</p>';
     } catch (e) { $("guideOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
     $("guideRead").disabled = false;
   };
-  $("guideUse").onclick = () => { const g = (S.guides || []).find((x) => x.id === $("guideSel").value); if (g) { applyGuide(g); $("guideOut").innerHTML = guideHtml(g) + '<p class="hint">Applied below.</p>'; } };
+  $("guideUse").onclick = () => { const g = (S.guides || []).find((x) => x.id === $("guideSel").value); if (g) { applyGuide(g); $("guideOut").innerHTML = guideHtml(g) + '<p class="hint">Studio is set up with it: pick the product and colours there, then run.</p>'; } };
   $("guideDel").onclick = async () => { const id = $("guideSel").value; if (id && confirm("Delete this saved guide?")) { await api(`/api/guides/${encodeURIComponent(id)}/delete`, {}); guidesRefresh(); $("guideOut").innerHTML = ""; } };
 }
 function initCloud() {
+  ["tabPrints", "tabMarket"].forEach((id) => $(id).classList.remove("hide"));
   initGuide(); initPrints();
   ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
@@ -797,19 +860,32 @@ function initCloud() {
 }
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
+const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", prints: "printTab", market: "marketTab", settings: "settingsTab" };
+const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", market: "Marketplace", settings: "Settings" };
 function showTab(tab) {
-  const rec = tab === "recolor", set = tab === "settings", dash = tab === "dashboard", f = $("recolorTab");
-  if (rec && !f.src) f.src = "/recolor/";
-  if (rec) f.style.height = Math.max(400, innerHeight - document.querySelector("header").offsetHeight) + "px"; // fills the window under the header
-  f.classList.toggle("hide", !rec); $("settingsTab").classList.toggle("hide", !set); $("dashTab").classList.toggle("hide", !dash); $("studioTab").classList.toggle("hide", rec || set || dash);
+  const f = $("recolorTab");
+  if (tab === "recolor" && !f.src) f.src = "/recolor/";
+  if (tab === "recolor") f.style.height = Math.max(400, innerHeight - document.querySelector("header").offsetHeight) + "px"; // fills the window under the header
+  for (const [t, id] of Object.entries(TABS)) $(id).classList.toggle("hide", t !== tab);
   document.querySelectorAll("#tabs [data-tab]").forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle("on", on); a.setAttribute("aria-selected", on); });
-  document.title = rec ? "Jag Studio · Recolor" : set ? "Jag Studio · Settings" : dash ? "Jag Studio · Dashboard" : "Jag Studio";
-  if (set && S.opts) renderSettings();
-  if (dash) setTimeout(loadDashboard);  // after the whole script has loaded
+  document.title = TITLES[tab] ? `Jag Studio · ${TITLES[tab]}` : "Jag Studio";
+  if (tab === "settings" && S.opts) renderSettings();
+  if (tab === "dashboard") setTimeout(loadDashboard);  // after the whole script has loaded
+  if (tab === "prints" && S.opts && S.opts.cloud) setTimeout(printTabRefresh);
 }
-const tabFromHash = () => ({ "#recolor": "recolor", "#settings": "settings", "#studio": "studio" })[location.hash] || "dashboard";
+// "#studio" is a tab; "#stepColours" is a part of one (the Studio step links): that tab stays open
+function tabFromHash() {
+  const h = decodeURIComponent(location.hash.slice(1)), el = h && document.getElementById(h);
+  if (TABS[h]) return h;
+  if (el) for (const [t, id] of Object.entries(TABS)) if ($(id).contains(el)) return t;
+  return "dashboard";
+}
 window.addEventListener("resize", () => { if (location.hash === "#recolor") showTab("recolor"); });
-window.addEventListener("hashchange", () => showTab(tabFromHash()));
+window.addEventListener("hashchange", () => {
+  showTab(tabFromHash());
+  const el = !TABS[location.hash.slice(1)] && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (el) el.scrollIntoView({ block: "start" });
+});
 showTab(tabFromHash());
 
 // ---------- Dashboard ----------
@@ -859,7 +935,7 @@ async function loadDashboard() {
         <td class="num">${fmt(Math.min(b.on_drive, b.photos))}<div class="meta">of ${fmt(b.photos)}</div></td>
         <td class="num">₹${fmt(b.cost_inr)}<div class="meta">${b.cost_is_real ? "billed" : "estimate"}</div></td>
         <td class="meta" style="white-space:nowrap">${ago(b.updated)}</td>
-        <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button>${S.opts.cloud ? ` <button class="btn" data-prints="${esc(b.name)}" title="Put your prints (Settings → Print folders) on this batch's finished front photos. No AI, no cost.">Add prints</button>` : ""}</td></tr>`; }).join("") + "</tbody>"
+        <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button></td></tr>`; }).join("") + "</tbody>"
     : `<tbody><tr><td class="empty">${status("idle", "No batches yet")}<div class="hint" style="margin-top:6px">Start one in the Studio tab, or ask the Agent.</div></td></tr></tbody>`;
   // needs attention
   $("dIssues").innerHTML = d.attention.length ? `<div class="issues">` + d.attention.map((a) => {
@@ -873,13 +949,6 @@ async function loadDashboard() {
 function initDashboard() {
   $("dRefresh").onclick = loadDashboard;
   $("dTable").addEventListener("click", async (e) => {
-    const pr = e.target.dataset.prints;
-    if (pr) {
-      if (!confirm(`Put the prints from your print folders on every finished front photo of ${pr.replace(/_/g, " ")} (${$("dPlace").selectedOptions[0].text})? No AI is used, so it costs nothing. The printed photos go to Google Drive too.`)) return;
-      e.target.disabled = true;
-      try { await api(`/api/batches/${encodeURIComponent(pr)}/prints`, { print_place: $("dPlace").value }); loadDashboard(); } catch (err) { alert(err.message); e.target.disabled = false; }
-      return;
-    }
     const name = e.target.dataset.redo; if (!name) return;
     if (!confirm(`Recolour every photo in ${name.replace(/_/g, " ")} again with the latest recolouring and quality check? No AI is used, so it costs nothing. The photos in Google Drive are replaced.`)) return;
     e.target.disabled = true;
