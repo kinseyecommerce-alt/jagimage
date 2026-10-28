@@ -826,3 +826,22 @@ def test_firm_rules_catch_a_print_on_the_collar_even_when_the_ai_says_ok(tmp_pat
     counts = studio.Batch(s, out=tmp_path, prints=lambda *a: [("p", tmp_path / "p.png")], checker=pleased).run("prints")
     qc = json.loads((tmp_path / s.name / "m0001" / "Navy__Navy" / "prints_qc.json").read_text())["front_main_print_p"]
     assert counts["print_fixed"] == 1 and qc["ok"] and qc["adjust"]["dy"] >= 0 and qc["adjust"]["scale"] < 1.2  # back below the collar
+
+
+def test_oversized_drop_shoulder_tee_is_for_men_and_women_only(tmp_path):
+    from jagimage.server import specs_from
+    men = studio.Spec(category="Men", top="OversizedTee", bottom="Trackpants", top_colours=["Black"])
+    assert studio.default_shot("OversizedTee") == "top"
+    text = studio.prompt(men, 1, men.bases()[0], "front_main", "none")
+    assert "DROP SHOULDERS" in text and "oversized" in text and "set-in shoulder seam at the natural shoulder" not in text
+    studio.Spec(category="Women", top="OversizedTee", bottom="Trackpants", top_colours=["Black"])
+    with pytest.raises(ValueError, match="Men and Women only"):
+        studio.Spec(category="Kids_Boys", top="OversizedTee", bottom="Shorts", top_colours=["Navy"])
+    # "every style" for kids leaves it out; for adults it is one of the styles with the same models
+    ledger = studio.ModelLedger(tmp_path)
+    kids = specs_from({"category": "Kids_Girls", "top": "HalfSleeveTee", "bottom": "Shorts", "top_colours": ["Navy"],
+                       "tops": list(studio.TOPS)}, ledger)
+    assert "OversizedTee" not in [s.top for s in kids] and len(kids) == 5
+    adults = specs_from({"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy"],
+                         "tops": list(studio.TOPS)}, ledger)
+    assert [s.top for s in adults][-1] == "OversizedTee" and len(adults) == 6

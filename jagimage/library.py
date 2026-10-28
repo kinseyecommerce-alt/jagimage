@@ -48,13 +48,17 @@ FABRIC_TEXT = {
         "bottom": "Cotton Mix poly-cotton French Terry knit, smooth even surface, slight structured drape, neat visible stitching at waistband and side seams",
     },
 }
-FABRIC_KIND = {"HalfSleeveTee": "top", "FullSleeveTee": "top", "SleevelessTee": "top", "Shorts": "bottom",
+FABRIC_KIND = {"HalfSleeveTee": "top", "FullSleeveTee": "top", "SleevelessTee": "top", "OversizedTee": "top", "Shorts": "bottom",
                "Trackpants": "bottom", "Hoodie": "fleece", "Sweatshirt": "fleece"}
 
 GARMENTS = {
     "HalfSleeveTee": "a plain {COLOUR} regular-fit crew-neck half-sleeve t-shirt, 1x1 ribbed neckband, set-in shoulder seam at the natural shoulder, sleeves ending mid-bicep, straight hem at the hip, worn untucked, no print, no logo, no pocket",
     "FullSleeveTee": "a plain {COLOUR} regular-fit crew-neck full-sleeve t-shirt, ribbed neckband, sleeves ending at the wrist bone with a plain flat hemmed sleeve end, straight hem at the hip, worn untucked, no print, no logo, no pocket",
     "SleevelessTee": "a plain {COLOUR} regular-fit crew-neck sleeveless vest/tank tee with neat bound armholes, straight hem, worn untucked, no print, no logo, no pocket",
+    "OversizedTee": ("a plain {COLOUR} oversized relaxed-fit crew-neck t-shirt with DROP SHOULDERS: the shoulder seam sits well below the "
+                     "natural shoulder, on the upper arm; wide boxy body with roomy chest, wide half sleeves ending around the elbow, "
+                     "slightly longer length covering the hip, thick 1x1 ribbed neckband, straight hem, worn untucked, heavyweight "
+                     "drape, no print, no logo, no pocket"),
     "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, covered elastic waistband with flat drawcord, two side seam pockets, straight flat hem, no logo",
     "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, covered elastic waistband with flat drawcord, two side seam pockets, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
     "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, ribbed cuffs and ribbed hem band, no print, no logo",

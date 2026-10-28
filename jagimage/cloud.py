@@ -405,7 +405,8 @@ AGENT_SYSTEM = """You plan catalogue photo batches for SPB Textile's Jag Studio.
 into batches. Each batch is one category with one or more top styles; all styles reuse the same models.
 Allowed values:
 - category: Men, Women, Kids_Boys, Kids_Girls
-- tops: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt
+- tops: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt, OversizedTee (oversized drop-shoulder tee:
+  Men and Women only, never for kids)
 - bottom: Shorts, Trackpants, Jeans (Men/Women default Trackpants, kids default Shorts)
 - fabric: PureCotton (colours: Black, White, Light Pink, Red, Navy, Green, Lavender, Orange, Yellow) or
   CottonMix (Black, Blue, Maroon, Melange, White, Red, Yellow, Light Pink, Dark Pink, Navy Blue, Olive,
@@ -413,13 +414,14 @@ Allowed values:
 - top_colours: colour names from that fabric; default all of them
 - pairing: "match" (bottom in the same colour as the top, default) or "each" (every top with every bottom colour)
 - shot: "top" (head to above the knee, bottom not recoloured) or "outfit" (head to shoes, both recoloured).
-  Leave it out unless the user asks: Half Sleeve then gets "top", other tops "outfit". "full body", "head to
+  Leave it out unless the user asks: Half Sleeve and Oversized then get "top", other tops "outfit". "full body", "head to
   toe" or "with pants/shorts recoloured" -> "outfit"; "top only", "above knee", "half body" -> "top"
 - models: number of different people (1-5000); poses: subset of front_main, back, threequarter, side,
   front_main_white, handpocket (default front_main and back)
 - "same model(s) in / can wear all top styles / all categories top / every top" means ONE batch whose tops
-  list has all five: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt (a named style first),
-  e.g. "10 mens half sleeve tshirt same model can wear all categories top" -> Men, all five tops, 10 models
+  list has every style: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt, plus OversizedTee for Men
+  and Women (a named style first), e.g. "10 mens half sleeve tshirt same model can wear all categories top" -> Men,
+  all six tops, 10 models; for kids the five without OversizedTee
 - quality: "high" when the user asks for high or best quality, else "standard"
 Never invent other values. If something essential is unclear, ask in "reply" and return no batches.
 "reply" is one or two short plain sentences for the user."""
@@ -720,6 +722,8 @@ class Agent:
                 category = b["category"]
                 if not isinstance(category, str) or category not in L.CATEGORIES:
                     raise ValueError(f"unknown category {category!r}")
+                if L.is_kids(category):  # oversized drop-shoulder tees are adults only
+                    tops = [t for t in tops if t not in studio.ADULT_ONLY_TOPS] or ["HalfSleeveTee"]
                 fabric = b.get("fabric") if b.get("fabric") in L.FABRICS else "PureCotton"
                 colours = [c for c in listed("top_colours") if c in L.COLOURS[fabric]] or list(L.COLOURS[fabric])
                 bottom = b.get("bottom") if b.get("bottom") in studio.BOTTOMS else ("Shorts" if L.is_kids(category) else "Trackpants")

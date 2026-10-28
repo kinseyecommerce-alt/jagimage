@@ -28,7 +28,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 from . import faces
 from . import library as L
 
-TOPS = ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]
+TOPS = ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt", "OversizedTee"]
+ADULT_ONLY_TOPS = {"OversizedTee"}  # drop-shoulder oversized tees are made for Men and Women only
 BOTTOMS = ["Shorts", "Trackpants", "Jeans"]
 FIXED_BOTTOMS = {"Jeans": "straight-leg light-wash blue denim jeans"}  # not recoloured
 TOP_BASES = {"light": ("mint green", "#8FD3A8"), "dark": ("bottle green", "#1E4636")}
@@ -42,7 +43,7 @@ ONE_IMAGE = "Output exactly one image: a single photograph of this one model, no
 NO_HANDS_FREE = {"handpocket"}  # poses that need the hands on the clothes
 NOT_MANNEQUIN = "mannequin, dummy, doll, ghost mannequin, faceless figure, plastic or wax figure, CGI character"
 SHOTS = {"outfit": "Top and bottom (full body, both recoloured)", "top": "Top only (head to just above the knee)"}
-SHOT_DEFAULTS = {"HalfSleeveTee": "top"}  # the shot a top style starts with; others start as "outfit"
+SHOT_DEFAULTS = {"HalfSleeveTee": "top", "OversizedTee": "top"}  # the shot a top style starts with; others start as "outfit"
 
 
 def default_shot(top: str) -> str:
@@ -125,6 +126,8 @@ class Spec:
             raise ValueError(f"category must be one of {', '.join(L.CATEGORIES)}")
         if self.top not in TOPS:
             raise ValueError(f"top must be one of {', '.join(TOPS)}")
+        if self.top in ADULT_ONLY_TOPS and L.is_kids(self.category):
+            raise ValueError("Oversized drop-shoulder T-shirts are for Men and Women only")
         if self.bottom not in BOTTOMS:
             raise ValueError(f"bottom must be one of {', '.join(BOTTOMS)}")
         if self.fabric not in L.FABRICS:

@@ -582,7 +582,9 @@ const api = async (path, body) => {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Number(n).toLocaleString();
 const label = (c) => c.replace(/_/g, " ");
-const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", Trackpants: "Track pants" };
+const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", OversizedTee: "Oversized tee (drop shoulder)", Trackpants: "Track pants" };
+// the top styles a category can have: oversized drop-shoulder tees are for Men and Women only
+const topsFor = (cat) => S.opts.tops.filter((t) => !(String(cat).startsWith("Kids") && (S.opts.adult_only_tops || []).includes(t)));
 const nice = (v) => NAMES[v] || label(v);
 const hexOf = (name) => { if (/^#[0-9a-f]{6}$/i.test(name)) return name; for (const f of [S.fabric(), ...Object.keys(S.opts.palettes)]) if (S.opts.palettes[f][name]) return S.opts.palettes[f][name]; return "#888"; };
 S.fabric = () => $("fabric").value;
@@ -1111,15 +1113,18 @@ async function init() {
   initSettings(); initDashboard(); if (tabFromHash() === "settings") renderSettings(); if (tabFromHash() === "dashboard") loadDashboard();
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
-  seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; refreshPlan(); });
+  seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; if (S.topOptions) { S.topOptions(); S.moreTopsRender && S.moreTopsRender(); autoShot(); } refreshPlan(); });
   seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; S.shotPicked = true; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
   const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";
     $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
   bc(); $("fabric").addEventListener("input", bc); $("bottomColour").addEventListener("input", refreshPlan);
-  $("top").innerHTML = S.opts.tops.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
-  const moreTops = () => { $("moreTops").innerHTML = S.opts.tops.filter((t) => t !== $("top").value).map((t) =>
+  const topOptions = () => { const cur = $("top").value, list = topsFor(S.category);
+    $("top").innerHTML = list.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");
+    $("top").value = list.includes(cur) ? cur : list[0]; [...S.moreTops].forEach((t) => { if (!list.includes(t)) S.moreTops.delete(t); }); };
+  topOptions(); S.topOptions = topOptions;
+  const moreTops = () => { $("moreTops").innerHTML = topsFor(S.category).filter((t) => t !== $("top").value).map((t) =>
     `<button class="chip ${S.moreTops.has(t) ? "on" : ""}" data-t="${t}"><i style="background:var(--soft)"></i>${esc(nice(t))}</button>`).join(""); };
-  moreTops(); $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); autoShot(); refreshPlan(); });
+  moreTops(); S.moreTopsRender = moreTops; $("top").addEventListener("input", () => { S.moreTops.delete($("top").value); moreTops(); autoShot(); refreshPlan(); });
   $("moreTops").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; const t = c.dataset.t;
     S.moreTops.has(t) ? S.moreTops.delete(t) : S.moreTops.add(t); moreTops(); refreshPlan(); };
   $("sameModels").addEventListener("change", refreshPlan); $("oneBase").addEventListener("change", refreshPlan);
