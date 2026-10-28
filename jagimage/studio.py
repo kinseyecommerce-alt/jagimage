@@ -157,6 +157,8 @@ class Spec:
             raise ValueError(f"print_place must be one of {', '.join(PLACES)}")
         from .prints import adjust
 
+        if not isinstance(self.print_check, bool):  # "false" or "no" would otherwise switch the paid AI checker on
+            raise ValueError("print_check must be true or false")
         a = adjust(self.print_dx, self.print_dy, self.print_scale)
         self.print_dx, self.print_dy, self.print_scale = a["dx"], a["dy"], a["scale"]
         if len(self.background) > 200 or len(self.guide) > 80:
@@ -178,7 +180,10 @@ class Spec:
         for c in self.top_colours + self.bottom_colours:
             colour_hex(c, self.fabric)
         if self.canvas:
-            self.canvas = tuple(int(v) for v in self.canvas)
+            try:
+                self.canvas = tuple(int(v) for v in self.canvas)
+            except (TypeError, ValueError):
+                raise ValueError("canvas must be width and height between 200 and 6000 px")
             if len(self.canvas) != 2 or not all(200 <= v <= 6000 for v in self.canvas):
                 raise ValueError("canvas must be width and height between 200 and 6000 px")
         else:
@@ -854,8 +859,8 @@ class Batch:
                             try:
                                 if plain is None:
                                     plain = self._recoloured(img, tmask, bmask, base, t, b)
-                                from PIL import Image
-                                art = Image.open(art_path)
+                                from .prints import open_image
+                                art = open_image(str(art_path))
                                 out, check = self._print_and_check(plain, tmask, art, m, dest)
                                 dest.parent.mkdir(parents=True, exist_ok=True)
                                 if spec.keep_png:

@@ -543,10 +543,12 @@ def guide_content(filename: str, data: bytes):
 
     from PIL import Image
 
+    from .prints import PrintError, open_image
+
     def picture(raw):
         try:
-            im = Image.open(io.BytesIO(raw)).convert("RGB")
-        except Exception:
+            im = open_image(raw).convert("RGB")
+        except PrintError:
             return None
         if min(im.size) < 120:  # icons and logos say nothing about the photo
             return None
@@ -557,27 +559,37 @@ def guide_content(filename: str, data: bytes):
 
     ext = os.path.splitext(filename.lower())[1]
     text, pics = "", []
-    if ext == ".pdf":
-        from pypdf import PdfReader
+    try:
+        if ext == ".pdf":
+            from pypdf import PdfReader
 
-        reader = PdfReader(io.BytesIO(data))
-        text = "\n".join((page.extract_text() or "") for page in reader.pages[:40])
-        for page in reader.pages[:12]:
-            for img in getattr(page, "images", [])[:3]:
-                pics.append(picture(img.data))
-    elif ext == ".docx":
-        with zipfile.ZipFile(io.BytesIO(data)) as z:
-            xml = z.read("word/document.xml").decode("utf-8", "ignore")
-            text = re.sub(r"<[^>]+>", "", re.sub(r"</w:p>", "\n", xml))
-            pics = [picture(z.read(n)) for n in z.namelist() if n.startswith("word/media/")][:12]
-    elif ext in (".txt", ".md", ".csv"):
-        text = data.decode("utf-8", "ignore")
-    elif ext in (".png", ".jpg", ".jpeg", ".webp"):
-        pics = [picture(data)]
-        if not pics[0]:
-            raise ValueError("That picture can't be read")
-    else:
-        raise ValueError(f"Upload the guide as {GUIDE_TYPES}")
+            reader = PdfReader(io.BytesIO(data))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages[:40])[:400_000]
+            for page in reader.pages[:12]:
+                for img in getattr(page, "images", [])[:3]:
+                    pics.append(picture(img.data))
+        elif ext == ".docx":
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                # sizes are checked before unpacking: a small .docx can unpack to gigabytes (a "zip bomb")
+                doc = z.getinfo("word/document.xml")
+                if doc.file_size > 20_000_000:
+                    raise ValueError("That Word file's text is too large to read")
+                xml = z.read(doc).decode("utf-8", "ignore")
+                text = re.sub(r"<[^>]+>", "", re.sub(r"</w:p>", "\n", xml))
+                media = [i for i in z.infolist() if i.filename.startswith("word/media/") and i.file_size <= 30_000_000][:12]
+                pics = [picture(z.read(i)) for i in media]
+        elif ext in (".txt", ".md", ".csv"):
+            text = data.decode("utf-8", "ignore")
+        elif ext in (".png", ".jpg", ".jpeg", ".webp"):
+            pics = [picture(data)]
+            if not pics[0]:
+                raise ValueError("That picture can't be read (or is too large)")
+        else:
+            raise ValueError(f"Upload the guide as {GUIDE_TYPES}")
+    except ValueError:
+        raise
+    except Exception as exc:  # a damaged PDF or Word file
+        raise ValueError(f"That file can't be read ({type(exc).__name__}): is it a damaged {ext or 'file'}?") from exc
     text = re.sub(r"[ \t]+", " ", text).strip()[:40000]
     pics = [p for p in pics if p][:6]
     if not text and not pics:
@@ -824,7 +836,8 @@ class Cloud:
             if cat not in L.CATEGORIES or top not in studio.TOPS:
                 raise ValueError(f"Pick a category and top style for every print folder ({cat or '?'} / {top or '?'})")
             folder = drive_folder_id(str(r.get("link", "")))
-            clean.append({"category": cat, "top": top, "colour": colour[:40], "link": str(r.get("link", "")).strip()[:300], "folder": folder})
+            # the link shown is rebuilt from the folder id: nothing else of what was pasted (a javascript: link) is kept
+            clean.append({"category": cat, "top": top, "colour": colour[:40], "link": f"https://drive.google.com/drive/folders/{folder}", "folder": folder})
         if len(clean) > 500:
             raise ValueError("At most 500 print folders")
         f = self.data / "prints.json"

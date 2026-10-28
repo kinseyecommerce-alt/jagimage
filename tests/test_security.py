@@ -138,3 +138,43 @@ def test_user_names_with_dots_stay_signed_in(tmp_path):
     from jagimage.cloud import Login
     lg = Login(users, b"k" * 32)
     assert lg.user(lg.cookie("j.doe").split(";")[0]) == "j.doe"
+
+
+def test_huge_pictures_zip_bombs_and_bad_values_are_refused(tmp_path):
+    import io
+    import math
+    import zipfile
+
+    import pytest
+    from PIL import Image
+
+    from jagimage.cloud import Cloud, Drive, guide_content
+    from jagimage.prints import PrintError, adjust, open_image
+    from jagimage import studio
+    # a tiny file that decodes to a huge picture is refused before it is decoded
+    buf = io.BytesIO()
+    Image.new("L", (13000, 13000)).save(buf, "PNG")
+    assert len(buf.getvalue()) < 500_000
+    with pytest.raises(PrintError, match="too large"):
+        open_image(buf.getvalue())
+    with pytest.raises(ValueError, match="too large"):
+        guide_content("page.png", buf.getvalue())
+    # a .docx whose text unpacks to a gigabyte is refused before unpacking
+    bomb = io.BytesIO()
+    with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("word/document.xml", b"<w:p>" + b"a" * 30_000_000)
+    with pytest.raises(ValueError, match="too large"):
+        guide_content("bomb.docx", bomb.getvalue())
+    # damaged files are a plain "can't be read", not a server error
+    for name, data in [("a.pdf", b"%PDF-1.4 garbage"), ("a.docx", b"PK\x03\x04garbage")]:
+        with pytest.raises(ValueError, match="can't be read"):
+            guide_content(name, data)
+    # NaN can't slip past the placement limits; print_check must be a real true/false
+    assert adjust(math.nan, float("inf"), math.nan) == {"dx": 0.0, "dy": 0.0, "scale": 1.0}  # not a number: the default
+    assert adjust("x", None, "y") == {"dx": 0.0, "dy": 0.0, "scale": 1.0}
+    with pytest.raises(ValueError, match="print_check"):
+        studio.Spec(top_colours=["Navy"], print_check="false")
+    # a pasted print folder link is rebuilt from its folder id: a javascript: link can't be stored
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password="tirupur-2026-x", drive=Drive("", "", tmp_path / "data"))
+    rows = cloud.set_print_rows([{"category": "Men", "top": "HalfSleeveTee", "link": "javascript:alert(document.cookie)//?id=AAAAAAAAAAAA"}])
+    assert rows[0]["link"] == "https://drive.google.com/drive/folders/AAAAAAAAAAAA"

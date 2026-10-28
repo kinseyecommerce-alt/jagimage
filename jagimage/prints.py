@@ -3,6 +3,7 @@ no AI, so every photo carries the same design. The artwork takes on the shirt's 
 little with its folds and shows the knit through the ink, and anything in front of the shirt (an arm, a
 hand, hair) stays in front of the print."""
 
+import math
 from typing import Dict, Tuple
 
 import numpy as np
@@ -27,11 +28,35 @@ class PrintError(ValueError):
     pass
 
 
+MAX_PIXELS = 36_000_000  # a print or guide picture larger than this (e.g. 6000 x 6000) is refused before it is decoded
+ART_SIDE = 3000          # bigger artwork is scaled down to this first: a chest print never needs more
+
+
+def open_image(src) -> Image.Image:
+    """An uploaded or downloaded picture, refused before decoding when it is huge (a small file can
+    hold a 13000 x 13000 picture that takes many GB of memory to decode)."""
+    import io
+
+    try:
+        im = Image.open(io.BytesIO(src) if isinstance(src, (bytes, bytearray)) else src)
+    except Exception as exc:
+        raise PrintError(f"that picture can't be read ({type(exc).__name__})") from exc
+    if im.width * im.height > MAX_PIXELS:
+        raise PrintError(f"that picture is too large ({im.width} x {im.height}); keep it under {MAX_PIXELS // 1_000_000} megapixels")
+    try:
+        im.load()
+    except Exception as exc:
+        raise PrintError(f"that picture can't be read ({type(exc).__name__})") from exc
+    return im
+
+
 def artwork(img: Image.Image) -> Image.Image:
     """The print as RGBA. A PNG with transparency is used as it is. A design on a plain white (or black, or
     any single-colour) background has that background colour taken out, as a screen printer would: it
     means "no ink". Soft edges keep their shape and lose the background's tint."""
     img = img.convert("RGBA")
+    if max(img.size) > ART_SIDE:
+        img.thumbnail((ART_SIDE, ART_SIDE), Image.LANCZOS)
     a = np.asarray(img).astype(np.float32) / 255
     if (a[..., 3] < 0.98).mean() > 0.01:
         return img
@@ -83,7 +108,14 @@ LIMITS = {"dx": (-0.3, 0.3), "dy": (-0.15, 0.4), "scale": (0.5, 1.6)}  # how far
 def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
     """A placement adjustment, kept within LIMITS: dx, dy move the print by a share of the chest width
     (+ is right and down in the photo); scale makes it bigger or smaller."""
-    clamp = lambda v, k: float(min(max(float(v or 0) if k != "scale" else float(v or 1), LIMITS[k][0]), LIMITS[k][1]))
+    def clamp(v, k):
+        try:
+            v = float(v if v is not None else (1 if k == "scale" else 0))
+        except (TypeError, ValueError):
+            v = 1.0 if k == "scale" else 0.0
+        if not math.isfinite(v):  # NaN would slip through min/max
+            v = 1.0 if k == "scale" else 0.0
+        return float(min(max(v, LIMITS[k][0]), LIMITS[k][1]))
     return {"dx": round(clamp(dx, "dx"), 3), "dy": round(clamp(dy, "dy"), 3), "scale": round(clamp(scale, "scale"), 3)}
 
 

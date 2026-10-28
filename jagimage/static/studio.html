@@ -893,6 +893,10 @@ async function guidesRefresh(pick) {
 }
 function initGuide() {
   $("guidePanel").classList.remove("hide"); guidesRefresh();
+  if (!isAdmin()) {  // guides are shared by everyone: only an admin uploads or deletes them
+    $("guideFile").closest(".row").classList.add("hide"); $("guideDel").classList.add("hide");
+    $("guideOut").innerHTML = '<p class="hint">Pick a saved guide below. Only an admin can upload or delete guides.</p>';
+  }
   $("guideRead").onclick = async () => {
     const f = $("guideFile").files[0]; if (!f) { $("guideOut").innerHTML = '<p class="e">Choose the guide file first.</p>'; return; }
     if (f.size > 15e6) { $("guideOut").innerHTML = '<p class="e">That file is too big: keep it under 15 MB (or upload screenshots of the pages).</p>'; return; }

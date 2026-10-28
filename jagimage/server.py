@@ -380,8 +380,8 @@ class Studio:
 
     def batch_for(self, name: str) -> studio.Batch:
         spec_file = Path(self.out) / name / "spec.json"
-        if "/" in name or ".." in name or not spec_file.exists():
-            raise FileNotFoundError(name)
+        if not name or "/" in name or ".." in name or not spec_file.exists():
+            raise FileNotFoundError(f"There is no batch called {name!r}" if name else "Pick a batch first")
         return studio.Batch(studio.Spec(**json.loads(spec_file.read_text())), out=self.out)
 
     def zip_bytes(self, name: str, what="jpg") -> bytes:
@@ -416,7 +416,18 @@ def make_handler(app: Studio):
 
         def _body(self, limit: int = 2_000_000) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
+            if n < 0:
+                raise ValueError("bad request size")
             if n > limit:
+                # read (and drop) what was sent, so the browser gets this answer instead of a broken connection
+                left = min(n, 4 * limit)
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    left -= len(chunk)
+                if n > 4 * limit:
+                    self.close_connection = True
                 raise ValueError("request too large" if limit == 2_000_000 else f"That file is too big: keep it under {limit // 1_400_000} MB")
             raw = self.rfile.read(n)
             # Only JSON from this app's own pages: a form or text/plain POST from another website (which a
@@ -526,9 +537,12 @@ def make_handler(app: Studio):
             target = next(t for t in targets if t["top"] == colour)
             names, art = [], None
             if body.get("art"):
+                from .prints import PrintError, open_image
+
                 try:
-                    art = Image.open(io.BytesIO(base64.b64decode(str(body["art"]), validate=True)))
-                    art.load()
+                    art = open_image(base64.b64decode(str(body["art"]), validate=True))
+                except PrintError as exc:
+                    raise ValueError(f"That print file can't be used: {exc}")
                 except Exception:
                     raise ValueError("That print file can't be read: use a PNG or JPG")
             else:
@@ -537,7 +551,9 @@ def make_handler(app: Studio):
                 if not files:
                     raise ValueError(f"No print folder for {batch.spec.category} {batch.spec.top} {colour}: add one below, or upload a print file to try")
                 pick = next((f for f in files if f[0] == body.get("print")), files[0])
-                art = Image.open(pick[1])
+                from .prints import open_image
+
+                art = open_image(str(pick[1]))
             adj = adjust(body.get("dx"), body.get("dy"), body.get("scale"))
             place = body.get("place") or "chest_large"
             out, mask = batch.preview_print(target, art, place, **adj)
@@ -563,9 +579,11 @@ def make_handler(app: Studio):
                     return self._json({"error": "Wrong user name or password"}, 403)
                 return self._send(200, b"{}", "application/json", {"Set-Cookie": c.login.cookie(name)})
             if parts == ["api", "guide"]:
-                # a marketplace's model photo guidelines (e.g. Myntra's): read by the AI into Studio settings
+                # a marketplace's model photo guidelines (e.g. Myntra's): read by the AI into Studio settings,
+                # saved for everyone, so an admin's job like the print folders
                 import base64
 
+                self._admin()
                 name = str(body.get("filename") or "guide").strip()[:120]
                 try:
                     data = base64.b64decode(str(body.get("data") or ""), validate=True)
@@ -591,6 +609,7 @@ def make_handler(app: Studio):
                 self._admin()
                 return self._json({"rows": c.set_print_rows(body.get("rows")), "can_read": c.drive.can_read})
             if len(parts) == 4 and parts[:2] == ["api", "guides"] and parts[3] == "delete":
+                self._admin()
                 c.delete_guide(unquote(parts[2]))
                 return self._json({"guides": c.guides()})
             if parts == ["api", "account", "password"]:
