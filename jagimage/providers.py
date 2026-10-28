@@ -73,12 +73,6 @@ class OpenAIProvider:
             result = self.client.images.generate(**params)
         return base64.b64decode(result.data[0].b64_json)
 
-    def generate_art(self, prompt: str) -> bytes:
-        """Print artwork: a square PNG with a transparent background (Print designs)."""
-        result = self.client.images.generate(model=self.model, prompt=prompt, size="1024x1024", quality=self.quality,
-                                             background="transparent", output_format="png", n=1)
-        return base64.b64decode(result.data[0].b64_json)
-
     TERMINAL = {"completed", "failed", "expired", "cancelled"}
 
     def _params(self):

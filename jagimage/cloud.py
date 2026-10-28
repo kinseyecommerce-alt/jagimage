@@ -767,30 +767,6 @@ class Agent:
         return {"place": place, **adjust(ans.get("dx"), ans.get("dy"), ans.get("scale")),
                 "reply": " ".join(str(ans.get("reply") or "").split())[:300]}
 
-    def design_briefs(self, category: str, themes: list, count: int, tees: str, language: str, extra: str = "") -> list:
-        """Print designs: the AI plans `count` original designs (name, theme, text, image prompt)."""
-        from . import designs as D
-
-        themes = themes or D.THEMES[D.audience(category)]
-        ask = (f"Audience: {category.replace('_', ' ')} ({D.audience(category)}). Themes: {', '.join(themes)}. "
-               f"Number of designs: {count}, spread over the themes. T-shirts: {D.TEES[tees]}. Text: {D.LANGUAGES[language]}."
-               + (f" The shop adds: {extra}" if extra else ""))
-        return D.clean_briefs(self._ask(ask, D.BRIEF_SYSTEM, D.BRIEF_SCHEMA), themes, count)
-
-    def design_request(self, message: str) -> dict:
-        """The print agent: the shop's words ("10 Tamil slogan prints for black kids tees") as print design
-        settings {category, tees, language, count, themes, extra, reply}, every value checked."""
-        from . import designs as D
-        from . import library as L
-
-        ans = self._ask(message, D.REQUEST_SYSTEM, D.REQUEST_SCHEMA)
-        category = ans.get("category") if ans.get("category") in L.CATEGORIES else "Men"
-        themes = [t for t in (ans.get("themes") or []) if t in D.THEMES[D.audience(category)]]
-        return {"category": category, "tees": ans.get("tees") if ans.get("tees") in D.TEES else "both",
-                "language": ans.get("language") if ans.get("language") in D.LANGUAGES else "English",
-                "count": max(1, min(D.MAX_DESIGNS, int(ans.get("count") or 6))), "themes": themes,
-                "extra": " ".join(str(ans.get("extra") or "").split())[:300], "reply": " ".join(str(ans.get("reply") or "").split())[:300]}
-
     def read_guide(self, filename: str, data: bytes) -> dict:
         """A marketplace's model photo guidelines (e.g. Myntra's) as Studio settings: photo size,
         backdrop, framing, the poses it asks for, and its directions for the model."""
@@ -824,10 +800,6 @@ class Cloud:
                                     self.data, os.environ.get("JAGIMAGE_DRIVE_FOLDER", "kinsey models 2026"))
         self.sync = DriveSync(self.drive, out_dir)
         self.agent = agent or Agent()
-        from .designs import DesignStore
-
-        self.designs = DesignStore(self.data / "designs")  # Print designs: the AI's original print artwork
-        self.design_jobs = {}
         self.oauth_states = {}
         self.plans = {}  # plan id -> agent plan, until Start
 

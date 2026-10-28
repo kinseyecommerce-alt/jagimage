@@ -79,15 +79,6 @@ header .sub { color: var(--muted); font-size: 13px; }
 main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
 main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
 .tabpage { max-width: 1040px; margin: 0 auto; padding: 18px 20px; }
-.tabpage .panel + .panel { margin-top: 14px; }
-.dsgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
-.dscard { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); font-size: 13px; }
-.dscard .art { aspect-ratio: 1; display: grid; place-items: center; padding: 10px; }
-.dscard .art.dark { background: #1d2733; } .dscard .art.light { background: #f3f1ec; }
-.dscard img { max-width: 100%; max-height: 100%; }
-.dscard .meta { padding: 6px 8px; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
-.dsset { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
-.dsbrief { margin: 6px 0; } .dsbrief label { display: flex; gap: 8px; align-items: flex-start; }
 .pvbox { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pvimg { min-height: 220px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; padding: 10px; overflow: hidden; }
 .pvimg img { max-width: 100%; max-height: 480px; border-radius: 6px; display: block; }
@@ -198,7 +189,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#designs" role="tab" data-tab="designs" class="hide" id="tabDesigns">Print designs</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
@@ -297,32 +288,6 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <button class="btn primary" id="nuAdd">Add user</button>
     </div>
     <p class="hint" id="usersMsg"></p>
-  </section>
-</div>
-<div id="designTab" class="hide tabpage">
-  <section class="panel">
-    <h2>Print agent</h2>
-    <p class="hint">Tell the print agent what to make. It plans and draws <b>original</b> T-shirt prints in the styles that sell online in India (motivational text, retro sunsets, line art, desi slogans, dinosaurs and space for kids …) as print-ready PNGs with a clear background, for production: download them as a ZIP (with a large print-size copy of each) or save them to Google Drive. It never copies existing designs, brands, logos, film or cartoon characters or celebrities. Trends come from the AI's general knowledge, not live sales data.</p>
-    <textarea id="dsAsk" rows="2" style="width:100%" placeholder="e.g. 10 Tamil slogan prints for black T-shirts for college boys, or 6 cute dinosaur prints for girls' pastel tees"></textarea>
-    <div class="row"><button class="btn primary" id="dsAskBtn" type="button">Plan it</button></div>
-    <details class="adv" id="dsManual"><summary>Or set it yourself</summary>
-    <div class="row">
-      <label class="field"><span>Category</span><select id="dsCat"></select></label>
-      <label class="field"><span>For T-shirts</span><select id="dsTees"><option value="dark">Dark T-shirts (black, navy …)</option><option value="light">Light T-shirts (white, pastels …)</option><option value="both">Both</option></select></label>
-      <label class="field"><span>Text</span><select id="dsLang"></select></label>
-      <label class="field"><span>How many designs</span><input type="number" id="dsCount" value="6" min="1" max="40"></label>
-    </div>
-    <div class="sub2">Themes <span class="hint">(none picked: the AI spreads them over the popular ones)</span></div>
-    <div class="chips" id="dsThemes"></div>
-    <label class="field" style="margin-top:8px"><span>Anything else (optional)</span><input type="text" id="dsExtra" maxlength="300" placeholder="e.g. for college students, bold retro lettering, Diwali sale theme"></label>
-    <div class="row" style="margin-top:8px"><button class="btn primary" id="dsPlan" type="button">Plan the designs</button></div>
-    </details>
-    <div id="dsOut" class="guideout"></div>
-  </section>
-  <section class="panel">
-    <h2>Design sets</h2>
-    <p class="hint"><b>Download ZIP</b>: every design as a PNG plus a large print-size copy (3600 px, 300 dpi, about 30 cm wide). <b>Save to Drive</b>: into "Print designs" in your Google Drive photos folder.</p>
-    <div id="dsSets"></div>
   </section>
 </div>
 <div id="printTab" class="hide tabpage">
@@ -782,77 +747,6 @@ async function agentRuns() {
     + (x.running ? ` · running <button class="btn" data-stoprun="${esc(x.id)}">Stop</button>` : x.error ? ` · stopped: <span class="e">${esc(x.error)}</span>` : x.stopped ? " · stopped" : " · finished") + `</div>`).join("");
   if (r.runs.some((x) => x.running)) loadJobs();
 }
-// ---------- Print designs: the AI's original print artwork
-async function designsRefresh() {
-  const r = await api("/api/designs"); S.designInfo = r;
-  const aud = $("dsCat").value.startsWith("Kids") ? "kids" : "adults", picked = S.dsThemes || new Set();
-  $("dsThemes").innerHTML = r.themes[aud].map((t) => `<button class="chip ${picked.has(t) ? "on" : ""}" data-t="${esc(t)}"><i style="background:var(--soft)"></i>${esc(t)}</button>`).join("");
-  if (!$("dsLang").options.length) $("dsLang").innerHTML = r.languages.map((l) => `<option>${esc(l)}</option>`).join("");
-  $("dsSets").innerHTML = r.sets.length ? r.sets.map((m) => `<div class="dsset" data-set="${esc(m.id)}">
-      <div class="row" style="justify-content:space-between"><div><b>${esc(label(m.category))}</b> · ${esc(m.tees)} T-shirts · ${esc(m.language)} · ${fmt(m.items.length)} designs <span class="hint">${ago(m.created)}</span></div>
-      <div class="row"><a class="btn" href="/api/designs/${esc(m.id)}/zip">Download ZIP</a><button class="btn" data-drive="${esc(m.id)}">Save to Drive</button><button class="btn" data-delset="${esc(m.id)}">Delete set</button></div></div>
-      <div class="dsgrid">${m.items.map((i) => `<div class="dscard"><a class="art ${m.tees === "light" ? "light" : "dark"}" href="/designs/${esc(m.id)}/${esc(i.file)}" target="_blank" rel="noopener"><img loading="lazy" src="/designs/${esc(m.id)}/${esc(i.file)}" alt="${esc(i.name)}"></a>
-        <div class="meta"><span><b>${esc(i.name)}</b><br><span class="hint">${esc(i.theme)}</span></span><button class="btn" title="Delete this design" data-delfile="${esc(i.file)}" data-of="${esc(m.id)}">×</button></div></div>`).join("")}</div></div>`).join("")
-    : `<p class="hint">No designs yet.</p>`;
-  const running = r.jobs.find((j) => j.running); if (running && !S.dsWatching) designWatch(running.id);
-}
-async function designWatch(id) {
-  S.dsWatching = true;
-  try {
-    const j = await api(`/api/designs/jobs/${id}`);
-    $("dsOut").innerHTML = (j.running ? `<p>Drawing designs… <b>${fmt(j.done)}</b> of ${fmt(j.total)} done` : `<p>Done: <b>${fmt(j.done)}</b> designs made`)
-      + (j.failed ? ` · <span class="e">${fmt(j.failed)} failed</span>` : "") + `</p>` + (j.errors.length ? `<p class="hint e">${j.errors.map(esc).join("<br>")}</p>` : "");
-    if (j.running) { setTimeout(() => designWatch(id), 4000); if (j.done) designsRefresh(); return; }
-    designsRefresh();
-  } catch (e) { $("dsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
-  S.dsWatching = false;
-}
-function initDesigns() {
-  $("dsCat").innerHTML = S.opts.categories.map((c) => `<option value="${esc(c)}">${esc(label(c))}</option>`).join("");
-  $("dsCat").onchange = () => { S.dsThemes = new Set(); designsRefresh(); };
-  $("dsThemes").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; S.dsThemes = S.dsThemes || new Set();
-    S.dsThemes.has(c.dataset.t) ? S.dsThemes.delete(c.dataset.t) : S.dsThemes.add(c.dataset.t); c.classList.toggle("on"); };
-  const showPlan = (p) => {
-      $("dsOut").innerHTML = (p.reply ? `<p><b>Print agent:</b> ${esc(p.reply)}</p>` : "") + `<p>${fmt(p.designs.length)} designs planned. Untick any you don't want, then make them (${p.engine === "openai" ? "OpenAI" : "Gemini"}, about <b>₹${fmt(p.cost_inr)}</b> for all).</p>`
-        + p.designs.map((d, i) => `<div class="dsbrief"><label><input type="checkbox" data-keep="${i}" checked><span><b>${esc(d.name)}</b> · <span class="hint">${esc(d.theme)}</span>${d.text ? ` · “${esc(d.text)}”` : ""}<br><span class="hint">${esc(d.prompt)}</span></span></label></div>`).join("")
-        + `<div class="row"><button class="btn primary" id="dsMake">Make the designs</button></div>`;
-      $("dsMake").onclick = async () => {
-        const keep = [...document.querySelectorAll("[data-keep]")].filter((c) => c.checked).map((c) => +c.dataset.keep);
-        try { const j = await api("/api/designs/make", { plan_id: p.plan_id, keep }); designWatch(j.id); }
-        catch (e) { $("dsOut").insertAdjacentHTML("beforeend", `<p class="e">${esc(e.message)}</p>`); }
-      };
-  };
-  $("dsPlan").onclick = async () => {
-    $("dsOut").innerHTML = '<p class="hint">The AI is planning the designs…</p>'; $("dsPlan").disabled = true;
-    try {
-      showPlan(await api("/api/designs/plan", { category: $("dsCat").value, tees: $("dsTees").value, language: $("dsLang").value,
-        count: +$("dsCount").value || 6, themes: [...(S.dsThemes || [])], extra: $("dsExtra").value }));
-    } catch (e) { $("dsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
-    $("dsPlan").disabled = false;
-  };
-  $("dsAskBtn").onclick = async () => {
-    const message = $("dsAsk").value.trim(); if (!message) return;
-    $("dsOut").innerHTML = '<p class="hint">The print agent is planning… (about half a minute)</p>'; $("dsAskBtn").disabled = true;
-    try {
-      const p = await api("/api/designs/ask", { message }), w = p.settings;
-      $("dsCat").value = w.category; $("dsTees").value = w.tees; $("dsLang").value = w.language; $("dsCount").value = w.count; $("dsExtra").value = w.extra;
-      S.dsThemes = new Set(w.themes); await designsRefresh(); showPlan(p);
-    } catch (e) { $("dsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
-    $("dsAskBtn").disabled = false;
-  };
-  $("dsSets").onclick = async (e) => {
-    const t = e.target, box = t.closest(".dsset");
-    try {
-      if (t.dataset.drive) {
-        t.disabled = true; t.textContent = "Saving…";
-        const r = await api(`/api/designs/${t.dataset.drive}/drive`, {}); t.textContent = `Saved ${r.saved} to Drive ✓`; t.title = r.folder;
-      } else if (t.dataset.delset && confirm("Delete this whole design set?")) { await api(`/api/designs/${t.dataset.delset}/delete`, {}); designsRefresh(); }
-      else if (t.dataset.delfile) { await api(`/api/designs/${t.dataset.of}/delete`, { file: t.dataset.delfile }); designsRefresh(); }
-    } catch (err) { alert(err.message); }
-  };
-  if (tabFromHash() === "designs") designsRefresh().catch(() => {});
-}
-
 // ---------- print folders (Settings) and Add prints (Dashboard)
 async function printsRefresh() {
   const r = await api("/api/prints"); S.printRows = r.rows;
@@ -860,7 +754,7 @@ async function printsRefresh() {
   if (!$("dPlace").options.length) $("dPlace").innerHTML = Object.entries(r.places).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
   const admin = isAdmin(); $("printAdd").classList.toggle("hide", !admin);
   $("printRows").innerHTML = r.rows.length ? `<tr><th>Category</th><th>Top style</th><th>Colour</th><th>Folder</th><th></th></tr>` + r.rows.map((x, i) =>
-    `<tr><td>${esc(label(x.category))}</td><td>${esc(nice(x.top))}</td><td>${esc(x.colour || "All colours")}</td><td>${x.link.startsWith("design:") ? `<a href="#designs">design set</a>` : `<a href="${esc(x.link)}" target="_blank" rel="noopener">Drive folder</a>`}</td><td class="r">${admin ? `<button class="btn" data-pdel="${i}">Remove</button>` : ""}</td></tr>`).join("")
+    `<tr><td>${esc(label(x.category))}</td><td>${esc(nice(x.top))}</td><td>${esc(x.colour || "All colours")}</td><td><a href="${esc(x.link)}" target="_blank" rel="noopener">open</a></td><td class="r">${admin ? `<button class="btn" data-pdel="${i}">Remove</button>` : ""}</td></tr>`).join("")
     : `<tr><td class="hint">No print folders yet.</td></tr>`;
 }
 async function printsSave(rows) {
@@ -1015,8 +909,8 @@ function initGuide() {
   $("guideDel").onclick = async () => { const id = $("guideSel").value; if (id && confirm("Delete this saved guide?")) { await api(`/api/guides/${encodeURIComponent(id)}/delete`, {}); guidesRefresh(); $("guideOut").innerHTML = ""; } };
 }
 function initCloud() {
-  ["tabDesigns", "tabPrints", "tabMarket"].forEach((id) => $(id).classList.remove("hide"));
-  initGuide(); initPrints(); initDesigns();
+  ["tabPrints", "tabMarket"].forEach((id) => $(id).classList.remove("hide"));
+  initGuide(); initPrints();
   ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
@@ -1047,8 +941,8 @@ function initCloud() {
 }
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
-const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", designs: "designTab", prints: "printTab", market: "marketTab", settings: "settingsTab" };
-const TITLES = { dashboard: "Dashboard", recolor: "Recolor", designs: "Print designs", prints: "Print placement", market: "Marketplace", settings: "Settings" };
+const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", prints: "printTab", market: "marketTab", settings: "settingsTab" };
+const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", market: "Marketplace", settings: "Settings" };
 function showTab(tab) {
   const f = $("recolorTab");
   if (tab === "recolor" && !f.src) f.src = "/recolor/";
@@ -1059,7 +953,6 @@ function showTab(tab) {
   if (tab === "settings" && S.opts) renderSettings();
   if (tab === "dashboard") setTimeout(loadDashboard);  // after the whole script has loaded
   if (tab === "prints" && S.opts && S.opts.cloud) setTimeout(printTabRefresh);
-  if (tab === "designs" && S.opts && S.opts.cloud) setTimeout(designsRefresh);
 }
 // "#studio" is a tab; "#stepColours" is a part of one (the Studio step links): that tab stays open
 function tabFromHash() {
