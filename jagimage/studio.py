@@ -282,7 +282,7 @@ CHILD_SAFE = [
     (", toddler proportions: baby face, large head relative to a small short body (head about one fifth of body height), "
      "short chubby limbs", ", a happy young child"),
     (", full little lips", ""), (", thin lips", ""), (", cupid's-bow lips", ""), (", rosy cheeks", ""),
-    ("round face with chubby cheeks", "round face"), ("very round face with full chubby cheeks", "very round face"),
+    ("round face with chubby cheeks", "round face"),
     (L.NEGATIVE_KIDS, "adult, teenager, older child"),
     (L.KIDS_RULE, " The child looks about 4-5 years old."),
 ]

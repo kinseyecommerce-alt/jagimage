@@ -6,8 +6,8 @@ from typing import Dict, List
 
 # Who the model is, without the features that vary (those come from FEATURES).
 PEOPLE = {
-    "Men": "an Indian man, natural friendly expression",
-    "Women": "an Indian woman, natural fresh makeup, nude lip, small stud earrings only",
+    "Men": "an Indian man aged 22-32, natural friendly expression",
+    "Women": "an Indian woman aged 21-30, natural fresh makeup, nude lip, small stud earrings only",
     "Kids_Boys": ("a small 4-5 year old Indian boy, toddler proportions: baby face, large head relative "
                   "to a small short body (head about one fifth of body height), short chubby limbs"),
     "Kids_Girls": ("a small 4-5 year old Indian girl, toddler proportions: baby face, large head relative "
@@ -25,74 +25,56 @@ ADULT_LIPS = ["full lips", "medium lips", "thin lips"]
 EYES = ["big round dark-brown eyes", "almond-shaped dark eyes", "large bright eyes with long lashes",
         "deep-set brown eyes", "wide-set expressive eyes"]
 
-MARKS = ["no distinguishing marks", "a small beauty mole on one cheek", "a dimple in the chin", "deep dimples when smiling",
-         "a few faint freckles across the nose", "a small mole above the lip"]
-KID_MARKS = ["no distinguishing marks", "deep dimples when smiling", "a few faint freckles across the nose",
-             "a tiny mole on one cheek", "a small gap between the front teeth"]
-
-# Each feature is written so the AI can see it in a front photo; subtle ones (lips, nose) on their own
-# leave the AI drawing the same "default" face, so the strong ones (hair, face shape, beard, age) lead.
 FEATURES: Dict[str, Dict[str, List[str]]] = {
     "Kids_Boys": {
-        "face": ["very round face with full chubby cheeks", "oval face with a narrow chin", "heart-shaped face with a small pointed chin",
-                 "broad square face with a wide jaw", "long face with a high forehead"],
+        "face": ["round face with chubby cheeks", "oval face with soft cheeks", "heart-shaped face with a small pointed chin",
+                 "soft square face with full cheeks"],
         "skin": SKIN,
-        "hair": ["short neat crop", "side-parted short hair", "short spiky top", "soft bowl cut with a full fringe", "short tight curls",
+        "hair": ["short neat crop", "side-parted short hair", "short spiky top", "soft bowl cut", "short curly hair",
                  "very short buzz cut", "slightly long messy fringe", "short wavy hair with a side sweep"],
         "eyes": EYES,
-        "brows": ["thick dark straight eyebrows", "soft thin light eyebrows", "naturally arched eyebrows"],
+        "brows": ["thick dark eyebrows", "soft thin eyebrows", "naturally arched eyebrows"],
         "smile": ["wide toothy grin", "shy closed-mouth smile", "big dimpled smile", "playful half smile"],
         "nose": NOSE,
         "cheeks": KID_CHEEKS,
-        "marks": KID_MARKS,
         "lips": KID_LIPS,
     },
     "Kids_Girls": {
-        "face": ["very round face with full chubby cheeks", "oval face with a narrow chin", "heart-shaped face with a small pointed chin",
-                 "broad square face with a wide jaw", "long face with a high forehead"],
+        "face": ["round face with chubby cheeks", "oval face with soft cheeks", "heart-shaped face with a small pointed chin",
+                 "soft square face with full cheeks"],
         "skin": SKIN,
         "hair": ["short bob with a straight fringe", "two high pigtails", "a single high ponytail", "two neat braids",
                  "shoulder-length curly hair", "half-up hair with a small clip", "short wavy bob", "two low pigtails with ribbons"],
         "eyes": EYES,
-        "brows": ["thick dark straight eyebrows", "soft thin light eyebrows", "naturally arched eyebrows"],
+        "brows": ["thick dark eyebrows", "soft thin eyebrows", "naturally arched eyebrows"],
         "smile": ["wide toothy grin", "shy closed-mouth smile", "big dimpled smile", "playful half smile"],
         "nose": NOSE,
         "cheeks": KID_CHEEKS,
-        "marks": KID_MARKS,
         "lips": KID_LIPS,
     },
     "Men": {
-        "face": ["oval face", "strong square jaw", "round full face with soft jaw", "long narrow face with high cheekbones",
-                 "diamond-shaped face with a pointed chin", "wide face with a broad forehead"],
+        "face": ["oval face", "square jaw", "round face", "long face with high cheekbones", "diamond-shaped face"],
         "skin": SKIN,
-        "hair": ["short textured crop with tapered sides", "neat side-parted short hair", "short tight curly hair",
-                 "slicked-back medium-length hair", "very short buzz cut", "wavy medium-length hair falling over the forehead",
-                 "tall short quiff", "messy short fringe", "high-and-tight military cut", "longer hair tied in a small man-bun"],
-        "beard": ["clean-shaven", "light stubble", "short boxed beard", "full thick beard", "moustache only", "goatee with light stubble"],
-        "age": ["looks about 21", "looks about 24", "looks about 28", "looks about 32", "looks about 36"],
-        "build": ["lean build", "regular build", "slim build", "broad muscular build", "slightly heavy build"],
+        "hair": ["short textured crop with tapered sides", "side-parted short hair", "short curly hair", "slicked-back medium hair",
+                 "buzz cut", "wavy medium-length hair", "short quiff", "messy short fringe"],
+        "beard": ["clean-shaven", "light stubble", "short trimmed beard", "full neat beard", "moustache with light stubble"],
         "eyes": EYES,
-        "brows": ["thick straight eyebrows", "medium natural eyebrows", "thin eyebrows", "heavy bushy eyebrows"],
-        "marks": MARKS,
+        "build": ["lean-athletic build", "regular build", "slim build", "broad athletic build"],
         "nose": ADULT_NOSE,
         "lips": ADULT_LIPS,
+        "age": ["looks about 23", "looks about 26", "looks about 29", "looks about 32"],
     },
     "Women": {
-        "face": ["oval face", "heart-shaped face with a pointed chin", "round full face", "long narrow face with high cheekbones",
-                 "soft square face with a defined jaw", "wide face with full cheeks"],
+        "face": ["oval face", "heart-shaped face", "round face", "long face with high cheekbones", "soft square face"],
         "skin": SKIN,
-        "hair": ["long open straight hair behind the shoulders", "short pixie cut", "chin-length bob with a fringe",
-                 "shoulder-length open wavy hair", "high sleek ponytail", "long open curly hair behind the shoulders",
-                 "middle-parted low bun", "side-swept long layered hair behind the shoulders", "single long braid down the back",
-                 "lob (long bob) with soft waves"],
-        "colour": ["jet-black hair", "dark brown hair", "black hair with soft brown highlights", "warm chestnut-brown hair"],
-        "age": ["looks about 21", "looks about 24", "looks about 27", "looks about 30", "looks about 34"],
-        "build": ["petite build", "regular slim build", "athletic build", "regular build", "curvy build"],
+        "hair": ["soft loose waves kept off the neckline", "sleek low ponytail", "shoulder-length straight hair tucked behind the ears",
+                 "short bob", "high bun", "long straight hair behind the shoulders", "curly hair tied back", "low braided bun"],
         "eyes": EYES,
-        "brows": ["thick defined eyebrows", "soft natural eyebrows", "high arched eyebrows", "thin straight eyebrows"],
-        "marks": MARKS,
+        "brows": ["thick defined eyebrows", "soft natural eyebrows", "arched eyebrows"],
+        "build": ["regular slim build", "petite build", "athletic build", "regular build"],
         "nose": ADULT_NOSE,
         "lips": ADULT_LIPS,
+        "age": ["looks about 22", "looks about 25", "looks about 28", "looks about 30"],
     },
 }
 
@@ -106,7 +88,7 @@ def capacity(category: str) -> int:
 
 
 # Features that change fastest from one model number to the next come first.
-ORDER = ["hair", "face", "beard", "colour", "age", "build", "brows", "marks", "smile", "eyes", "skin"]
+ORDER = ["hair", "skin", "face", "eyes", "smile", "beard", "brows", "build"]
 
 
 def look(category: str, i: int) -> Dict[str, str]:
@@ -124,17 +106,13 @@ def look(category: str, i: int) -> Dict[str, str]:
     return {name: pick[name] for name in feats}
 
 
-DISTINCT = "a distinctive individual with their own recognisable face, not a generic model face"
-DISTINCT_KID = "a child with a look of their own, not a generic face"
-
-
 def describe(category: str, i: int, hair=True) -> str:
     """hair=False when a reference photo sets the hair: a written hairstyle that differs from the photo
     makes some models (Gemini Flash) switch hairstyles between shots of the same person."""
     f = look(category, i)
     if not hair:
         f["hair"] = "hairstyle exactly as in the reference photo"
-    return PEOPLE[category] + ", " + ", ".join(f.values()) + ", " + (DISTINCT_KID if category.startswith("Kids") else DISTINCT)
+    return PEOPLE[category] + ", " + ", ".join(f.values())
 
 
 def hairstyle(category: str, i: int) -> str:
