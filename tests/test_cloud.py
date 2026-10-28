@@ -485,3 +485,41 @@ def test_print_agents_check_photos_and_turn_words_into_a_placement(tmp_path, mon
         assert call(base + "/api/prints/plan", {"message": " "}, cookie=cookie)[0] == 400
     finally:
         httpd.shutdown()
+
+
+def test_print_preview_shows_one_photo_and_the_checkers_verdict(tmp_path, monkeypatch):
+    import base64
+    import io
+
+    from PIL import Image
+    from test_studio import make_print
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+    llm = FakeLLM({"ok": False, "issues": ["too high"], "dx": 0, "dy": 0.05, "scale": 0.9})
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD,
+                  drive=Drive("", "", tmp_path / "data"), agent=Agent(client=llm, model="gemini-test"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        s = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Navy", "White"], poses=["front_main"])
+        studio.Batch(s, out=tmp_path / "out", generate=fake_generate).run()
+        art = base64.b64encode(make_print(tmp_path / "p.png").read_bytes()).decode()
+        code, _, body = call(base + "/api/prints/preview", {"batch": s.name, "colour": "White", "art": art, "dy": 0.05}, cookie=cookie)
+        r = json.loads(body)
+        assert code == 200 and r["colours"] == ["Navy", "White"] and r["colour"] == "White" and r["check"] is None and r["dy"] == 0.05
+        im = Image.open(io.BytesIO(base64.b64decode(r["image"].split(",", 1)[1])))
+        assert im.format == "JPEG" and max(im.size) <= 1200
+        assert not list((tmp_path / "out" / s.name).rglob("*print*"))  # a preview saves nothing
+        code, _, body = call(base + "/api/prints/preview", {"batch": s.name, "art": art, "check": True}, cookie=cookie)
+        assert json.loads(body)["check"] == {"ok": False, "score": 0, "issues": ["too high"], "dx": 0.0, "dy": 0.05, "scale": 0.9}
+        # no file uploaded: the prints come from the print folders
+        cloud.print_files = lambda cat, top, colour: [("Logo", make_print(tmp_path / "q.png")), ("237", make_print(tmp_path / "r.png"))]
+        code, _, body = call(base + "/api/prints/preview", {"batch": s.name, "print": "237"}, cookie=cookie)
+        assert json.loads(body)["prints"] == ["Logo", "237"] and json.loads(body)["print"] == "237"
+        cloud.print_files = lambda cat, top, colour: []
+        code, _, body = call(base + "/api/prints/preview", {"batch": s.name}, cookie=cookie)
+        assert code == 400 and "upload a print file" in json.loads(body)["error"]
+        assert call(base + "/api/prints/preview", {"batch": "../etc"}, cookie=cookie)[0] in (400, 404)
+    finally:
+        httpd.shutdown()

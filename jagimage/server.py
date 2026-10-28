@@ -506,6 +506,54 @@ def make_handler(app: Studio):
                 return self._json({"rows": c.print_rows(), "places": PLACE_NAMES, "can_read": c.drive.can_read})
             return None
 
+        def _print_preview(self, body) -> dict:
+            """One printed photo of a batch at the given position (nothing saved), optionally with the AI
+            print checker's verdict. The print is an uploaded file to try, or one from the print folders."""
+            import base64
+            import io
+
+            from PIL import Image
+
+            from .prints import adjust
+
+            c = app.cloud
+            batch = app.batch_for(str(body.get("batch") or ""))
+            targets = batch.print_targets()
+            if not targets:
+                raise ValueError("This batch has no finished front photos to print on")
+            colours = sorted({t["top"] for t in targets}, key=[x["top"] for x in targets].index)
+            colour = body.get("colour") if body.get("colour") in colours else colours[0]
+            target = next(t for t in targets if t["top"] == colour)
+            names, art = [], None
+            if body.get("art"):
+                try:
+                    art = Image.open(io.BytesIO(base64.b64decode(str(body["art"]), validate=True)))
+                    art.load()
+                except Exception:
+                    raise ValueError("That print file can't be read: use a PNG or JPG")
+            else:
+                files = c.print_files(batch.spec.category, batch.spec.top, colour)
+                names = [n for n, _ in files]
+                if not files:
+                    raise ValueError(f"No print folder for {batch.spec.category} {batch.spec.top} {colour}: add one below, or upload a print file to try")
+                pick = next((f for f in files if f[0] == body.get("print")), files[0])
+                art = Image.open(pick[1])
+            adj = adjust(body.get("dx"), body.get("dy"), body.get("scale"))
+            place = body.get("place") or "chest_large"
+            out = batch.preview_print(target, art, place, **adj)
+            check = None
+            if body.get("check"):
+                if not (ready().get("gemini") or ready().get("openai")):
+                    raise ValueError("The print checker needs a Gemini or OpenAI key (Settings → API keys)")
+                check = c.agent.check_print(out, art)
+            shown = out.convert("RGB")
+            shown.thumbnail((900, 1200))
+            buf = io.BytesIO()
+            shown.save(buf, "JPEG", quality=88)
+            return {"image": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), "colours": colours,
+                    "colour": colour, "prints": names, "print": None if body.get("art") else (body.get("print") if body.get("print") in names else names[0]),
+                    "model": target["model"], "check": check, **adj}
+
         def _cloud_post(self, parts, body):
             c = app.cloud
             if parts == ["login"]:
@@ -528,6 +576,8 @@ def make_handler(app: Studio):
                 if not (ready().get("gemini") or ready().get("openai")):
                     raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
                 return self._json({"guide": c.save_guide(c.agent.read_guide(name, data)), "guides": c.guides()})
+            if parts == ["api", "prints", "preview"]:
+                return self._json(self._print_preview(body))
             if parts == ["api", "prints", "plan"]:
                 # "a bit lower and smaller": the print agent turns the shop's words into a placement
                 message = " ".join(str(body.get("message") or "").split())[:500]
@@ -678,7 +728,7 @@ def make_handler(app: Studio):
             try:
                 if not self._host_ok() or not self._signed_in(parts):
                     return
-                body = self._body(GUIDE_LIMIT if parts == ["api", "guide"] else 2_000_000)
+                body = self._body(GUIDE_LIMIT if parts in (["api", "guide"], ["api", "prints", "preview"]) else 2_000_000)
                 if app.cloud and self._cloud_post(parts, body) is not None:
                     return
                 if parts == ["api", "preview"]:

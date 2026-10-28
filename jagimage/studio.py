@@ -852,6 +852,26 @@ class Batch:
                             except (PrintError, OSError) as exc:
                                 self._event("errors", model=m, path=str(dest), error=f"print {name}: {exc}")
 
+    def print_targets(self) -> List[dict]:
+        """The finished front photos a print can go on: [{model, top, bottom, pose}] (for the preview)."""
+        spec, rows = self.spec, []
+        for m in spec.model_numbers():
+            for pose in [p for p in ("front_main", "front_main_white") if p in spec.poses]:
+                for t, b in spec.pairs():
+                    if self.base_path(m, spec.base_key(t, b), pose).exists():
+                        rows.append({"model": m, "top": t, "bottom": b, "pose": pose})
+        return rows
+
+    def preview_print(self, target: dict, art, place: str, dx=0.0, dy=0.0, scale=1.0):
+        """One printed photo, made in memory only: how the print sits before the whole batch is printed."""
+        from .prints import place_print
+
+        m, t, b, pose = target["model"], target["top"], target["bottom"], target["pose"]
+        base = self.spec.base_key(t, b)
+        img, tmask, bmask = self.masks(m, base, pose)
+        plain = self._recoloured(img, tmask, bmask, base, t, b)
+        return place_print(plain, tmask, art, place, dx=dx, dy=dy, scale=scale)
+
     PRINT_FIXES = 2  # the checker may move or resize a print this many times, then it is flagged for a person
 
     def _print_and_check(self, plain, tmask, art, m, dest):

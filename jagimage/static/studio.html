@@ -79,6 +79,10 @@ header .sub { color: var(--muted); font-size: 13px; }
 main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
 main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
 .tabpage { max-width: 1040px; margin: 0 auto; padding: 18px 20px; }
+.pvbox { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pvimg { min-height: 220px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; padding: 10px; overflow: hidden; }
+.pvimg img { max-width: 100%; max-height: 480px; border-radius: 6px; display: block; }
+@media (max-width: 760px) { .pvbox { grid-template-columns: 1fr; } }
 .guidebanner { margin: 8px 0 0; font-size: 14px; }
 .guideout { margin-top: 10px; font-size: 14px; } .guideout ul { margin: 6px 0 0 18px; padding: 0; } .guideout li { margin: 3px 0; }
 main.studio .builder, main.studio .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -307,6 +311,22 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <button class="btn" id="prAskBtn" type="button">Ask the print agent</button>
     </div>
     <p class="hint" id="prAskOut"></p>
+    <div class="pvbox" id="pvBox">
+      <div class="pvimg" id="pvImg"><span class="hint">Preview one photo before printing the whole batch: pick a colour and a print, then press Preview. It follows the position and size above as you change them.</span></div>
+      <div>
+        <div class="row">
+          <label class="field"><span>Colour</span><select id="pvColour"></select></label>
+          <label class="field"><span>Print</span><select id="pvPrint"><option value="">First print in its folder</option></select></label>
+        </div>
+        <label class="field" style="margin-top:6px"><span>…or try a print file (PNG/JPG)</span><input type="file" id="pvFile" accept=".png,.jpg,.jpeg,.webp"></label>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="pvGo" type="button">Preview</button>
+          <button class="btn" id="pvCheck" type="button">Check with AI</button>
+          <button class="btn hide" id="pvApply" type="button">Apply the fix</button>
+        </div>
+        <div class="hint" id="pvOut" style="margin-top:8px"></div>
+      </div>
+    </div>
     <label class="check" style="margin-top:8px"><input type="checkbox" id="prCheck" checked> <span><b>AI print checker</b>: looks at every printed photo next to your artwork (centred? on the collar? cut off by an arm? looks printed, not stuck on?) and moves or resizes the print until it is right, at most twice; photos it still isn't happy with are marked. Uses Gemini or OpenAI, whichever has a key: about ₹0.1–0.5 per photo.</span></label>
     <p class="hint" id="prStatus"></p>
     <div class="gallery" id="prGallery"></div>
@@ -761,6 +781,31 @@ async function printGallery() {
     return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}</b><span>${esc(x.model)} · print ${esc(x.pose.split("_print_")[1])}</span>${badge}</span></a>`; }).join("");
   if (!printed.length && !S.printJob) $("prStatus").textContent = "No printed photos in this batch yet.";
 }
+// ---------- print preview: one photo, made on the server and not saved
+async function printPreview(check) {
+  const batch = $("prBatch").value; if (!batch) return;
+  clearTimeout(pvTimer); const seq = S.pvSeq = (S.pvSeq || 0) + 1;  // only the newest preview is shown
+  const f = $("pvFile").files[0], pl = printPlacement();
+  const body = { batch, colour: $("pvColour").value, print: $("pvPrint").value, place: pl.print_place, dx: pl.print_dx, dy: pl.print_dy, scale: pl.print_scale, check: !!check };
+  if (f) body.art = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
+  $("pvOut").textContent = check ? "The AI is looking at it…" : "Making the preview…"; $("pvApply").classList.add("hide");
+  try {
+    const r = await api("/api/prints/preview", body); if (seq !== S.pvSeq) return; S.pvShown = true;
+    $("pvImg").innerHTML = `<img src="${r.image}" alt="Preview of the print">`;
+    const keep = $("pvColour").value; $("pvColour").innerHTML = r.colours.map((c) => `<option>${esc(c)}</option>`).join(""); $("pvColour").value = keep && r.colours.includes(keep) ? keep : r.colour;
+    if (r.prints.length) { const kp = $("pvPrint").value; $("pvPrint").innerHTML = r.prints.map((n) => `<option>${esc(n)}</option>`).join(""); $("pvPrint").value = r.prints.includes(kp) ? kp : r.print; }
+    const where = `Model ${r.model}, ${esc(r.colour)}${f ? `, ${esc(f.name)}` : r.print ? `, print ${esc(r.print)}` : ""}.`;
+    if (!r.check) { $("pvOut").innerHTML = where; return; }
+    const k = r.check, fix = Math.abs(k.dx) > 0.005 || Math.abs(k.dy) > 0.005 || Math.abs(k.scale - 1) > 0.01;
+    $("pvOut").innerHTML = where + "<br>" + (k.ok ? status("good", "Checker: looks right") : status("bad", "Checker: " + (k.issues.join("; ") || "not right yet")))
+      + (fix ? `<br>Suggested fix: ${k.dx ? `move ${k.dx > 0 ? "right" : "left"} ${Math.abs(Math.round(k.dx * 100))}%` : ""} ${k.dy ? `move ${k.dy > 0 ? "down" : "up"} ${Math.abs(Math.round(k.dy * 100))}%` : ""} ${Math.abs(k.scale - 1) > 0.01 ? `size ${Math.round(k.scale * 100)}%` : ""}` : "");
+    if (fix) { $("pvApply").classList.remove("hide"); $("pvApply").onclick = () => {
+      $("prDx").value = Math.round((pl.print_dx + k.dx) * 100); $("prDy").value = Math.round((pl.print_dy + k.dy) * 100);
+      $("prScale").value = Math.round(pl.print_scale * k.scale * 100); $("pvApply").classList.add("hide"); printPreview(false); }; }
+  } catch (e) { if (seq === S.pvSeq) $("pvOut").innerHTML = `<span class="e">${esc(e.message)}</span>`; }
+}
+let pvTimer = null;
+const pvLater = () => { if (!S.pvShown) return; clearTimeout(pvTimer); pvTimer = setTimeout(() => printPreview(false), 500); };
 const printPlacement = () => ({ print_place: $("dPlace").value, print_dx: (+$("prDx").value || 0) / 100,
   print_dy: (+$("prDy").value || 0) / 100, print_scale: (+$("prScale").value || 100) / 100 });
 async function printWatch(id) {
@@ -776,7 +821,10 @@ async function printWatch(id) {
   } catch (e) { $("prStatus").innerHTML = `<span class="e">${esc(e.message)}</span>`; S.printJob = null; }
 }
 function initPrints() {
-  $("prBatch").onchange = () => { $("prStatus").textContent = ""; printGallery(); };
+  $("prBatch").onchange = () => { $("prStatus").textContent = ""; printGallery(); S.pvShown = false; $("pvColour").innerHTML = ""; $("pvPrint").innerHTML = '<option value="">First print in its folder</option>'; $("pvImg").innerHTML = '<span class="hint">Press Preview to see this batch.</span>'; };
+  $("pvGo").onclick = () => printPreview(false); $("pvCheck").onclick = () => printPreview(true);
+  for (const id of ["dPlace", "pvColour", "pvPrint", "pvFile"]) $(id).addEventListener("change", pvLater);
+  for (const id of ["prDx", "prDy", "prScale"]) $(id).addEventListener("input", pvLater);
   const start = async (redo) => {
     const name = $("prBatch").value; if (!name) return;
     if (redo && !confirm("Print every photo of this batch again with this position, replacing the earlier printed photos (also in Google Drive)?")) return;
@@ -791,7 +839,7 @@ function initPrints() {
     $("prAskOut").textContent = "Asking…"; $("prAskBtn").disabled = true;
     try {
       const cur = printPlacement(), r = await api("/api/prints/plan", { message, current: { place: cur.print_place, dx: cur.print_dx, dy: cur.print_dy, scale: cur.print_scale } });
-      $("dPlace").value = r.place; $("prDx").value = Math.round(r.dx * 100); $("prDy").value = Math.round(r.dy * 100); $("prScale").value = Math.round(r.scale * 100);
+      $("dPlace").value = r.place; $("prDx").value = Math.round(r.dx * 100); $("prDy").value = Math.round(r.dy * 100); $("prScale").value = Math.round(r.scale * 100); pvLater();
       $("prAskOut").textContent = (r.reply || "Done.") + " Press Add prints, or Print again to redo printed photos.";
     } catch (e) { $("prAskOut").innerHTML = `<span class="e">${esc(e.message)}</span>`; }
     $("prAskBtn").disabled = false;
