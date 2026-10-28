@@ -754,3 +754,49 @@ def test_prints_stage_prints_every_front_photo_of_a_batch(tmp_path):
     assert any(r["pose"] == "front_main_print_237" for r in rows)
     again = studio.Batch(s, out=tmp_path, prints=prints).run("prints")
     assert again["printed"] == 0  # already printed: nothing redone
+
+
+def test_print_adjustment_moves_and_resizes_and_stays_within_limits(tmp_path):
+    import numpy as np
+    from PIL import Image
+    from jagimage.prints import adjust, place_print
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    from test_gemini_bases import fake_photo
+    assert adjust(5, -5, 9) == {"dx": 0.3, "dy": -0.15, "scale": 1.6} and adjust(None, None, None) == {"dx": 0, "dy": 0, "scale": 1}
+    photo = fake_photo("#1E4636")
+    mask, _ = garment_mask(rgb_to_lab(np.asarray(photo)), "#1E4636")
+    art = Image.open(make_print(tmp_path / "p.png"))
+
+    def box(**kw):
+        diff = np.abs(np.asarray(place_print(photo, mask, art, **kw)).astype(int) - np.asarray(photo).astype(int)).sum(-1) > 30
+        ys, xs = np.nonzero(diff)
+        return ys.min(), xs.mean(), diff.sum()
+    y0, x0, n0 = box()
+    y1, x1, n1 = box(dy=0.1, dx=0.1, scale=0.8)
+    assert y1 > y0 + 5 and x1 > x0 + 5 and n1 < n0  # lower, to the right, smaller
+
+
+def test_print_checker_fixes_the_placement_or_flags_it(tmp_path):
+    s = studio.Spec(top_colours=["Navy"], models=1, poses=["front_main"], keep_png=False)
+    studio.Batch(s, out=tmp_path, generate=fake_generate).run()
+    arts = [("ok", make_print(tmp_path / "a.png")), ("stubborn", make_print(tmp_path / "b.png", size=(300, 400))),
+            ("offline", make_print(tmp_path / "c.png", size=(380, 300)))]
+    calls = []
+
+    def checker(photo, art):
+        calls.append(art.size)
+        if art.size == (380, 300):
+            raise RuntimeError("no connection")
+        if art.size == (300, 400):
+            return {"ok": False, "issues": ["too high: touches the collar"], "dx": 0, "dy": 0.05, "scale": 1}
+        first = sum(1 for c in calls if c == art.size) == 1
+        return {"ok": not first, "issues": ["too high"] if first else [], "dx": 0, "dy": 0.08 if first else 0, "scale": 1}
+    counts = studio.Batch(s, out=tmp_path, prints=lambda *a: arts, checker=checker).run("prints")
+    assert counts["printed"] == 3 and counts["print_fixed"] == 2 and counts["print_flagged"] == 2
+    qc = json.loads((tmp_path / s.name / "m0001" / "Navy__Navy" / "prints_qc.json").read_text())
+    assert qc["front_main_print_ok"]["ok"] and qc["front_main_print_ok"]["adjust"]["dy"] == 0.08
+    assert len(qc["front_main_print_stubborn"]["rounds"]) == 3 and qc["front_main_print_stubborn"]["adjust"]["dy"] == 0.1
+    assert "no connection" in qc["front_main_print_offline"]["error"]
+    rows = {r["pose"]: r for r in studio.Batch(s, out=tmp_path).results()}
+    assert rows["front_main_print_ok"]["print_check"] == {"ok": True, "fixed": True, "error": None, "issues": []}
+    assert rows["front_main_print_stubborn"]["print_check"]["issues"] == ["too high: touches the collar"]

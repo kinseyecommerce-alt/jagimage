@@ -114,6 +114,10 @@ class Spec:
     background: str = ""     # a marketplace guide's backdrop, e.g. "pure white (#FFFFFF)"; empty: the studio grey
     guide: str = ""          # the marketplace guide these settings came from (shown on the dashboard), e.g. "Myntra"
     print_place: str = "chest_large"  # where prints go on the front photos (jagimage.prints.PLACES)
+    print_dx: float = 0.0    # the whole batch's print moved right (+) / left, as a share of the chest width
+    print_dy: float = 0.0    # ... and down (+) / up
+    print_scale: float = 1.0  # ... and made bigger / smaller
+    print_check: bool = False  # the AI print checker looks at every printed photo and fixes the placement
     name: str = ""
 
     def __post_init__(self):
@@ -151,6 +155,10 @@ class Spec:
 
         if self.print_place not in PLACES:
             raise ValueError(f"print_place must be one of {', '.join(PLACES)}")
+        from .prints import adjust
+
+        a = adjust(self.print_dx, self.print_dy, self.print_scale)
+        self.print_dx, self.print_dy, self.print_scale = a["dx"], a["dy"], a["scale"]
         if len(self.background) > 200 or len(self.guide) > 80:
             raise ValueError("background must be at most 200 characters and guide at most 80")
         if len(self.extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
@@ -441,7 +449,7 @@ class Batch:
     def __init__(self, spec: Spec, out="output/studio", generate: Optional[Callable[[str, List[str]], bytes]] = None,
                  workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
                  export: Optional[str] = None, export_what="jpg", redo: bool = False,
-                 prints: Optional[Callable[[str, str, str], list]] = None):
+                 prints: Optional[Callable[[str, str, str], list]] = None, checker: Optional[Callable] = None):
         """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
         photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
@@ -460,9 +468,11 @@ class Batch:
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
-        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0, "printed": 0}
+        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0,
+                       "printed": 0, "print_fixed": 0, "print_flagged": 0}
         # prints(category, top style, colour) -> [(print name, PNG path)]: the shop's prints for that shirt
         self.prints = prints
+        self.checker = checker  # checker(printed photo, artwork) -> {ok, issues, dx, dy, scale}: the AI print checker
         if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
             generate.set_usage_log(self.root / "_usage.jsonl")
 
@@ -827,15 +837,63 @@ class Batch:
                                 if plain is None:
                                     plain = self._recoloured(img, tmask, bmask, base, t, b)
                                 from PIL import Image
-                                out = place_print(plain, tmask, Image.open(art_path), spec.print_place)
+                                art = Image.open(art_path)
+                                out, check = self._print_and_check(plain, tmask, art, m, dest)
                                 dest.parent.mkdir(parents=True, exist_ok=True)
                                 if spec.keep_png:
                                     out.save(dest)
                                 if jpg:
                                     fit_canvas(out, *spec.canvas).save(jpg, quality=95)
+                                if check:
+                                    self._print_qc(dest, check)
+                                if self.redo:
+                                    self._forget_upload(dest, dest.stem)
                                 self._event("printed", model=m, path=str(dest), top=t, bottom=b, pose=pose, print=name)
                             except (PrintError, OSError) as exc:
                                 self._event("errors", model=m, path=str(dest), error=f"print {name}: {exc}")
+
+    PRINT_FIXES = 2  # the checker may move or resize a print this many times, then it is flagged for a person
+
+    def _print_and_check(self, plain, tmask, art, m, dest):
+        """Place the print; with the AI checker on, show it each result and apply its fix (a move or a
+        resize) until it is happy, at most PRINT_FIXES times. Returns (photo, check record or None)."""
+        from .prints import adjust, place_print
+
+        spec = self.spec
+        adj = adjust(spec.print_dx, spec.print_dy, spec.print_scale)
+        out = place_print(plain, tmask, art, spec.print_place, **adj)
+        if not self.checker:
+            return out, None
+        record = {"rounds": [], "ok": False}
+        for n in range(self.PRINT_FIXES + 1):
+            try:
+                res = self.checker(out, art)
+            except Exception as exc:  # the checker can't be reached: keep the print, say it wasn't checked
+                record.update(error=f"{type(exc).__name__}: {exc}"[:300])
+                self._event("errors", model=m, path=str(dest), error=f"print check: {exc}")
+                break
+            record["rounds"].append({"ok": res["ok"], "issues": res["issues"], "at": dict(adj)})
+            moved = abs(res["dx"]) > 0.005 or abs(res["dy"]) > 0.005 or abs(res["scale"] - 1) > 0.01
+            if res["ok"] or not moved or n == self.PRINT_FIXES:
+                record["ok"] = res["ok"]
+                break
+            adj = adjust(adj["dx"] + res["dx"], adj["dy"] + res["dy"], adj["scale"] * res["scale"])
+            out = place_print(plain, tmask, art, spec.print_place, **adj)
+        record["adjust"] = adj
+        record["fixed"] = len(record["rounds"]) > 1
+        if record["fixed"]:
+            self._event("print_fixed", model=m, path=str(dest))
+        if not record["ok"]:
+            self._event("print_flagged", model=m, path=str(dest), issues=record["rounds"][-1]["issues"] if record["rounds"] else [])
+        return out, record
+
+    @staticmethod
+    def _print_qc(dest: Path, record: dict):
+        """Each printed photo's check, next to it in prints_qc.json (shown in the Print placement tab)."""
+        f = dest.parent / "prints_qc.json"
+        rows = json.loads(f.read_text()) if f.exists() else {}
+        rows[dest.stem] = record
+        f.write_text(json.dumps(rows, indent=1))
 
     def _recoloured(self, img, tmask, bmask, base, top, bottom):
         from .recolor import recolor_image
@@ -925,13 +983,20 @@ class Batch:
         for md in sorted(self.root.glob("m[0-9][0-9][0-9][0-9]")):
             for pd in sorted(p for p in md.iterdir() if p.is_dir() and not p.name.startswith("_")):
                 top, _, bottom = pd.name.partition("__")
+                pq = pd / "prints_qc.json"
+                pchecks = json.loads(pq.read_text()) if pq.exists() else {}
                 poses = {f.stem for f in pd.glob("*.png") if not f.name.startswith(".")}
                 poses |= {size.match(f.stem).group(1) for f in pd.glob("*_*x*.jpg") if size.match(f.stem) and not f.name.startswith(".")}
                 for pose in sorted(poses):
                     png = pd / f"{pose}.png"
                     # this pose's own JPG, not a printed one (front_main_print_237_...) that starts the same
                     canvas = sorted(c for c in pd.glob(f"{pose}_*x*.jpg") if size.match(c.stem) and size.match(c.stem).group(1) == pose)
-                    rows.append({"model": md.name, "top": top, "bottom": bottom or None, "pose": pose,
-                                 "png": str(png.relative_to(self.root)) if png.exists() else None,
-                                 "jpg": str(canvas[0].relative_to(self.root)) if canvas else None})
+                    row = {"model": md.name, "top": top, "bottom": bottom or None, "pose": pose,
+                           "png": str(png.relative_to(self.root)) if png.exists() else None,
+                           "jpg": str(canvas[0].relative_to(self.root)) if canvas else None}
+                    if pose in pchecks:  # the AI print checker's verdict on a printed photo
+                        c = pchecks[pose]
+                        row["print_check"] = {"ok": c.get("ok"), "fixed": c.get("fixed"), "error": c.get("error"),
+                                              "issues": (c.get("rounds") or [{}])[-1].get("issues", [])}
+                    rows.append(row)
         return rows

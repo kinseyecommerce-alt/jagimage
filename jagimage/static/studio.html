@@ -294,7 +294,20 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field" style="flex:2"><span>Batch</span><select id="prBatch"></select></label>
       <label class="field"><span>Print position</span><select id="dPlace"></select></label>
       <button class="btn primary" id="prStart" type="button">Add prints</button>
+      <button class="btn" id="prRedo" type="button" title="Print every photo of this batch again with the position below, replacing the earlier printed photos (also in Google Drive)">Print again</button>
     </div>
+    <div class="row">
+      <label class="field"><span>Move right (+) / left (−), %</span><input type="number" id="prDx" value="0" step="1" min="-30" max="30"></label>
+      <label class="field"><span>Move down (+) / up (−), %</span><input type="number" id="prDy" value="0" step="1" min="-15" max="40"></label>
+      <label class="field"><span>Size, %</span><input type="number" id="prScale" value="100" step="5" min="50" max="160"></label>
+    </div>
+    <p class="hint" style="margin-top:4px">Percent of the chest width, for the whole batch. Or tell the print agent:</p>
+    <div class="row">
+      <input type="text" id="prAsk" style="flex:1;min-width:220px" placeholder="e.g. a bit lower and 10% smaller, or make it a small left-chest logo">
+      <button class="btn" id="prAskBtn" type="button">Ask the print agent</button>
+    </div>
+    <p class="hint" id="prAskOut"></p>
+    <label class="check" style="margin-top:8px"><input type="checkbox" id="prCheck" checked> <span><b>AI print checker</b>: looks at every printed photo next to your artwork (centred? on the collar? cut off by an arm? looks printed, not stuck on?) and moves or resizes the print until it is right, at most twice; photos it still isn't happy with are marked. Uses Gemini or OpenAI, whichever has a key: about ₹0.1–0.5 per photo.</span></label>
     <p class="hint" id="prStatus"></p>
     <div class="gallery" id="prGallery"></div>
   </section>
@@ -743,14 +756,20 @@ async function printGallery() {
   const r = await api(`/api/batches/${encodeURIComponent(name)}/results?offset=0&limit=5000`);
   const printed = r.rows.filter((x) => x.pose.includes("_print_")).slice(-120).reverse();
   $("prGallery").innerHTML = printed.map((x) => { const src = `/thumbs/${encodeURIComponent(name)}/${x.jpg || x.png}`, full = `/files/${encodeURIComponent(name)}/${x.jpg || x.png}`;
-    return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}</b><span>${esc(x.model)} · print ${esc(x.pose.split("_print_")[1])}</span></span></a>`; }).join("");
+    const pc = x.print_check, badge = !pc ? "" : pc.error ? `<span class="hint">not checked</span>`
+      : pc.ok ? status("good", pc.fixed ? "Fixed by the checker" : "Checker: OK") : status("bad", (pc.issues || []).join("; ") || "Needs a look");
+    return `<a class="card" href="${full}" target="_blank" rel="noopener"><img loading="lazy" src="${src}" alt=""><span class="cap"><b>${esc(label(x.top))}</b><span>${esc(x.model)} · print ${esc(x.pose.split("_print_")[1])}</span>${badge}</span></a>`; }).join("");
   if (!printed.length && !S.printJob) $("prStatus").textContent = "No printed photos in this batch yet.";
 }
+const printPlacement = () => ({ print_place: $("dPlace").value, print_dx: (+$("prDx").value || 0) / 100,
+  print_dy: (+$("prDy").value || 0) / 100, print_scale: (+$("prScale").value || 100) / 100 });
 async function printWatch(id) {
   S.printJob = id;
   try {
     const j = await api(`/api/jobs/${id}`), c = j.counts;
-    $("prStatus").innerHTML = (j.running ? "Printing… " : "Done: ") + `<b>${fmt(c.printed)}</b> printed photos` + (c.errors ? ` · <span class="e">${fmt(c.errors)} problems</span>` : "")
+    $("prStatus").innerHTML = (j.running ? "Printing… " : "Done: ") + `<b>${fmt(c.printed)}</b> printed photos`
+      + (c.print_fixed ? ` · ${fmt(c.print_fixed)} fixed by the checker` : "") + (c.print_flagged ? ` · <span class="e">${fmt(c.print_flagged)} to look at</span>` : "")
+      + (c.errors ? ` · <span class="e">${fmt(c.errors)} problems</span>` : "")
       + (j.error ? ` · <span class="e">${esc(j.error.replace(/^\w+Error: (prints: )?/, ""))}</span>` : "");
     if (j.running) { setTimeout(() => printWatch(id), 2000); if (c.printed % 6 === 0) printGallery(); }
     else { S.printJob = null; printGallery(); }
@@ -758,12 +777,24 @@ async function printWatch(id) {
 }
 function initPrints() {
   $("prBatch").onchange = () => { $("prStatus").textContent = ""; printGallery(); };
-  $("prStart").onclick = async () => {
+  const start = async (redo) => {
     const name = $("prBatch").value; if (!name) return;
-    $("prStart").disabled = true; $("prStatus").textContent = "Starting…";
-    try { const j = await api(`/api/batches/${encodeURIComponent(name)}/prints`, { print_place: $("dPlace").value }); printWatch(j.id); }
+    if (redo && !confirm("Print every photo of this batch again with this position, replacing the earlier printed photos (also in Google Drive)?")) return;
+    $("prStart").disabled = $("prRedo").disabled = true; $("prStatus").textContent = "Starting…";
+    try { const j = await api(`/api/batches/${encodeURIComponent(name)}/prints`, { ...printPlacement(), print_check: $("prCheck").checked, redo }); printWatch(j.id); }
     catch (e) { $("prStatus").innerHTML = `<span class="e">${esc(e.message)}</span>`; }
-    $("prStart").disabled = false;
+    $("prStart").disabled = $("prRedo").disabled = false;
+  };
+  $("prStart").onclick = () => start(false); $("prRedo").onclick = () => start(true);
+  $("prAskBtn").onclick = async () => {
+    const message = $("prAsk").value.trim(); if (!message) return;
+    $("prAskOut").textContent = "Asking…"; $("prAskBtn").disabled = true;
+    try {
+      const cur = printPlacement(), r = await api("/api/prints/plan", { message, current: { place: cur.print_place, dx: cur.print_dx, dy: cur.print_dy, scale: cur.print_scale } });
+      $("dPlace").value = r.place; $("prDx").value = Math.round(r.dx * 100); $("prDy").value = Math.round(r.dy * 100); $("prScale").value = Math.round(r.scale * 100);
+      $("prAskOut").textContent = (r.reply || "Done.") + " Press Add prints, or Print again to redo printed photos.";
+    } catch (e) { $("prAskOut").innerHTML = `<span class="e">${esc(e.message)}</span>`; }
+    $("prAskBtn").disabled = false;
   };
   if (tabFromHash() === "prints") printTabRefresh().catch(() => {});
   $("pCat").innerHTML = S.opts.categories.map((c) => `<option value="${esc(c)}">${esc(label(c))}</option>`).join("");

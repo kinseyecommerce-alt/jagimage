@@ -111,7 +111,8 @@ def default_engine(spec: studio.Spec):
 class Job:
     """One or more batches run one after another, e.g. the same models in several top styles."""
 
-    def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg", redo=False, prints=None):
+    def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg", redo=False, prints=None,
+                 checker=None):
         specs = specs if isinstance(specs, list) else [specs]
         self.id = uuid.uuid4().hex[:8]
         self.specs, self.spec, self.stage = specs, specs[0], stage
@@ -122,7 +123,7 @@ class Job:
         self.recent = deque(maxlen=48)
         self.batches = [studio.Batch(sp, out=out, generate=engine(sp) if stage not in ("recolor", "prints") else None,
                                      workers=workers, on_event=self.event, export=export, export_what=export_what, redo=redo,
-                                     prints=prints)
+                                     prints=prints, checker=checker)
                         for sp in specs]
         self.batch = self.batches[0]
         self.export = str(self.batch.export) if self.batch.export else None
@@ -279,8 +280,8 @@ class Studio:
 
     def start(self, body: dict) -> Job:
         stage = body.pop("stage", "all")
-        redo = stage == "redo"  # recolour again over finished photos (no AI)
-        stage = "recolor" if redo else stage
+        redo = stage in ("redo", "redo_prints")  # make finished photos again (no AI)
+        stage = {"redo": "recolor", "redo_prints": "prints"}.get(stage, stage)
         if stage not in ("all", "bases", "recolor", "prints"):
             raise ValueError("stage must be all, bases, recolor, redo or prints")
         if stage == "prints" and not self.cloud:
@@ -302,8 +303,13 @@ class Studio:
         with self.lock:
             if any(j.finished is None for j in self.jobs.values()):
                 raise ValueError("A batch is already running. Stop it or wait for it to finish.")
+            checker = None
+            if stage == "prints" and spec.print_check:
+                if not (ready().get("gemini") or ready().get("openai")):
+                    raise ValueError("The print checker needs a Gemini or OpenAI key (Settings → API keys), or turn it off")
+                checker = self.cloud.agent.check_print
             job = Job(specs, self.out, self.engine, workers, stage, export, export_what, redo=redo,
-                      prints=self.cloud.print_files if self.cloud and stage == "prints" else None)
+                      prints=self.cloud.print_files if self.cloud and stage == "prints" else None, checker=checker)
             for sp in specs:
                 ledger.reserve(sp)
             self.jobs[job.id] = job
@@ -522,6 +528,15 @@ def make_handler(app: Studio):
                 if not (ready().get("gemini") or ready().get("openai")):
                     raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
                 return self._json({"guide": c.save_guide(c.agent.read_guide(name, data)), "guides": c.guides()})
+            if parts == ["api", "prints", "plan"]:
+                # "a bit lower and smaller": the print agent turns the shop's words into a placement
+                message = " ".join(str(body.get("message") or "").split())[:500]
+                if not message:
+                    raise ValueError("Tell the print agent what to change, e.g. a bit lower and smaller")
+                if not (ready().get("gemini") or ready().get("openai")):
+                    raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
+                cur = body.get("current") if isinstance(body.get("current"), dict) else {}
+                return self._json(c.agent.plan_print(message, cur))
             if parts == ["api", "prints"]:
                 self._admin()
                 return self._json({"rows": c.set_print_rows(body.get("rows")), "can_read": c.drive.can_read})
@@ -745,8 +760,10 @@ def make_handler(app: Studio):
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "prints":
                     # Dashboard: the shop's prints (Drive print folders) on this batch's finished front photos (no AI)
                     spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())
-                    place = body.get("print_place") or spec.get("print_place") or "chest_large"
-                    return self._json(app.start({**spec, "stage": "prints", "same_models": True, "print_place": place}).status())
+                    want = {k: body[k] for k in ("print_place", "print_dx", "print_dy", "print_scale", "print_check") if k in body}
+                    # redo: print again over earlier printed photos (e.g. after moving the print)
+                    job = app.start({**spec, **want, "stage": "redo_prints" if body.get("redo") else "prints", "same_models": True})
+                    return self._json(job.status())
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "redo":
                     # Dashboard: recolour a whole batch again with the latest recolouring (no AI)
                     spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())

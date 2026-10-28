@@ -475,10 +475,52 @@ GUIDE_SCHEMA = {
     "required": ["marketplace", "poses", "summary"],
 }
 GUIDE_TYPES = ".pdf, .docx, .txt, .md, .png, .jpg, .jpeg, .webp"
+
+PRINT_CHECK_SYSTEM = """You are the print checker of a clothing studio. Image 1 is a catalogue photo of a model wearing a
+T-shirt with a print placed on it by software; image 2 is the original print artwork. Judge only the print's
+placement and look on the shirt, as a buyer on Myntra or Amazon would:
+- centred on the chest (for a chest print), level, not riding onto the collar or neckband, not sliding under the
+  armpits, not cut off by an arm or hand, a sensible size for the chest;
+- the artwork itself intact: same design, colours and proportions as image 2, nothing missing or stretched;
+- it looks printed on the fabric (follows its light and folds), not like a sticker floating on top.
+Then give a fix as a move and a resize: dx moves the print right (+) or left (-) and dy moves it down (+) or up (-),
+both as a share of the chest width (0.05 = a small nudge, 0.15 = a lot); scale multiplies its size (0.9 = 10%
+smaller). Use 0, 0, 1 when the placement is right. ok is true only when a buyer would accept the photo as it is.
+Keep issues short and plain (e.g. "too high: touches the collar")."""
+
+PRINT_CHECK_SCHEMA = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}, "score": {"type": "integer"},
+                   "issues": {"type": "array", "items": {"type": "string"}},
+                   "dx": {"type": "number"}, "dy": {"type": "number"}, "scale": {"type": "number"}},
+    "required": ["ok", "issues", "dx", "dy", "scale"],
+}
+
+PRINT_PLAN_SYSTEM = """You set where a clothing studio's software places a print on T-shirt photos. Turn the shop's
+words into a placement. place: "chest_large" (centred, big graphic), "chest_medium" (centred, medium) or
+"left_chest" (small logo on the wearer's left chest). dx moves it right (+) or left (-) and dy down (+) or up (-),
+as a share of the chest width (0.03 = "a little", 0.08 = "more", 0.15 = "a lot"); scale multiplies its size
+(0.85 = "a bit smaller", 1.2 = "bigger"). Start from the current values given and change only what the words ask.
+reply: one short plain sentence saying what you changed."""
+
+PRINT_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {"place": {"type": "string"}, "dx": {"type": "number"}, "dy": {"type": "number"},
+                   "scale": {"type": "number"}, "reply": {"type": "string"}},
+    "required": ["place", "dx", "dy", "scale", "reply"],
+}
 # a guide's shot names that mean one of the Studio's own poses (whose wording keeps e.g. a true rear view)
 POSE_ALIASES = [("front", "front_main"), ("straight", "front_main"), ("back", "back"), ("rear", "back"),
                 ("side", "side"), ("profile", "side"), ("three_quarter", "threequarter"), ("threequarter", "threequarter"),
                 ("angle", "threequarter"), ("45", "threequarter"), ("pocket", "handpocket")]
+
+
+def _on_white(im):
+    from PIL import Image
+
+    bg = Image.new("RGB", im.size, "white")
+    bg.paste(im, mask=im.getchannel("A"))
+    return bg
 
 
 def drive_folder_id(link: str) -> str:
@@ -689,6 +731,35 @@ class Agent:
                 problems.append(f"Skipped {b.get('category', 'a batch')} {', '.join(listed('tops'))}: {exc}")
         total = {k: sum((r[k] or 0) for r in rows) for k in ("ai_images", "photos", "cost_inr")}
         return {"reply": str(ans.get("reply") or ""), "batches": rows, "bodies": bodies, "total": total, "problems": problems}
+
+    def check_print(self, photo, art) -> dict:
+        """The print checker: is the print on this photo placed right? {ok, score, issues, dx, dy, scale}
+        with the move and resize that would fix it (kept within jagimage.prints.LIMITS)."""
+        import io
+
+        from .prints import adjust
+
+        def jpeg(im, side):
+            im = im.convert("RGB") if im.mode != "RGBA" else _on_white(im)
+            im.thumbnail((side, side))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+
+        ans = self._ask("Check the print placement on image 1 (image 2 is the artwork).", PRINT_CHECK_SYSTEM,
+                        PRINT_CHECK_SCHEMA, [jpeg(photo, 1024), jpeg(art, 512)])
+        fix = adjust(ans.get("dx"), ans.get("dy"), ans.get("scale"))
+        issues = [" ".join(str(i).split())[:160] for i in (ans.get("issues") or []) if str(i).strip()][:5]
+        return {"ok": bool(ans.get("ok")), "score": int(ans.get("score") or 0), "issues": issues, **fix}
+
+    def plan_print(self, message: str, current: dict) -> dict:
+        """The shop's words ("a bit lower and smaller") as a placement: {place, dx, dy, scale, reply}."""
+        from .prints import PLACES, adjust
+
+        ans = self._ask(f"Current placement: {json.dumps(current)}\nThe shop says: {message}", PRINT_PLAN_SYSTEM, PRINT_PLAN_SCHEMA)
+        place = ans.get("place") if ans.get("place") in PLACES else current.get("place", "chest_large")
+        return {"place": place, **adjust(ans.get("dx"), ans.get("dy"), ans.get("scale")),
+                "reply": " ".join(str(ans.get("reply") or "").split())[:300]}
 
     def read_guide(self, filename: str, data: bytes) -> dict:
         """A marketplace's model photo guidelines (e.g. Myntra's) as Studio settings: photo size,

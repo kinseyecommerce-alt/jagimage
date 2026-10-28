@@ -77,11 +77,25 @@ def chest(mask: np.ndarray):
     return cx, neck, w
 
 
-def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: str = "chest_large") -> Image.Image:
-    """The photo with the artwork printed on the shirt's chest. mask: the shirt (0..1, same size)."""
+LIMITS = {"dx": (-0.3, 0.3), "dy": (-0.15, 0.4), "scale": (0.5, 1.6)}  # how far a placement may be adjusted
+
+
+def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
+    """A placement adjustment, kept within LIMITS: dx, dy move the print by a share of the chest width
+    (+ is right and down in the photo); scale makes it bigger or smaller."""
+    clamp = lambda v, k: float(min(max(float(v or 0) if k != "scale" else float(v or 1), LIMITS[k][0]), LIMITS[k][1]))
+    return {"dx": round(clamp(dx, "dx"), 3), "dy": round(clamp(dy, "dy"), 3), "scale": round(clamp(scale, "scale"), 3)}
+
+
+def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: str = "chest_large",
+                dx: float = 0.0, dy: float = 0.0, scale: float = 1.0) -> Image.Image:
+    """The photo with the artwork printed on the shirt's chest. mask: the shirt (0..1, same size).
+    dx, dy, scale: an adjustment of the place (see adjust())."""
     if place not in PLACES:
         raise PrintError(f"place must be one of {', '.join(PLACES)}")
     share, below, offset = PLACES[place]
+    a_ = adjust(dx, dy, scale)
+    share, below, offset = share * a_["scale"], below + a_["dy"], offset + a_["dx"]
     rgb = np.asarray(photo.convert("RGB")).astype(np.float32) / 255
     H, W = rgb.shape[:2]
     cx, neck, cw = chest(mask)
@@ -92,8 +106,8 @@ def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: s
     art = art.crop(bbox)  # the design itself, without the empty canvas around it
     pw = share * cw
     ph = pw * art.height / art.width
-    if ph > MAX_TALL * cw:
-        ph = MAX_TALL * cw
+    if ph > MAX_TALL * a_["scale"] * cw:
+        ph = MAX_TALL * a_["scale"] * cw
         pw = ph * art.width / art.height
     pw, ph = max(2, int(round(pw))), max(2, int(round(ph)))
     x0 = int(round(cx + offset * cw - pw / 2))

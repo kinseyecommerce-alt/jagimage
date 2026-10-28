@@ -461,3 +461,27 @@ def test_print_folders_are_saved_and_their_prints_downloaded_once(tmp_path):
     cloud.drive.can_read = False
     with pytest.raises(RuntimeError, match="Reconnect Google Drive"):
         cloud.print_files("Men", "HalfSleeveTee", "Black")
+
+
+def test_print_agents_check_photos_and_turn_words_into_a_placement(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+    llm = FakeLLM({"ok": False, "score": 4, "issues": ["too high", ""], "dx": 0, "dy": 0.9, "scale": 1.0})
+    agent = Agent(client=llm, model="gemini-test")
+    res = agent.check_print(Image.new("RGB", (800, 1200), "navy"), Image.new("RGBA", (300, 300), (255, 0, 0, 255)))
+    assert res == {"ok": False, "score": 4, "issues": ["too high"], "dx": 0.0, "dy": 0.4, "scale": 1.0}  # move kept within limits
+    assert len(llm.asked[1]) == 3  # photo, artwork, then the question
+    llm.answer = {"place": "nowhere", "dx": 0, "dy": 0.05, "scale": 0.85, "reply": "Moved it a little lower and made it smaller."}
+    plan = agent.plan_print("a bit lower and smaller", {"place": "chest_medium", "dx": 0, "dy": 0, "scale": 1})
+    assert plan == {"place": "chest_medium", "dx": 0.0, "dy": 0.05, "scale": 0.85, "reply": "Moved it a little lower and made it smaller."}
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"), agent=agent)
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        code, _, body = call(base + "/api/prints/plan", {"message": "a bit lower and smaller", "current": {"place": "chest_large"}}, cookie=cookie)
+        assert code == 200 and json.loads(body)["scale"] == 0.85
+        assert call(base + "/api/prints/plan", {"message": " "}, cookie=cookie)[0] == 400
+    finally:
+        httpd.shutdown()
