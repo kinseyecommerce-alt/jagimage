@@ -57,6 +57,7 @@ CLOSE_FRAMING = ("Close-up framing exactly as the pose describes, the garment de
                  "real model wearing it, eye-level camera, 3:4 portrait")
 TOP_ONLY_NEW_PHOTO = "Create a new three-quarter photo framed from the top of the head to just above the knees (no legs below the knee, no feet). "
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
+BOTTOM_TRIM_BAND = 0.06  # of photo height: only that close above the top's hem can pixels be trimmed as the bottom
 BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
 MIN_BASE_STRENGTH = 0.33  # a base garment keeps at least this share of its base colour's chroma (good ones: >= 0.38)
 BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
@@ -73,6 +74,15 @@ def colour_hex(name: str, fabric: str) -> str:
         if name in L.COLOURS[f]:
             return L.COLOURS[f][name]
     raise ValueError(f"Unknown colour {name!r}: use a palette name or #RRGGBB")
+
+
+def _base_hued(lab, base):
+    """Pixels plainly in the base colour's hue (its folds included): never the photographed bottom."""
+    import numpy as np
+
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    dh = np.abs(np.angle(np.exp(1j * (np.arctan2(lab[..., 2], lab[..., 1]) - np.arctan2(base[2], base[1])))))
+    return (dh < np.radians(40)) & (C > 0.015)
 
 
 def base_of(hex_: str) -> str:
@@ -714,7 +724,7 @@ class Batch:
             raise MaskError(why)
         top, _ = garment_mask(lab, TOP_BASES[base[0]][1])
         if not base[1] and self.spec.bottom not in FIXED_BOTTOMS:
-            top = self._trim_fixed_bottom(lab, top)
+            top = self._trim_fixed_bottom(lab, top, base)
         masks = {"top": top}
         if base[1]:
             bottom, _ = garment_mask(lab, BOTTOM_BASES[base[1]][1])
@@ -734,7 +744,7 @@ class Batch:
             save_mask(path.parent / f"{stem}_{k}_mask.png", mk)
         (path.parent / f"{stem}_mask_version.txt").write_text(str(MASK_VERSION))
 
-    def _trim_fixed_bottom(self, lab, top):
+    def _trim_fixed_bottom(self, lab, top, base):
         """Top-only shots: a black or grey bottom can carry a faint tint of the base green near the
         seam, and the mask's shadow growth then reaches into it. Pixels in the bottom's own colour that
         connect to the bottom are taken out again; dark shadow inside the top is kept."""
@@ -757,6 +767,10 @@ class Batch:
         if np.linalg.norm(seen - want) > 0.25:  # what's below isn't the bottom (e.g. bare legs): leave it
             return top
         like = np.linalg.norm(lab - seen, axis=-1) < BOTTOM_LIKE
+        # never the base colour itself, and only near the hem: a navy bottom and the top's dark folds are
+        # alike, and following them would reach up the side folds to the sleeves (left in bottle green)
+        like &= ~_base_hued(lab, hex_to_lab(TOP_BASES[base[0]][1]))
+        like[:max(0, ys.max() - int(BOTTOM_TRIM_BAND * lab.shape[0]))] = False
         seed = like & (top < 0.5)
         if not seed.any():
             return top

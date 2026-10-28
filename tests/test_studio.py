@@ -845,3 +845,23 @@ def test_oversized_drop_shoulder_tee_is_for_men_and_women_only(tmp_path):
     adults = specs_from({"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy"],
                          "tops": list(studio.TOPS)}, ledger)
     assert [s.top for s in adults][-1] == "OversizedTee" and len(adults) == 6
+
+
+def test_top_only_trim_keeps_dark_folds_far_above_the_hem(tmp_path):
+    """A navy bottom and a bottle-green top's dark side fold look alike: the trim must not follow the
+    fold up to the sleeve (that part of the top was left in bottle green), only clear the bottom at the hem."""
+    import numpy as np
+
+    from jagimage.recolor import rgb_to_lab
+
+    h, w = 300, 200
+    rgb = np.full((h, w, 3), 230, np.uint8)
+    rgb[40:200, 40:160] = (30, 70, 54)        # the top in bottle green
+    rgb[200:300, 60:140] = (34, 40, 66)       # navy trackpants below the hem
+    rgb[60:200, 95:105] = (28, 32, 40)        # a dark, nearly colourless fold running down to the hem
+    top = np.zeros((h, w), np.float32)
+    top[40:204, 40:160] = 1                    # the mask's shadow growth ran a little into the trackpants
+    spec = studio.Spec(category="Men", top="OversizedTee", bottom="Trackpants", top_colours=["Navy"], bottom_colour="Navy", shot="top")
+    out = studio.Batch(spec, out=tmp_path)._trim_fixed_bottom(rgb_to_lab(rgb), top, ("dark", None))
+    assert out[60:150, 95:105].min() > 0.5    # the fold far above the hem stays part of the top
+    assert out[202:204, 70:90].max() < 0.5    # the trackpants just below the hem are taken out
