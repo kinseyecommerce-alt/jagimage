@@ -190,7 +190,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
   <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
-  <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
+  <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-meta"></span>Meta</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
 <div id="dashTab" class="hide">
@@ -222,7 +222,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   <section class="panel" id="enginePanel">
     <h2>Engine</h2>
     <p class="hint" style="margin:-4px 0 10px">The AI that makes the base photos, for every batch and the Agent. Its key goes in API keys below.</p>
-    <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="runpod">RunPod (own GPU)</button></div>
+    <div class="seg" id="provider"><button data-v="gemini" class="on">Gemini</button><button data-v="openai">OpenAI</button><button data-v="meta">Meta</button><button data-v="runpod">RunPod (own GPU)</button></div>
     <div class="row">
       <label class="field" id="modelField"><span>Gemini model</span><select id="geminiModel"><option value="flash" selected>Flash (cheaper, recommended)</option><option value="pro">Pro</option></select></label>
       <label class="field" id="sizeField"><span>Gemini size</span><select id="imageSize"></select></label>
@@ -589,10 +589,10 @@ const nice = (v) => NAMES[v] || label(v);
 const hexOf = (name) => { if (/^#[0-9a-f]{6}$/i.test(name)) return name; for (const f of [S.fabric(), ...Object.keys(S.opts.palettes)]) if (S.opts.palettes[f][name]) return S.opts.palettes[f][name]; return "#888"; };
 S.fabric = () => $("fabric").value;
 
-const engineName = (v) => ({ gemini: "Gemini", openai: "OpenAI", runpod: "RunPod (own GPU)" })[v] || v;
+const engineName = (v) => ({ gemini: "Gemini", openai: "OpenAI", meta: "Meta (Muse)", runpod: "RunPod (own GPU)" })[v] || v;
 function engineFields() {
   const v = S.provider;
-  $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v === "runpod"); $("batchWho").textContent = v === "openai" ? "OpenAI" : "Google";
+  $("sizeField").classList.toggle("hide", v !== "gemini"); $("modelField").classList.toggle("hide", v !== "gemini"); $("batchField").classList.toggle("hide", v === "runpod" || v === "meta"); $("batchWho").textContent = v === "openai" ? "OpenAI" : "Google";
   $("qualityField").classList.toggle("hide", v !== "openai");
   $("runpodHint").classList.toggle("hide", v !== "runpod");
   if (v === "runpod") $("workers").value = 1;
@@ -636,7 +636,7 @@ function spec() {
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
     custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
-    batch: S.provider !== "runpod" && $("batchMode").checked, keep_png: $("keepPng").checked,
+    batch: !["runpod", "meta"].includes(S.provider) && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
     one_base: $("oneBase").checked, canvas: [+$("photoW").value || 1500, +$("photoH").value || 1500],
     background: $("background").value.trim(), guide: S.guide || "" };
@@ -726,7 +726,7 @@ function syncBottom() {
   $("fixedNote").classList.toggle("hide", !jeans);
 }
 function keys(p) {
-  for (const k of ["gemini", "openai", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]);
+  for (const k of ["gemini", "openai", "meta", "runpod"]) $("dot-" + k).classList.toggle("on", !!p[k]);
   if (S.opts) { S.opts.providers = p; engineSummary(); }
 }
 
@@ -1050,7 +1050,7 @@ function initDashboard() {
 }
 
 // ---------- Settings: API keys, my password, users (admin) ----------
-const KEY_INFO = { gemini: ["Gemini", "AIza…  (aistudio.google.com/apikey)"], openai: ["OpenAI (GPT)", "sk-…  (platform.openai.com/api-keys)"], runpod: ["RunPod (own GPU)", "Pod token"] };
+const KEY_INFO = { gemini: ["Gemini", "AIza…  (aistudio.google.com/apikey)"], openai: ["OpenAI (GPT)", "sk-…  (platform.openai.com/api-keys)"], meta: ["Meta (Muse Image)", "Model API key  (dev.meta.ai)"], runpod: ["RunPod (own GPU)", "Pod token"] };
 const isAdmin = () => !S.opts.cloud || (S.me && S.me.role === "admin");
 async function renderSettings() {
   if (S.opts.cloud && !S.me) S.me = await api("/api/me");
@@ -1150,8 +1150,8 @@ async function init() {
   wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom");
   seg($("pairing"), ["match", "each"], S.pairing, (v) => { S.pairing = v; syncBottom(); refreshPlan(); }, (v) => v === "match" ? "Same colour as the top" : "Choose bottom colours");
   // start on an engine that has a key (e.g. OpenAI when no Gemini key is saved)
-  if (!S.opts.providers[S.provider]) S.provider = ["openai", "gemini", "runpod"].find((k) => S.opts.providers[k]) || S.provider;
-  seg($("provider"), ["gemini", "openai", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
+  if (!S.opts.providers[S.provider]) S.provider = ["openai", "gemini", "meta", "runpod"].find((k) => S.opts.providers[k]) || S.provider;
+  seg($("provider"), ["gemini", "openai", "meta", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
   for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   for (const id of ["geminiModel", "imageSize", "quality", "batchMode"]) $(id).addEventListener("change", engineSummary);
   setTimeout(engineSummary);  // once the size and quality lists are filled

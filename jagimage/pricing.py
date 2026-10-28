@@ -15,6 +15,7 @@ OUTPUT = {
     ("openai", "*"): {"low": 0.005, "medium": 0.041, "high": 0.165},
 }
 # Estimated input per image: the ~900-token prompt plus 0-2 reference photos (identity / approved front).
+META_PER_IMAGE = 0.01  # Muse Image: flat price per returned image (dev.meta.ai/docs/image-generation)
 INPUT = {"gemini-3-pro-image": 0.003, "gemini-3.1-flash-image": 0.001, "openai": 0.02}
 RETRY_ALLOWANCE = 0.10  # images the app re-asks for when the AI gets the base colours wrong, network errors
 BATCH_DISCOUNT = 0.5    # batch mode: half the standard price (Google and OpenAI list it this way)
@@ -43,6 +44,8 @@ def per_image(provider: str, setting: str, model: Optional[str] = None) -> Optio
     (e.g. OpenAI xhigh/max, which OpenAI doesn't list per image)."""
     if provider == "runpod":
         return RUNPOD_USD_PER_HOUR * RUNPOD_SECONDS / 3600
+    if provider == "meta":
+        return META_PER_IMAGE
     if provider == "gemini":
         model = model or gemini_model()
         out = OUTPUT.get(("gemini", model), {}).get(setting)
@@ -67,7 +70,7 @@ def estimate(spec) -> dict:
     return {"per_image_usd": round(each, 4), "ai_cost_usd": round(base, 2), "with_retries_usd": round(total, 2),
             "per_photo_usd": round(total / photos, 4), "usd_inr": USD_INR, "with_retries_inr": round(total * USD_INR),
             "per_photo_inr": round(total / photos * USD_INR, 2), "retry_allowance": RETRY_ALLOWANCE,
-            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": {"gemini": model, "runpod": "qwen-image-edit-2511"}.get(spec.provider, "openai"),
+            "prices_checked": PRICES_CHECKED, "batch": bool(getattr(spec, "batch", False)), "model": {"gemini": model, "runpod": "qwen-image-edit-2511", "meta": "muse-image-1.0"}.get(spec.provider, "openai"),
             **({"gpu_usd_per_hour": RUNPOD_USD_PER_HOUR, "gpu_seconds_per_image": RUNPOD_SECONDS} if spec.provider == "runpod" else {})}
 
 

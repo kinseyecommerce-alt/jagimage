@@ -29,7 +29,7 @@ input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #d9dde
 <body><form id="f"><h1>Jag Studio</h1><input id="un" placeholder="User name" value="admin" autocomplete="username" autocapitalize="none"><input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus><button>Sign in</button><p id="e"></p></form>
 <script>f.onsubmit=async(ev)=>{ev.preventDefault();const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:un.value,password:pw.value})});
 if(r.ok)location.href="/";else e.textContent=(await r.json()).error||"Wrong password"}</script></body></html>"""
-KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "runpod": "JAGIMAGE_RUNPOD_TOKEN"}
+KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "meta": "META_MODEL_API_KEY", "runpod": "JAGIMAGE_RUNPOD_TOKEN"}
 RUNPOD_URL_ENV = "JAGIMAGE_RUNPOD_URL"
 
 

@@ -5,6 +5,7 @@
   at 1K/2K/4K resolution with a fixed 3:4 aspect ratio.
 - runpod: your own GPU pod running pilot/runpod/qwen_server.py (Qwen-Image-Edit-2511, open model),
   reached at JAGIMAGE_RUNPOD_URL with the token JAGIMAGE_RUNPOD_TOKEN. You pay RunPod by the hour.
+- meta: Meta's Muse Image on the Meta Model API (META_MODEL_API_KEY), a flat price per image.
 """
 
 import base64
@@ -384,7 +385,50 @@ class RunPodProvider:
         return to_png(base64.b64decode(out["png"]))
 
 
+class MetaProvider:
+    """Muse Image on the Meta Model API: OpenAI-style image endpoints, reference photos sent as data URLs
+    in a JSON body. Its web and image search tools are switched off, so a photo is made only from the
+    prompt and our reference photos. Meta picks the pixel size; `size` only sets the 2:3 shape."""
+    name = "meta"
+    URL = "https://api.meta.ai/v1"
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, size="1024x1536", timeout=300, opener=None):
+        self.key = api_key or os.environ.get("META_MODEL_API_KEY", "")
+        if not self.key:
+            raise ValueError("Add your Meta Model API key first")
+        self.model = model or os.environ.get("JAGIMAGE_META_MODEL", "muse-image-1.0")
+        self.size, self.timeout = size, timeout
+        if opener is None:
+            from urllib.request import urlopen as opener
+        self.opener = opener
+
+    def generate(self, prompt: str, refs: List[str]) -> bytes:
+        import json
+        from urllib.error import HTTPError
+        from urllib.request import Request
+
+        body = {"model": self.model, "prompt": prompt, "n": 1, "size": self.size, "output_format": "png",
+                "response_format": "b64_json",
+                "tool_enablement": {"enable_image_search": False, "enable_web_search": False, "enable_shell": False}}
+        if refs:
+            body["images"] = []
+            for r in refs:
+                mime = mimetypes.guess_type(r)[0] or "image/png"
+                with open(r, "rb") as f:
+                    body["images"].append({"image_url": f"data:{mime};base64," + base64.b64encode(f.read()).decode()})
+        req = Request(self.URL + ("/images/edits" if refs else "/images/generations"), data=json.dumps(body).encode(),
+                      headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.key}"})
+        try:
+            with self.opener(req, timeout=self.timeout) as r:
+                out = json.loads(r.read())
+        except HTTPError as exc:
+            raise RuntimeError(f"Meta API error {exc.code}: {exc.read()[:300].decode(errors='replace')}") from exc
+        return to_png(base64.b64decode(out["data"][0]["b64_json"]))
+
+
 def make_provider(name: str = "openai", **kw):
+    if name == "meta":
+        return MetaProvider(api_key=kw.get("api_key"))
     if name == "runpod":
         return RunPodProvider(url=kw.get("url"), token=kw.get("api_key"))
     if name == "gemini":

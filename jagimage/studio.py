@@ -117,7 +117,7 @@ class Spec:
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
     same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
     one_base: bool = False   # one light base shoot per model; dark colours are recoloured from it too (half the AI images)
-    provider: str = "gemini"  # gemini, openai, or runpod (your own GPU pod with an open model)
+    provider: str = "gemini"  # gemini, openai, meta, or runpod (your own GPU pod with an open model)
     quality: str = "medium"  # OpenAI: medium looks right for catalogue photos at about half the cost of high
     image_size: str = "2K"   # Gemini
     gemini_model: str = "flash"  # Gemini: flash (default, cheaper) or pro
@@ -146,8 +146,8 @@ class Spec:
             raise ValueError("pick at least one top colour")
         if self.pairing not in ("match", "each"):
             raise ValueError("pairing must be match or each")
-        if self.provider not in ("gemini", "openai", "runpod"):
-            raise ValueError("provider must be gemini, openai or runpod")
+        if self.provider not in ("gemini", "openai", "meta", "runpod"):
+            raise ValueError("provider must be gemini, openai, meta or runpod")
         if self.gemini_model not in ("flash", "pro"):
             raise ValueError("gemini_model must be flash or pro")
         if self.batch and self.provider not in ("gemini", "openai"):
