@@ -278,6 +278,7 @@ class Studio:
         self.keys_file = Path(keys_file) if keys_file else None  # desktop app: remembered API keys
         self.jobs = {}
         self.previews = {}
+        self.facetest = {"running": False, "done": [], "errors": []}
         self.lock = threading.Lock()
 
     def start(self, body: dict) -> Job:
@@ -379,6 +380,43 @@ class Studio:
         running = [j.status() for j in self.jobs.values() if j.finished is None]
         return {"totals": totals, "batches": batches, "attention": sorted(attention, key=lambda a: -a["updated"])[:60],
                 "running": [{"id": r["id"], "name": r["name"], "counts": r["counts"], "plan": r["plan"]} for r in running]}
+
+    def face_test(self, body: dict):
+        """Admin test: one finished AI base photo, the face changed to other models' faces and nothing
+        else, made on the server with the app's OpenAI key. Saved in the batch's _facetest folder."""
+        from . import faces
+        from .providers import OpenAIProvider
+
+        b = self.batch_for(str(body.get("batch") or ""))
+        model, base = int(body.get("model") or 1), str(body.get("base") or "dark")
+        src = next((b.base_path(model, k, "front_main") for k in b.spec.bases() if k[0] == base), None)
+        if src is None or not src.exists():
+            raise FileNotFoundError(f"No {base} base photo for model {model} in {b.spec.name}")
+        nums = [int(n) for n in body.get("faces") or []][:8]
+        quality = body.get("quality") if body.get("quality") in ("low", "medium", "high") else "medium"
+        if self.facetest["running"]:
+            raise ValueError("A face test is already running")
+        self.facetest = {"running": True, "done": [], "errors": []}
+        out = Path(self.out) / b.spec.name / "_facetest"
+        out.mkdir(exist_ok=True)
+
+        def run():
+            p = OpenAIProvider(quality=quality, fidelity="high")
+            for n in nums:
+                who = faces.describe(b.spec.category, n, hair=False)
+                prompt = ("Edit image 1. Change ONLY the face so it is clearly a different person: " + who + ". Keep everything "
+                          "else exactly as it is: the same hairstyle and hair, body, pose, hands, arms, the t-shirt with every "
+                          "fold and its exact colour, the bottoms, the background, lighting, framing and camera. Neck and face "
+                          "skin tone match the arms. Photorealistic studio e-commerce photo, sharp natural face.")
+                try:
+                    (out / f"m{model:04d}_{base}_face{n}.png").write_bytes(p.generate(prompt, [str(src)]))
+                    self.facetest["done"].append(f"{b.spec.name}/_facetest/m{model:04d}_{base}_face{n}.png")
+                except Exception as exc:
+                    self.facetest["errors"].append(f"face {n}: {exc}")
+            self.facetest["running"] = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return self.facetest
 
     def batch_for(self, name: str) -> studio.Batch:
         spec_file = Path(self.out) / name / "spec.json"
@@ -717,6 +755,9 @@ def make_handler(app: Studio):
                 if len(parts) == 3 and parts[:2] == ["api", "preview"]:
                     pv = app.previews.get(parts[2])
                     return self._json(pv.status()) if pv else self._json({"error": "no such preview"}, 404)
+                if parts == ["api", "facetest"]:
+                    self._admin()
+                    return self._json(app.facetest)
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "results":
                     rows = app.batch_for(parts[2]).results()
                     off, lim = int(q.get("offset", ["0"])[0]), int(q.get("limit", ["60"])[0])
@@ -824,6 +865,9 @@ def make_handler(app: Studio):
                     if app.keys_file and (body.get("remember") or body.get("clear")):
                         save_keys(app.keys_file)
                     return self._json(ready())
+                if parts == ["api", "facetest"]:
+                    self._admin()
+                    return self._json(app.face_test(body))
                 if parts == ["api", "jobs"]:
                     if body.get("export"):
                         self._admin()  # writing to a folder of one's choice on the server

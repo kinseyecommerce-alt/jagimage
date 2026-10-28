@@ -865,3 +865,36 @@ def test_top_only_trim_keeps_dark_folds_far_above_the_hem(tmp_path):
     out = studio.Batch(spec, out=tmp_path)._trim_fixed_bottom(rgb_to_lab(rgb), top, ("dark", None))
     assert out[60:150, 95:105].min() > 0.5    # the fold far above the hem stays part of the top
     assert out[202:204, 70:90].max() < 0.5    # the trackpants just below the hem are taken out
+
+
+def test_face_test_changes_only_the_face_of_a_finished_base(tmp_path, monkeypatch):
+    from jagimage import providers
+
+    seen = []
+    monkeypatch.setattr(providers.OpenAIProvider, "__init__", lambda self, **kw: None)
+    monkeypatch.setattr(providers.OpenAIProvider, "generate", lambda self, prompt, refs: seen.append((prompt, refs)) or b"png")
+    app, httpd = serve(port=0, out=str(tmp_path), engine=lambda spec: fake_generate)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        code, job = _post(base + "/api/jobs", {"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants",
+                                              "top_colours": ["Navy"], "models": 1})
+        for _ in range(600):
+            st = json.loads(_get(f"{base}/api/jobs/{job['id']}")[1])
+            if not st["running"]:
+                break
+            time.sleep(0.1)
+        m = studio.Spec(**json.loads((tmp_path / st["name"] / "spec.json").read_text())).first_model
+        assert _post(base + "/api/facetest", {"batch": "nope", "model": m})[0] == 400
+        code, ft = _post(base + "/api/facetest", {"batch": st["name"], "model": m, "faces": [201, 202]})
+        assert code == 200, ft
+        for _ in range(100):
+            ft = json.loads(_get(base + "/api/facetest")[1])
+            if not ft["running"]:
+                break
+            time.sleep(0.05)
+        assert len(ft["done"]) == 2 and not ft["errors"]
+        assert all("Change ONLY the face" in p and r[0].endswith("front_main.png") for p, r in seen)
+        assert _get(f"{base}/files/{ft['done'][0]}")[0] == 200
+    finally:
+        httpd.shutdown()
