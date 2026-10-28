@@ -401,7 +401,7 @@ class Studio:
         out.mkdir(exist_ok=True)
 
         def run():
-            p = OpenAIProvider(quality=quality, fidelity="high")
+            p = OpenAIProvider(quality=quality)
             for n in nums:
                 who = faces.describe(b.spec.category, n, hair=False)
                 prompt = ("Edit image 1. Change ONLY the face so it is clearly a different person: " + who + ". Keep everything "
