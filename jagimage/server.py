@@ -56,7 +56,7 @@ def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
-        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
+        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "can_remember": bool(app and app.keys_file),
@@ -88,6 +88,12 @@ def load_keys(path: Path):
 
 
 GUIDE_LIMIT = 21_000_000  # a guide upload: about 15 MB of file once base64-encoded
+
+def market_options():
+    from .market import MARKETS
+
+    return [{"key": k, "label": lb, "size": f"{w}x{h}", "white": white} for k, (lb, (w, h), white) in MARKETS.items()]
+
 
 def default_engine(spec: studio.Spec):
     from .providers import make_provider
@@ -766,6 +772,13 @@ def make_handler(app: Studio):
                     data = app.zip_bytes(parts[2], q.get("what", ["jpg"])[0])
                     return self._send(200, data, "application/zip",
                                       {"Content-Disposition": 'attachment; filename="%s.zip"' % re.sub(r"[^A-Za-z0-9_.-]", "_", parts[2])})
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "market":
+                    from . import market
+
+                    to = q.get("to", [""])[0]
+                    data = market.zip_bytes(app.batch_for(parts[2]), to)
+                    name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{parts[2]}_{to}")
+                    return self._send(200, data, "application/zip", {"Content-Disposition": f'attachment; filename="{name}.zip"'})
                 if parts[0] in ("files", "thumbs") and len(parts) >= 3:
                     out_root = Path(app.out).resolve()
                     root = (out_root / parts[1]).resolve()

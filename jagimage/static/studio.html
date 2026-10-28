@@ -556,8 +556,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h2 style="margin:0">Photos <span class="n" id="galTotal"></span></h2>
         <span class="row">
-          <a class="btn" id="zipJpg" href="#">Download marketplace JPGs (ZIP)</a>
+          <a class="btn" id="zipJpg" href="#">Square JPGs 1500 × 1500 (ZIP)</a>
           <a class="btn" id="zipPng" href="#">Full-size PNG (ZIP)</a>
+          <span class="mkt"><select id="mktTo" aria-label="Marketplace"></select> <a class="btn" id="zipMkt" href="#">Download for marketplace (ZIP)</a></span>
         </span>
       </div>
       <div class="gallery" id="gallery"></div>
@@ -1203,7 +1204,17 @@ function showJob(j) {
     : e.kind === "ai_done" ? `<div>m${String(e.model).padStart(4, "0")}: AI base ${esc(e.base)} ${esc(label(e.pose))}</div>`
     : `<div>m${String(e.model).padStart(4, "0")}: ${esc(label(e.top))}${e.bottom ? " / " + esc(label(e.bottom)) : ""} ${esc(label(e.pose))}</div>`).join("");
 }
-function openBatch(name) { S.batch = name; $("zipJpg").href = `/api/batches/${encodeURIComponent(name)}/zip?what=jpg`; $("zipPng").href = `/api/batches/${encodeURIComponent(name)}/zip?what=png`; loadGallery(true); }
+function mktLink() {
+  if (!S.batch) return;
+  $("zipMkt").href = `/api/batches/${encodeURIComponent(S.batch)}/market?to=${encodeURIComponent($("mktTo").value)}`;
+}
+function fillMarkets() {
+  const sel = $("mktTo");
+  if (sel.options.length) return;
+  for (const m of S.opts.markets || []) sel.add(new Option(`${m.label} ${m.size.replace("x", " × ")}${m.white ? ", white" : ""}`, m.key));
+  sel.addEventListener("change", mktLink);
+}
+function openBatch(name) { fillMarkets(); S.batch = name; $("zipJpg").href = `/api/batches/${encodeURIComponent(name)}/zip?what=jpg`; $("zipPng").href = `/api/batches/${encodeURIComponent(name)}/zip?what=png`; mktLink(); loadGallery(true); }
 let galBusy = false;
 async function loadGallery(reset, quiet) {
   if (!S.batch || galBusy) return; galBusy = true;
