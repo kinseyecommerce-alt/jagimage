@@ -500,11 +500,74 @@ def make_handler(app: Studio):
                 return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
             if parts == ["api", "guides"]:
                 return self._json({"guides": c.guides()})
+            if parts == ["api", "designs"]:
+                from . import designs as D
+
+                return self._json({"sets": c.designs.sets(), "themes": D.THEMES, "tees": list(D.TEES), "languages": list(D.LANGUAGES),
+                                   "jobs": [j.status() for j in c.design_jobs.values()][-3:]})
+            if len(parts) == 4 and parts[:3] == ["api", "designs", "jobs"]:
+                job = c.design_jobs.get(parts[3])
+                return self._json(job.status()) if job else self._json({"error": "not found"}, 404)
+            if len(parts) == 3 and parts[0] in ("designs", "designthumbs"):
+                f = c.designs.folder(parts[1]) / parts[2]
+                if "/" in parts[2] or not parts[2].endswith(".png") or not f.is_file():
+                    return self._json({"error": "not found"}, 404)
+                return self._send(200, f.read_bytes() if parts[0] == "designs" else thumb(f), "image/png" if parts[0] == "designs" else "image/jpeg")
             if parts == ["api", "prints"]:
                 from .prints import PLACE_NAMES
 
                 return self._json({"rows": c.print_rows(), "places": PLACE_NAMES, "can_read": c.drive.can_read})
             return None
+
+        def _design_plan(self, body) -> dict:
+            """Print designs, step 1: the AI plans the designs and their cost; nothing is made yet."""
+            from . import designs as D
+            from . import library as L
+            from .pricing import USD_INR, per_image
+
+            c = app.cloud
+            category = body.get("category")
+            if category not in L.CATEGORIES:
+                raise ValueError("Pick a category")
+            tees = body.get("tees") if body.get("tees") in D.TEES else "both"
+            language = body.get("language") if body.get("language") in D.LANGUAGES else "English"
+            themes = [t for t in (body.get("themes") or []) if t in D.THEMES[D.audience(category)]]
+            count = max(1, min(D.MAX_DESIGNS, int(body.get("count") or 6)))
+            have = ready()
+            if not (have.get("gemini") or have.get("openai")):
+                raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
+            briefs = c.agent.design_briefs(category, themes, count, tees, language, " ".join(str(body.get("extra") or "").split())[:300])
+            if not briefs:
+                raise ValueError("The AI didn't plan any designs: try again")
+            engine = "openai" if have.get("openai") else "gemini"
+            each = per_image(engine, "medium" if engine == "openai" else "1K") or 0
+            plan_id = uuid.uuid4().hex[:10]
+            c.plans[plan_id] = {"designs": briefs, "meta": {"category": category, "themes": themes, "tees": tees, "language": language,
+                                                            "engine": engine}, "time": time.time()}
+            return {"plan_id": plan_id, "designs": briefs, "engine": engine, "cost_inr": round(each * len(briefs) * 1.1 * USD_INR)}
+
+        def _design_make(self, body) -> dict:
+            """Print designs, step 2: make the planned designs (the image AI), one after another, into a new set."""
+            from . import designs as D
+            from .providers import make_provider
+
+            c = app.cloud
+            plan = c.plans.pop(str(body.get("plan_id") or ""), None)
+            if not plan or "designs" not in plan:
+                raise ValueError("That plan is gone: plan the designs again")
+            keep = body.get("keep")
+            briefs = [b for i, b in enumerate(plan["designs"]) if not isinstance(keep, list) or i in keep]
+            if not briefs:
+                raise ValueError("Keep at least one design")
+            if any(j.finished is None for j in c.design_jobs.values()):
+                raise ValueError("Designs are already being made: wait for them to finish")
+            engine = plan["meta"]["engine"]
+            provider = make_provider(engine, quality="medium", image_size="1K", api_key=os.environ.get(KEY_ENV[engine]))
+            make = provider.generate_art if hasattr(provider, "generate_art") else (lambda p: provider.generate(p, []))
+            job = D.DesignJob(c.designs, {**plan["meta"], "by": self.user}, briefs, make)
+            c.design_jobs[job.id] = job
+            job.thread.start()
+            return job.status()
 
         def _print_preview(self, body) -> dict:
             """One printed photo of a batch at the given position (nothing saved), optionally with the AI
@@ -576,6 +639,23 @@ def make_handler(app: Studio):
                 if not (ready().get("gemini") or ready().get("openai")):
                     raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
                 return self._json({"guide": c.save_guide(c.agent.read_guide(name, data)), "guides": c.guides()})
+            if parts == ["api", "designs", "plan"]:
+                return self._json(self._design_plan(body))
+            if parts == ["api", "designs", "make"]:
+                return self._json(self._design_make(body))
+            if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "delete":
+                c.designs.remove(parts[2], body.get("file"))
+                return self._json({"sets": c.designs.sets()})
+            if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "use":
+                # this design set becomes the print folder for a category, top style and colour
+                self._admin()
+                meta = next((m for m in c.designs.sets() if m["id"] == parts[2]), None)
+                if not meta:
+                    raise FileNotFoundError(parts[2])
+                row = {"category": meta["category"], "top": str(body.get("top") or ""), "colour": str(body.get("colour") or ""),
+                       "link": "design:" + meta["id"]}
+                rest = [r for r in c.print_rows() if not (r["category"] == row["category"] and r["top"] == row["top"] and r["colour"] == row["colour"])]
+                return self._json({"rows": c.set_print_rows(rest + [row])})
             if parts == ["api", "prints", "preview"]:
                 return self._json(self._print_preview(body))
             if parts == ["api", "prints", "plan"]:

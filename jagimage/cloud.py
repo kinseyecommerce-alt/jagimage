@@ -767,6 +767,16 @@ class Agent:
         return {"place": place, **adjust(ans.get("dx"), ans.get("dy"), ans.get("scale")),
                 "reply": " ".join(str(ans.get("reply") or "").split())[:300]}
 
+    def design_briefs(self, category: str, themes: list, count: int, tees: str, language: str, extra: str = "") -> list:
+        """Print designs: the AI plans `count` original designs (name, theme, text, image prompt)."""
+        from . import designs as D
+
+        themes = themes or D.THEMES[D.audience(category)]
+        ask = (f"Audience: {category.replace('_', ' ')} ({D.audience(category)}). Themes: {', '.join(themes)}. "
+               f"Number of designs: {count}, spread over the themes. T-shirts: {D.TEES[tees]}. Text: {D.LANGUAGES[language]}."
+               + (f" The shop adds: {extra}" if extra else ""))
+        return D.clean_briefs(self._ask(ask, D.BRIEF_SYSTEM, D.BRIEF_SCHEMA), themes, count)
+
     def read_guide(self, filename: str, data: bytes) -> dict:
         """A marketplace's model photo guidelines (e.g. Myntra's) as Studio settings: photo size,
         backdrop, framing, the poses it asks for, and its directions for the model."""
@@ -800,6 +810,10 @@ class Cloud:
                                     self.data, os.environ.get("JAGIMAGE_DRIVE_FOLDER", "kinsey models 2026"))
         self.sync = DriveSync(self.drive, out_dir)
         self.agent = agent or Agent()
+        from .designs import DesignStore
+
+        self.designs = DesignStore(self.data / "designs")  # Print designs: the AI's original print artwork
+        self.design_jobs = {}
         self.oauth_states = {}
         self.plans = {}  # plan id -> agent plan, until Start
 
@@ -823,7 +837,8 @@ class Cloud:
             cat, top, colour = str(r.get("category", "")), str(r.get("top", "")), " ".join(str(r.get("colour") or "").split())
             if cat not in L.CATEGORIES or top not in studio.TOPS:
                 raise ValueError(f"Pick a category and top style for every print folder ({cat or '?'} / {top or '?'})")
-            folder = drive_folder_id(str(r.get("link", "")))
+            link = str(r.get("link", "")).strip()
+            folder = link if re.fullmatch(r"design:[a-z0-9-]{4,40}", link) else drive_folder_id(link)
             clean.append({"category": cat, "top": top, "colour": colour[:40], "link": str(r.get("link", "")).strip()[:300], "folder": folder})
         if len(clean) > 500:
             raise ValueError("At most 500 print folders")
@@ -838,6 +853,11 @@ class Cloud:
         row = next((r for r in rows if r["colour"].lower() == colour.lower()), None) or next((r for r in rows if not r["colour"]), None)
         if not row:
             return []
+        if row["folder"].startswith("design:"):  # a design set made in the Print designs tab
+            try:
+                return self.designs.files(row["folder"][7:])
+            except FileNotFoundError:
+                raise RuntimeError(f"The design set for {category} {top} {colour or 'all colours'} was deleted: choose another in Print placement")
         if not self.drive.can_read:
             raise RuntimeError("Reconnect Google Drive (Settings → Google Drive → Connect) so the app may read your print folders")
         try:

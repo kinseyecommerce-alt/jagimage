@@ -525,3 +525,71 @@ def test_print_preview_shows_one_photo_and_the_checkers_verdict(tmp_path, monkey
         assert call(base + "/api/prints/preview", {"batch": "../etc"}, cookie=cookie)[0] in (400, 404)
     finally:
         httpd.shutdown()
+
+
+def test_print_designs_are_planned_made_and_used_as_prints(tmp_path, monkeypatch):
+    import io
+
+    from PIL import Image, ImageDraw
+    from jagimage import designs as D
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    briefs = {"designs": [
+        {"name": "Chai Mode On", "theme": "Coffee and chai lover", "text": "Chai Mode On", "prompt": "a steaming cup, bold retro lettering"},
+        {"name": "Chai Mode On", "theme": "x", "text": "", "prompt": "duplicate name, dropped"},
+        {"name": "Hill Calling", "theme": "Not a theme", "text": "", "prompt": "mountains and a sun"}]}
+    chat = FakeOpenAIChat(briefs)
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD,
+                  drive=Drive("", "", tmp_path / "data"), agent=Agent(openai_client=chat))
+    drawn = []
+
+    class FakeArt:  # the image AI: a red square on a white background (as Gemini would return it)
+        def generate_art(self, prompt):
+            drawn.append(prompt)
+            im = Image.new("RGB", (400, 400), "white")
+            ImageDraw.Draw(im).rectangle((120, 120, 280, 280), fill="#D23C1E")
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            return buf.getvalue()
+    monkeypatch.setattr("jagimage.providers.make_provider", lambda *a, **kw: FakeArt())
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        code, _, body = call(base + "/api/designs/plan", {"category": "Men", "tees": "light", "language": "English", "count": 3,
+                                                           "themes": ["Coffee and chai lover", "Travel and mountains"]}, cookie=cookie)
+        plan = json.loads(body)
+        assert code == 200 and [d["name"] for d in plan["designs"]] == ["Chai Mode On", "Hill Calling"] and plan["engine"] == "openai"
+        assert plan["designs"][1]["theme"] == "Coffee and chai lover" and plan["cost_inr"] > 0
+        code, _, body = call(base + "/api/designs/make", {"plan_id": plan["plan_id"], "keep": [0, 1]}, cookie=cookie)
+        job = json.loads(body)
+        for _ in range(100):
+            st = json.loads(call(base + f"/api/designs/jobs/{job['id']}", cookie=cookie)[2])
+            if not st["running"]:
+                break
+            time.sleep(0.05)
+        assert st["done"] == 2 and st["failed"] == 0
+        assert 'spelt exactly: "Chai Mode On"' in drawn[0] and "No text" in drawn[1] and "no brand names" in drawn[0]
+        sets = json.loads(call(base + "/api/designs", cookie=cookie)[2])["sets"]
+        assert len(sets) == 1 and [i["file"] for i in sets[0]["items"]] == ["Chai_Mode_On.png", "Hill_Calling.png"]
+        code, headers, png = call(base + f"/designs/{sets[0]['id']}/Chai_Mode_On.png", cookie=cookie)
+        art = Image.open(io.BytesIO(png))
+        assert code == 200 and art.mode == "RGBA" and art.getpixel((2, 2))[3] == 0  # white background taken out, trimmed
+        assert art.size[0] < 260
+        # the set becomes the print folder for Men half sleeve, every colour
+        code, _, body = call(base + f"/api/designs/{sets[0]['id']}/use", {"top": "HalfSleeveTee", "colour": ""}, cookie=cookie)
+        assert code == 200 and json.loads(body)["rows"][0]["folder"] == "design:" + sets[0]["id"]
+        files = cloud.print_files("Men", "HalfSleeveTee", "Navy")
+        assert [n for n, _ in files] == ["Chai_Mode_On", "Hill_Calling"]
+        s = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Navy"], poses=["front_main"])
+        studio.Batch(s, out=tmp_path / "out", generate=fake_generate).run()
+        assert studio.Batch(s, out=tmp_path / "out", prints=cloud.print_files).run("prints")["printed"] == 2
+        call(base + f"/api/designs/{sets[0]['id']}/delete", {"file": "Hill_Calling.png"}, cookie=cookie)
+        assert len(cloud.print_files("Men", "HalfSleeveTee", "Navy")) == 1
+        call(base + f"/api/designs/{sets[0]['id']}/delete", {}, cookie=cookie)
+        with pytest.raises(RuntimeError, match="design set .* was deleted"):
+            cloud.print_files("Men", "HalfSleeveTee", "Navy")
+        assert call(base + "/designs/..%2F..%2Fsecret/x.png", cookie=cookie)[0] == 404
+    finally:
+        httpd.shutdown()
