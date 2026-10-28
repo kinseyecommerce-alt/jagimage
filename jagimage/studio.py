@@ -51,6 +51,9 @@ def default_shot(top: str) -> str:
 TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just above the knees: knees, shins and feet are "
                     "out of frame, small margin above the head, the whole top fully visible, model fills about 90% of frame height")
 FULL_FRAMING = "Full body head to shoes in frame with small margins, model about 85-90% of frame height"
+CLOSE_UP = re.compile(r"close[- ]?up|detail shot|zoomed", re.I)
+CLOSE_FRAMING = ("Close-up framing exactly as the pose describes, the garment detail sharp and filling most of the frame, "
+                 "real model wearing it, eye-level camera, 3:4 portrait")
 TOP_ONLY_NEW_PHOTO = "Create a new three-quarter photo framed from the top of the head to just above the knees (no legs below the knee, no feet). "
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
 BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
@@ -247,7 +250,10 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     colours = f"top {tname} ({thex})" + (f", bottom {bcol[0]} ({bcol[1]})" if bcol else "")
     rules = L.RULES.replace("Exact garment colour {COLOUR} ({HEX}),", f"Exact garment colours: {colours}, each")
     pose_text = spec.pose_texts()[pose]
-    if top_only:  # every part of the instruction says the same framing: nothing asks for legs or a full body
+    if CLOSE_UP.search(pose_text):  # a guide's detail shot (e.g. the neckline): framed as the pose says, not head to toe
+        rules = rules.replace(FULL_FRAMING, CLOSE_FRAMING)
+        lines = {k: v.replace("Create a new full-body photo. ", "Create a new close-up photo. ") for k, v in lines.items()}
+    elif top_only:  # every part of the instruction says the same framing: nothing asks for legs or a full body
         rules = rules.replace(FULL_FRAMING, TOP_ONLY_FRAMING)
         lines = {k: v.replace("Create a new full-body photo. ", TOP_ONLY_NEW_PHOTO) for k, v in lines.items()}
         pose_text = pose_text.replace("weight slightly on one leg", "relaxed natural posture")

@@ -694,3 +694,11 @@ def test_openai_gets_plain_childrens_wording_gemini_unchanged():
 def test_half_sleeve_starts_as_top_only():
     from jagimage.studio import default_shot
     assert default_shot("HalfSleeveTee") == "top" and default_shot("Hoodie") == "outfit"
+
+
+def test_close_up_pose_from_a_guide_is_not_framed_head_to_toe():
+    sp = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], poses=["front_main", "detail_closeup"],
+                     custom_poses={"detail_closeup": "Close-up of the neckline showing fabric detail"})
+    close = studio.prompt(sp, 1, sp.bases()[0], "detail_closeup", "face+front")
+    assert studio.CLOSE_FRAMING in close and studio.FULL_FRAMING not in close and "full-body photo" not in close
+    assert studio.FULL_FRAMING in studio.prompt(sp, 1, sp.bases()[0], "front_main", "none")
