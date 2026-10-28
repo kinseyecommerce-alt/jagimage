@@ -527,7 +527,7 @@ def test_print_preview_shows_one_photo_and_the_checkers_verdict(tmp_path, monkey
         httpd.shutdown()
 
 
-def test_print_designs_are_planned_made_and_used_as_prints(tmp_path, monkeypatch):
+def test_print_agent_plans_makes_and_delivers_designs(tmp_path, monkeypatch):
     import io
 
     from PIL import Image, ImageDraw
@@ -577,19 +577,35 @@ def test_print_designs_are_planned_made_and_used_as_prints(tmp_path, monkeypatch
         art = Image.open(io.BytesIO(png))
         assert code == 200 and art.mode == "RGBA" and art.getpixel((2, 2))[3] == 0  # white background taken out, trimmed
         assert art.size[0] < 260
-        # the set becomes the print folder for Men half sleeve, every colour
-        code, _, body = call(base + f"/api/designs/{sets[0]['id']}/use", {"top": "HalfSleeveTee", "colour": ""}, cookie=cookie)
-        assert code == 200 and json.loads(body)["rows"][0]["folder"] == "design:" + sets[0]["id"]
-        files = cloud.print_files("Men", "HalfSleeveTee", "Navy")
-        assert [n for n, _ in files] == ["Chai_Mode_On", "Hill_Calling"]
-        s = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Navy"], poses=["front_main"])
-        studio.Batch(s, out=tmp_path / "out", generate=fake_generate).run()
-        assert studio.Batch(s, out=tmp_path / "out", prints=cloud.print_files).run("prints")["printed"] == 2
+        # production files: a ZIP with each design and a large print-size copy
+        import zipfile
+        code, headers, data = call(base + f"/api/designs/{sets[0]['id']}/zip", cookie=cookie)
+        z = zipfile.ZipFile(io.BytesIO(data))
+        assert code == 200 and sorted(z.namelist()) == ["Chai_Mode_On.png", "Hill_Calling.png", "print_size/Chai_Mode_On_3600px.png", "print_size/Hill_Calling_3600px.png"]
+        big = Image.open(io.BytesIO(z.read("print_size/Chai_Mode_On_3600px.png")))
+        assert max(big.size) == 3600 and big.mode == "RGBA" and big.info.get("dpi", (0,))[0] > 299
+        # ... or saved to Google Drive, under Print designs/<set>
+        assert call(base + f"/api/designs/{sets[0]['id']}/drive", {}, cookie=cookie)[0] == 400  # not connected
+        uploads = []
+        cloud.drive = SimpleNamespace(connected=True, folder="kinsey models 2026", can_read=False,
+                                      upload=lambda path, parts, name: uploads.append((parts, name)))
+        code, _, body = call(base + f"/api/designs/{sets[0]['id']}/drive", {}, cookie=cookie)
+        assert code == 200 and json.loads(body)["saved"] == 2 and uploads[0][0][0] == "Print designs" and uploads[0][1] == "Chai_Mode_On.png"
+        # separate from the model photos: no route makes a set a print folder
+        assert call(base + f"/api/designs/{sets[0]['id']}/use", {"top": "HalfSleeveTee"}, cookie=cookie)[0] in (400, 404)
+        # the print agent: plain words become the settings and the plan
+        chat.answer = {"category": "Kids_Girls", "tees": "light", "language": "Tamil", "count": 99, "themes": ["Dinosaurs", "Gym and fitness"],
+                       "extra": "cute", "reply": "Planning cute Tamil dinosaur prints for girls' light tees.",
+                       "designs": [{"name": "Dino Pal", "theme": "Dinosaurs", "text": "", "prompt": "a cute dinosaur"}]}  # same stand-in answers both questions
+        code, _, body = call(base + "/api/designs/ask", {"message": "cute tamil dinosaur prints for girls pastel tees"}, cookie=cookie)
+        r = json.loads(body)
+        assert code == 200 and r["settings"] == {"category": "Kids_Girls", "tees": "light", "language": "Tamil", "count": 40,
+                                                 "themes": ["Dinosaurs"], "extra": "cute", "reply": "Planning cute Tamil dinosaur prints for girls' light tees."}
+        assert [d["name"] for d in r["designs"]] == ["Dino Pal"] and r["plan_id"]
         call(base + f"/api/designs/{sets[0]['id']}/delete", {"file": "Hill_Calling.png"}, cookie=cookie)
-        assert len(cloud.print_files("Men", "HalfSleeveTee", "Navy")) == 1
+        assert [i["file"] for i in json.loads(call(base + "/api/designs", cookie=cookie)[2])["sets"][0]["items"]] == ["Chai_Mode_On.png"]
         call(base + f"/api/designs/{sets[0]['id']}/delete", {}, cookie=cookie)
-        with pytest.raises(RuntimeError, match="design set .* was deleted"):
-            cloud.print_files("Men", "HalfSleeveTee", "Navy")
+        assert json.loads(call(base + "/api/designs", cookie=cookie)[2])["sets"] == []
         assert call(base + "/designs/..%2F..%2Fsecret/x.png", cookie=cookie)[0] == 404
     finally:
         httpd.shutdown()

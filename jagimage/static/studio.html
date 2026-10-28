@@ -301,8 +301,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 </div>
 <div id="designTab" class="hide tabpage">
   <section class="panel">
-    <h2>Create print designs</h2>
-    <p class="hint">The AI plans and draws <b>original</b> T-shirt prints in the styles that sell online in India: motivational text, retro sunsets, line art, desi slogans, dinosaurs and space for kids and more. Print-ready PNGs with a clear background, ready for Print placement. It never copies existing designs, brands, logos, film or cartoon characters or celebrities (they would get your listings taken down). Trends come from the AI's general knowledge, not live sales data.</p>
+    <h2>Print agent</h2>
+    <p class="hint">Tell the print agent what to make. It plans and draws <b>original</b> T-shirt prints in the styles that sell online in India (motivational text, retro sunsets, line art, desi slogans, dinosaurs and space for kids …) as print-ready PNGs with a clear background, for production: download them as a ZIP (with a large print-size copy of each) or save them to Google Drive. It never copies existing designs, brands, logos, film or cartoon characters or celebrities. Trends come from the AI's general knowledge, not live sales data.</p>
+    <textarea id="dsAsk" rows="2" style="width:100%" placeholder="e.g. 10 Tamil slogan prints for black T-shirts for college boys, or 6 cute dinosaur prints for girls' pastel tees"></textarea>
+    <div class="row"><button class="btn primary" id="dsAskBtn" type="button">Plan it</button></div>
+    <details class="adv" id="dsManual"><summary>Or set it yourself</summary>
     <div class="row">
       <label class="field"><span>Category</span><select id="dsCat"></select></label>
       <label class="field"><span>For T-shirts</span><select id="dsTees"><option value="dark">Dark T-shirts (black, navy …)</option><option value="light">Light T-shirts (white, pastels …)</option><option value="both">Both</option></select></label>
@@ -313,11 +316,12 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="chips" id="dsThemes"></div>
     <label class="field" style="margin-top:8px"><span>Anything else (optional)</span><input type="text" id="dsExtra" maxlength="300" placeholder="e.g. for college students, bold retro lettering, Diwali sale theme"></label>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="dsPlan" type="button">Plan the designs</button></div>
+    </details>
     <div id="dsOut" class="guideout"></div>
   </section>
   <section class="panel">
     <h2>Design sets</h2>
-    <p class="hint">Each set can be the prints for a category, top style and colour: press <b>Use for prints</b>, then add them to photos in the Print placement tab.</p>
+    <p class="hint"><b>Download ZIP</b>: every design as a PNG plus a large print-size copy (3600 px, 300 dpi, about 30 cm wide). <b>Save to Drive</b>: into "Print designs" in your Google Drive photos folder.</p>
     <div id="dsSets"></div>
   </section>
 </div>
@@ -784,11 +788,9 @@ async function designsRefresh() {
   const aud = $("dsCat").value.startsWith("Kids") ? "kids" : "adults", picked = S.dsThemes || new Set();
   $("dsThemes").innerHTML = r.themes[aud].map((t) => `<button class="chip ${picked.has(t) ? "on" : ""}" data-t="${esc(t)}"><i style="background:var(--soft)"></i>${esc(t)}</button>`).join("");
   if (!$("dsLang").options.length) $("dsLang").innerHTML = r.languages.map((l) => `<option>${esc(l)}</option>`).join("");
-  const tops = S.opts.tops.map((t) => `<option value="${esc(t)}">${esc(nice(t))}</option>`).join("");
-  const colours = `<option value="">All colours</option>` + [...new Set(Object.values(S.opts.palettes).flatMap((p) => Object.keys(p)))].map((c) => `<option>${esc(c)}</option>`).join("");
   $("dsSets").innerHTML = r.sets.length ? r.sets.map((m) => `<div class="dsset" data-set="${esc(m.id)}">
       <div class="row" style="justify-content:space-between"><div><b>${esc(label(m.category))}</b> · ${esc(m.tees)} T-shirts · ${esc(m.language)} · ${fmt(m.items.length)} designs <span class="hint">${ago(m.created)}</span></div>
-      <div class="row"><select data-top>${tops}</select><select data-colour>${colours}</select><button class="btn" data-use="${esc(m.id)}">Use for prints</button><button class="btn" data-delset="${esc(m.id)}">Delete set</button></div></div>
+      <div class="row"><a class="btn" href="/api/designs/${esc(m.id)}/zip">Download ZIP</a><button class="btn" data-drive="${esc(m.id)}">Save to Drive</button><button class="btn" data-delset="${esc(m.id)}">Delete set</button></div></div>
       <div class="dsgrid">${m.items.map((i) => `<div class="dscard"><a class="art ${m.tees === "light" ? "light" : "dark"}" href="/designs/${esc(m.id)}/${esc(i.file)}" target="_blank" rel="noopener"><img loading="lazy" src="/designs/${esc(m.id)}/${esc(i.file)}" alt="${esc(i.name)}"></a>
         <div class="meta"><span><b>${esc(i.name)}</b><br><span class="hint">${esc(i.theme)}</span></span><button class="btn" title="Delete this design" data-delfile="${esc(i.file)}" data-of="${esc(m.id)}">×</button></div></div>`).join("")}</div></div>`).join("")
     : `<p class="hint">No designs yet.</p>`;
@@ -810,12 +812,8 @@ function initDesigns() {
   $("dsCat").onchange = () => { S.dsThemes = new Set(); designsRefresh(); };
   $("dsThemes").onclick = (e) => { const c = e.target.closest(".chip"); if (!c) return; S.dsThemes = S.dsThemes || new Set();
     S.dsThemes.has(c.dataset.t) ? S.dsThemes.delete(c.dataset.t) : S.dsThemes.add(c.dataset.t); c.classList.toggle("on"); };
-  $("dsPlan").onclick = async () => {
-    $("dsOut").innerHTML = '<p class="hint">The AI is planning the designs…</p>'; $("dsPlan").disabled = true;
-    try {
-      const p = await api("/api/designs/plan", { category: $("dsCat").value, tees: $("dsTees").value, language: $("dsLang").value,
-        count: +$("dsCount").value || 6, themes: [...(S.dsThemes || [])], extra: $("dsExtra").value });
-      $("dsOut").innerHTML = `<p>${fmt(p.designs.length)} designs planned. Untick any you don't want, then make them (${p.engine === "openai" ? "OpenAI" : "Gemini"}, about <b>₹${fmt(p.cost_inr)}</b> for all).</p>`
+  const showPlan = (p) => {
+      $("dsOut").innerHTML = (p.reply ? `<p><b>Print agent:</b> ${esc(p.reply)}</p>` : "") + `<p>${fmt(p.designs.length)} designs planned. Untick any you don't want, then make them (${p.engine === "openai" ? "OpenAI" : "Gemini"}, about <b>₹${fmt(p.cost_inr)}</b> for all).</p>`
         + p.designs.map((d, i) => `<div class="dsbrief"><label><input type="checkbox" data-keep="${i}" checked><span><b>${esc(d.name)}</b> · <span class="hint">${esc(d.theme)}</span>${d.text ? ` · “${esc(d.text)}”` : ""}<br><span class="hint">${esc(d.prompt)}</span></span></label></div>`).join("")
         + `<div class="row"><button class="btn primary" id="dsMake">Make the designs</button></div>`;
       $("dsMake").onclick = async () => {
@@ -823,15 +821,31 @@ function initDesigns() {
         try { const j = await api("/api/designs/make", { plan_id: p.plan_id, keep }); designWatch(j.id); }
         catch (e) { $("dsOut").insertAdjacentHTML("beforeend", `<p class="e">${esc(e.message)}</p>`); }
       };
+  };
+  $("dsPlan").onclick = async () => {
+    $("dsOut").innerHTML = '<p class="hint">The AI is planning the designs…</p>'; $("dsPlan").disabled = true;
+    try {
+      showPlan(await api("/api/designs/plan", { category: $("dsCat").value, tees: $("dsTees").value, language: $("dsLang").value,
+        count: +$("dsCount").value || 6, themes: [...(S.dsThemes || [])], extra: $("dsExtra").value }));
     } catch (e) { $("dsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
     $("dsPlan").disabled = false;
+  };
+  $("dsAskBtn").onclick = async () => {
+    const message = $("dsAsk").value.trim(); if (!message) return;
+    $("dsOut").innerHTML = '<p class="hint">The print agent is planning… (about half a minute)</p>'; $("dsAskBtn").disabled = true;
+    try {
+      const p = await api("/api/designs/ask", { message }), w = p.settings;
+      $("dsCat").value = w.category; $("dsTees").value = w.tees; $("dsLang").value = w.language; $("dsCount").value = w.count; $("dsExtra").value = w.extra;
+      S.dsThemes = new Set(w.themes); await designsRefresh(); showPlan(p);
+    } catch (e) { $("dsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+    $("dsAskBtn").disabled = false;
   };
   $("dsSets").onclick = async (e) => {
     const t = e.target, box = t.closest(".dsset");
     try {
-      if (t.dataset.use) {
-        await api(`/api/designs/${t.dataset.use}/use`, { top: box.querySelector("[data-top]").value, colour: box.querySelector("[data-colour]").value });
-        t.textContent = "Added to print folders ✓"; printsRefresh().catch(() => {});
+      if (t.dataset.drive) {
+        t.disabled = true; t.textContent = "Saving…";
+        const r = await api(`/api/designs/${t.dataset.drive}/drive`, {}); t.textContent = `Saved ${r.saved} to Drive ✓`; t.title = r.folder;
       } else if (t.dataset.delset && confirm("Delete this whole design set?")) { await api(`/api/designs/${t.dataset.delset}/delete`, {}); designsRefresh(); }
       else if (t.dataset.delfile) { await api(`/api/designs/${t.dataset.of}/delete`, { file: t.dataset.delfile }); designsRefresh(); }
     } catch (err) { alert(err.message); }

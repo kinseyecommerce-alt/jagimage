@@ -505,6 +505,15 @@ def make_handler(app: Studio):
 
                 return self._json({"sets": c.designs.sets(), "themes": D.THEMES, "tees": list(D.TEES), "languages": list(D.LANGUAGES),
                                    "jobs": [j.status() for j in c.design_jobs.values()][-3:]})
+            if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "zip":
+                from . import designs as D
+
+                meta = next((m for m in c.designs.sets() if m["id"] == parts[2]), None)
+                if not meta:
+                    raise FileNotFoundError(parts[2])
+                name = re.sub(r"[^A-Za-z0-9_.-]+", "_", D.set_title(meta))
+                return self._send(200, D.set_zip(c.designs, meta["id"]), "application/zip",
+                                  {"Content-Disposition": f'attachment; filename="{name}.zip"'})
             if len(parts) == 4 and parts[:3] == ["api", "designs", "jobs"]:
                 job = c.design_jobs.get(parts[3])
                 return self._json(job.status()) if job else self._json({"error": "not found"}, 404)
@@ -646,16 +655,28 @@ def make_handler(app: Studio):
             if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "delete":
                 c.designs.remove(parts[2], body.get("file"))
                 return self._json({"sets": c.designs.sets()})
-            if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "use":
-                # this design set becomes the print folder for a category, top style and colour
-                self._admin()
+            if parts == ["api", "designs", "ask"]:
+                # the print agent: plain words become the settings, then the design plan
+                message = " ".join(str(body.get("message") or "").split())[:600]
+                if not message:
+                    raise ValueError("Tell the print agent what to make, e.g. 10 Tamil slogan prints for black T-shirts")
+                if not (ready().get("gemini") or ready().get("openai")):
+                    raise ValueError("Add a Gemini or OpenAI API key in Settings → API keys first")
+                want = c.agent.design_request(message)
+                return self._json({**self._design_plan(dict(want)), "settings": want, "reply": want["reply"]})
+            if len(parts) == 4 and parts[:2] == ["api", "designs"] and parts[3] == "drive":
+                # save a design set to Google Drive: <photos folder>/Print designs/<set>/
+                from . import designs as D
+
+                if not c.drive.connected:
+                    raise ValueError("Connect Google Drive first (Settings → Google Drive)")
                 meta = next((m for m in c.designs.sets() if m["id"] == parts[2]), None)
                 if not meta:
                     raise FileNotFoundError(parts[2])
-                row = {"category": meta["category"], "top": str(body.get("top") or ""), "colour": str(body.get("colour") or ""),
-                       "link": "design:" + meta["id"]}
-                rest = [r for r in c.print_rows() if not (r["category"] == row["category"] and r["top"] == row["top"] and r["colour"] == row["colour"])]
-                return self._json({"rows": c.set_print_rows(rest + [row])})
+                folder = ["Print designs", D.set_title(meta)]
+                for name, path in c.designs.files(meta["id"]):
+                    c.drive.upload(path, folder, f"{name}.png")
+                return self._json({"saved": len(meta["items"]), "folder": "/".join([c.drive.folder] + folder)})
             if parts == ["api", "prints", "preview"]:
                 return self._json(self._print_preview(body))
             if parts == ["api", "prints", "plan"]:

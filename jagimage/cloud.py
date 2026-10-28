@@ -777,6 +777,20 @@ class Agent:
                + (f" The shop adds: {extra}" if extra else ""))
         return D.clean_briefs(self._ask(ask, D.BRIEF_SYSTEM, D.BRIEF_SCHEMA), themes, count)
 
+    def design_request(self, message: str) -> dict:
+        """The print agent: the shop's words ("10 Tamil slogan prints for black kids tees") as print design
+        settings {category, tees, language, count, themes, extra, reply}, every value checked."""
+        from . import designs as D
+        from . import library as L
+
+        ans = self._ask(message, D.REQUEST_SYSTEM, D.REQUEST_SCHEMA)
+        category = ans.get("category") if ans.get("category") in L.CATEGORIES else "Men"
+        themes = [t for t in (ans.get("themes") or []) if t in D.THEMES[D.audience(category)]]
+        return {"category": category, "tees": ans.get("tees") if ans.get("tees") in D.TEES else "both",
+                "language": ans.get("language") if ans.get("language") in D.LANGUAGES else "English",
+                "count": max(1, min(D.MAX_DESIGNS, int(ans.get("count") or 6))), "themes": themes,
+                "extra": " ".join(str(ans.get("extra") or "").split())[:300], "reply": " ".join(str(ans.get("reply") or "").split())[:300]}
+
     def read_guide(self, filename: str, data: bytes) -> dict:
         """A marketplace's model photo guidelines (e.g. Myntra's) as Studio settings: photo size,
         backdrop, framing, the poses it asks for, and its directions for the model."""
@@ -837,8 +851,7 @@ class Cloud:
             cat, top, colour = str(r.get("category", "")), str(r.get("top", "")), " ".join(str(r.get("colour") or "").split())
             if cat not in L.CATEGORIES or top not in studio.TOPS:
                 raise ValueError(f"Pick a category and top style for every print folder ({cat or '?'} / {top or '?'})")
-            link = str(r.get("link", "")).strip()
-            folder = link if re.fullmatch(r"design:[a-z0-9-]{4,40}", link) else drive_folder_id(link)
+            folder = drive_folder_id(str(r.get("link", "")))
             clean.append({"category": cat, "top": top, "colour": colour[:40], "link": str(r.get("link", "")).strip()[:300], "folder": folder})
         if len(clean) > 500:
             raise ValueError("At most 500 print folders")
@@ -853,11 +866,6 @@ class Cloud:
         row = next((r for r in rows if r["colour"].lower() == colour.lower()), None) or next((r for r in rows if not r["colour"]), None)
         if not row:
             return []
-        if row["folder"].startswith("design:"):  # a design set made in the Print designs tab
-            try:
-                return self.designs.files(row["folder"][7:])
-            except FileNotFoundError:
-                raise RuntimeError(f"The design set for {category} {top} {colour or 'all colours'} was deleted: choose another in Print placement")
         if not self.drive.can_read:
             raise RuntimeError("Reconnect Google Drive (Settings → Google Drive → Connect) so the app may read your print folders")
         try:

@@ -1,6 +1,7 @@
 """Print designs: original T-shirt print artwork in the styles that sell online in India (motivational
-typography, retro sunsets, line art, desi slogans, dinosaurs and space for kids ...), made by the AI as
-print-ready PNGs and kept in design sets that the Print placement tab can use like a print folder.
+typography, retro sunsets, line art, desi slogans, dinosaurs and space for kids ...), made by the print
+agent as print-ready PNGs for production: downloaded as a ZIP (with a large print-size copy) or saved to
+Google Drive. A tool of its own, separate from the model photos.
 
 The designs are new artwork in popular styles. They never copy an existing design, brand, logo, film or
 cartoon character, team or celebrity: those belong to someone else and get listings taken down."""
@@ -45,6 +46,22 @@ T-shirt colours and language given. Rules:
 For each design give: name (2-4 words), theme (one of the given themes), text ("" for none), and prompt: a
 detailed instruction for an image AI describing the artwork only (subject, composition, style, ink colours,
 lettering style and the exact text), without mentioning a T-shirt mockup or a model."""
+
+REQUEST_SYSTEM_T = """You are the print agent of SPB Textile, a T-shirt maker in Tirupur. Turn the shop's request into
+print design settings. category: Men, Women, Kids_Boys or Kids_Girls (who wears it; "kids" alone means Kids_Boys
+unless girls are meant). tees: "dark" (black, navy, maroon, bottle green ...), "light" (white, pastels, grey
+melange) or "both". language: English, Tamil, Hindi, Mixed or None (no text). count: how many designs (default
+6, at most 40). themes: pick from this list only, the ones the request asks for (empty when it doesn't say):
+ADULT THEMES / KID THEMES. extra: anything else it asks for (style, occasion, audience, colours) in a few words.
+reply: one short plain sentence saying what will be planned."""
+
+REQUEST_SCHEMA = {
+    "type": "object",
+    "properties": {"category": {"type": "string"}, "tees": {"type": "string"}, "language": {"type": "string"},
+                   "count": {"type": "integer"}, "themes": {"type": "array", "items": {"type": "string"}},
+                   "extra": {"type": "string"}, "reply": {"type": "string"}},
+    "required": ["category", "tees", "language", "count", "themes", "reply"],
+}
 
 BRIEF_SCHEMA = {
     "type": "object",
@@ -206,3 +223,43 @@ class DesignJob:
     def status(self) -> dict:
         return {"id": self.id, "set": self.set["id"], "total": len(self.briefs), "done": self.done, "failed": self.failed,
                 "errors": self.errors[-5:], "running": self.finished is None}
+
+
+REQUEST_SYSTEM = REQUEST_SYSTEM_T.replace("ADULT THEMES", "for adults " + "; ".join(THEMES["adults"])).replace(
+    "KID THEMES", "for kids " + "; ".join(THEMES["kids"]))
+PRINT_SIZE = 3600  # px on the long side of the large copy in the ZIP: about 30 cm at 300 dpi, a full chest print
+
+
+def print_size(png_path: Path) -> bytes:
+    """A large copy for the printer: enlarged smoothly (the designs are flat colours with clean edges),
+    edges kept crisp, transparency kept."""
+    from PIL import Image, ImageFilter
+
+    im = Image.open(png_path).convert("RGBA")
+    k = PRINT_SIZE / max(im.size)
+    if k > 1:
+        im = im.resize((round(im.width * k), round(im.height * k)), Image.LANCZOS)
+        r, g, b, a = im.split()
+        rgb = Image.merge("RGB", (r, g, b)).filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=2))
+        im = Image.merge("RGBA", (*rgb.split(), a))
+    buf = io.BytesIO()
+    im.save(buf, "PNG", dpi=(300, 300))
+    return buf.getvalue()
+
+
+def set_zip(store: DesignStore, set_id: str) -> bytes:
+    """Every design of a set: the original PNG and a large print-size PNG."""
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for name, path in store.files(set_id):
+            z.write(path, f"{name}.png")
+            z.writestr(f"print_size/{name}_{PRINT_SIZE}px.png", print_size(path))
+    return buf.getvalue()
+
+
+def set_title(meta: dict) -> str:
+    """A set's name in Drive and in the ZIP: e.g. Men dark English 2026-10-28 men-1a2b3c."""
+    when = time.strftime("%Y-%m-%d", time.localtime(meta.get("created", time.time())))
+    return f"{meta.get('category', '').replace('_', ' ')} {meta.get('tees', '')} {meta.get('language', '')} {when} {meta['id']}".strip()
