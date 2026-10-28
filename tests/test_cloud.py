@@ -512,7 +512,9 @@ def test_print_preview_shows_one_photo_and_the_checkers_verdict(tmp_path, monkey
         assert im.format == "JPEG" and max(im.size) <= 1200
         assert not list((tmp_path / "out" / s.name).rglob("*print*"))  # a preview saves nothing
         code, _, body = call(base + "/api/prints/preview", {"batch": s.name, "art": art, "check": True}, cookie=cookie)
-        assert json.loads(body)["check"] == {"ok": False, "score": 0, "issues": ["too high"], "dx": 0.0, "dy": 0.05, "scale": 0.9}
+        check = json.loads(body)["check"]
+        assert {k: check[k] for k in ("ok", "issues", "dx", "dy", "scale")} == {"ok": False, "issues": ["too high"], "dx": 0.0, "dy": 0.05, "scale": 0.9}
+        assert "collar gap" in str(llm.asked[1][-1]) and check["measured"]["collar_gap"] > 0.07  # the AI is told the measurements
         # no file uploaded: the prints come from the print folders
         cloud.print_files = lambda cat, top, colour: [("Logo", make_print(tmp_path / "q.png")), ("237", make_print(tmp_path / "r.png"))]
         code, _, body = call(base + "/api/prints/preview", {"batch": s.name, "print": "237"}, cookie=cookie)

@@ -235,6 +235,24 @@ def pair_dir(top: str, bottom: Optional[str]) -> str:
     return slug(top) + ("__" + slug(bottom) if bottom else "")
 
 
+def judge_print(photo, art, mask, place: str, adj: dict, checker=None) -> dict:
+    """Is this printed photo right? The firm rules on the measured placement (jagimage.prints.rule_check)
+    decide first; the AI checker, when given, also looks at the photo (and is told the measurements).
+    {ok, issues, dx, dy, scale (the fix), measured}"""
+    from .prints import measure, rule_check
+
+    info = measure(mask, art, place, **adj)
+    issues, fix = rule_check(info, place)
+    ok = not issues
+    if checker:
+        ai = checker(photo, art, info)
+        issues += [i for i in ai["issues"] if i not in issues]
+        ok = ok and ai["ok"]
+        if fix == {"dx": 0.0, "dy": 0.0, "scale": 1.0}:  # the rules found nothing to move: the AI's fix
+            fix = {k: ai[k] for k in ("dx", "dy", "scale")}
+    return {"ok": ok, "issues": issues, **fix, "measured": info}
+
+
 def backdrop(spec: Spec, pose: str) -> str:
     if spec.background:  # a marketplace guide's backdrop, for every pose
         return f"Plain seamless {spec.background.rstrip('.')} studio background, soft even shadow-free lighting."
@@ -863,14 +881,15 @@ class Batch:
         return rows
 
     def preview_print(self, target: dict, art, place: str, dx=0.0, dy=0.0, scale=1.0):
-        """One printed photo, made in memory only: how the print sits before the whole batch is printed."""
+        """One printed photo, made in memory only: how the print sits before the whole batch is printed.
+        Returns (photo, the shirt's mask)."""
         from .prints import place_print
 
         m, t, b, pose = target["model"], target["top"], target["bottom"], target["pose"]
         base = self.spec.base_key(t, b)
         img, tmask, bmask = self.masks(m, base, pose)
         plain = self._recoloured(img, tmask, bmask, base, t, b)
-        return place_print(plain, tmask, art, place, dx=dx, dy=dy, scale=scale)
+        return place_print(plain, tmask, art, place, dx=dx, dy=dy, scale=scale), tmask
 
     PRINT_FIXES = 2  # the checker may move or resize a print this many times, then it is flagged for a person
 
@@ -887,7 +906,7 @@ class Batch:
         record = {"rounds": [], "ok": False}
         for n in range(self.PRINT_FIXES + 1):
             try:
-                res = self.checker(out, art)
+                res = judge_print(out, art, tmask, spec.print_place, adj, self.checker)
             except Exception as exc:  # the checker can't be reached: keep the print, say it wasn't checked
                 record.update(error=f"{type(exc).__name__}: {exc}"[:300])
                 self._event("errors", model=m, path=str(dest), error=f"print check: {exc}")

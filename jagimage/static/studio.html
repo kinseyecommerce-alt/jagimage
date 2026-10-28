@@ -797,7 +797,9 @@ async function printPreview(check) {
     const where = `Model ${r.model}, ${esc(r.colour)}${f ? `, ${esc(f.name)}` : r.print ? `, print ${esc(r.print)}` : ""}.`;
     if (!r.check) { $("pvOut").innerHTML = where; return; }
     const k = r.check, fix = Math.abs(k.dx) > 0.005 || Math.abs(k.dy) > 0.005 || Math.abs(k.scale - 1) > 0.01;
+    const ms = k.measured, pc = (v) => Math.round(v * 100) + "%";
     $("pvOut").innerHTML = where + "<br>" + (k.ok ? status("good", "Checker: looks right") : status("bad", "Checker: " + (k.issues.join("; ") || "not right yet")))
+      + (ms ? `<br><span class="hint">Measured: ${pc(ms.collar_gap)} below the collar · ${pc(ms.width)} of the chest wide · ${pc(Math.abs(ms.off_centre))} off-centre · ${pc(ms.hidden)} hidden</span>` : "")
       + (fix ? `<br>Suggested fix: ${k.dx ? `move ${k.dx > 0 ? "right" : "left"} ${Math.abs(Math.round(k.dx * 100))}%` : ""} ${k.dy ? `move ${k.dy > 0 ? "down" : "up"} ${Math.abs(Math.round(k.dy * 100))}%` : ""} ${Math.abs(k.scale - 1) > 0.01 ? `size ${Math.round(k.scale * 100)}%` : ""}` : "");
     if (fix) { $("pvApply").classList.remove("hide"); $("pvApply").onclick = () => {
       $("prDx").value = Math.round((pl.print_dx + k.dx) * 100); $("prDy").value = Math.round((pl.print_dy + k.dy) * 100);

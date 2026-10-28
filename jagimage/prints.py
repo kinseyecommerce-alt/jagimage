@@ -87,17 +87,14 @@ def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
     return {"dx": round(clamp(dx, "dx"), 3), "dy": round(clamp(dy, "dy"), 3), "scale": round(clamp(scale, "scale"), 3)}
 
 
-def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: str = "chest_large",
-                dx: float = 0.0, dy: float = 0.0, scale: float = 1.0) -> Image.Image:
-    """The photo with the artwork printed on the shirt's chest. mask: the shirt (0..1, same size).
-    dx, dy, scale: an adjustment of the place (see adjust())."""
+def _layout(mask: np.ndarray, art: Image.Image, place: str, dx=0.0, dy=0.0, scale=1.0) -> dict:
+    """Where the print goes on this shirt: the chest (cx, neck, cw) and the print's box (x0, y0, pw, ph)."""
     if place not in PLACES:
         raise PrintError(f"place must be one of {', '.join(PLACES)}")
     share, below, offset = PLACES[place]
     a_ = adjust(dx, dy, scale)
     share, below, offset = share * a_["scale"], below + a_["dy"], offset + a_["dx"]
-    rgb = np.asarray(photo.convert("RGB")).astype(np.float32) / 255
-    H, W = rgb.shape[:2]
+    H, W = mask.shape[:2]
     cx, neck, cw = chest(mask)
     art = artwork(art)
     bbox = art.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
@@ -114,6 +111,60 @@ def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: s
     y0 = int(round(neck + below * cw))
     if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
         raise PrintError("the print doesn't fit on this photo")
+    return {"cx": cx, "neck": neck, "cw": cw, "art": art, "x0": x0, "y0": y0, "pw": pw, "ph": ph}
+
+
+# the firm rules every chest print is held to (shares of the chest width); the AI checker judges the rest
+MIN_COLLAR_GAP = 0.07   # the print starts at least this far below the top of the neckband (it never touches the collar)
+MIN_HEM_GAP = 0.12      # ... and ends at least this far above the hem
+MAX_WIDTH = 0.78        # ... and is at most this wide
+MAX_OFF_CENTRE = 0.05   # a centred print may sit at most this far off the chest's middle
+MAX_HIDDEN = 0.08       # at most this share of the print may be hidden by an arm or hand
+
+
+def measure(mask: np.ndarray, art: Image.Image, place: str = "chest_large", dx=0.0, dy=0.0, scale=1.0) -> dict:
+    """The print's placement in numbers, as shares of the chest width: gap below the collar, gap above the
+    hem, width, how far off-centre, and the share of it hidden by an arm or hand."""
+    g = _layout(mask, art, place, dx, dy, scale)
+    m = mask > 0.5
+    col = m[:, max(0, int(g["cx"]) - 3):int(g["cx"]) + 4].any(axis=1)
+    hem = len(col) - 1 - int(np.argmax(col[::-1]))
+    alpha = np.asarray(g["art"].resize((g["pw"], g["ph"])).getchannel("A")) > 128
+    under = m[g["y0"]:g["y0"] + g["ph"], g["x0"]:g["x0"] + g["pw"]]
+    cw = g["cw"]
+    return {"collar_gap": round((g["y0"] - g["neck"]) / cw, 3), "hem_gap": round((hem - g["y0"] - g["ph"]) / cw, 3),
+            "width": round(g["pw"] / cw, 3), "off_centre": round((g["x0"] + g["pw"] / 2 - g["cx"]) / cw - PLACES[place][2], 3),
+            "hidden": round(float((alpha & ~under).sum()) / max(1, int(alpha.sum())), 3)}
+
+
+def rule_check(info: dict, place: str = "chest_large"):
+    """The firm rules on a measured placement: (issues, fix) where fix is a move/resize like adjust()."""
+    issues, fix = [], {"dx": 0.0, "dy": 0.0, "scale": 1.0}
+    if info["collar_gap"] < MIN_COLLAR_GAP:
+        issues.append("too high: touches the collar")
+        fix["dy"] = round(PLACES[place][1] - info["collar_gap"], 3)
+    elif info["hem_gap"] < MIN_HEM_GAP:
+        issues.append("too low: runs towards the hem")
+        fix["dy"] = round(info["hem_gap"] - MIN_HEM_GAP - 0.02, 3)
+    if info["width"] > MAX_WIDTH:
+        issues.append("too big for the chest")
+        fix["scale"] = round(PLACES[place][0] / info["width"], 3)
+    if abs(info["off_centre"]) > MAX_OFF_CENTRE:
+        issues.append("off-centre")
+        fix["dx"] = round(-info["off_centre"], 3)
+    if info["hidden"] > MAX_HIDDEN:
+        issues.append(f"partly hidden by an arm or hand ({round(info['hidden'] * 100)}%)")
+    return issues, fix
+
+
+def place_print(photo: Image.Image, mask: np.ndarray, art: Image.Image, place: str = "chest_large",
+                dx: float = 0.0, dy: float = 0.0, scale: float = 1.0) -> Image.Image:
+    """The photo with the artwork printed on the shirt's chest. mask: the shirt (0..1, same size).
+    dx, dy, scale: an adjustment of the place (see adjust())."""
+    g = _layout(mask, art, place, dx, dy, scale)
+    cx, neck, cw, art, x0, y0, pw, ph = (g[k] for k in ("cx", "neck", "cw", "art", "x0", "y0", "pw", "ph"))
+    rgb = np.asarray(photo.convert("RGB")).astype(np.float32) / 255
+    H, W = rgb.shape[:2]
     a = np.asarray(art.resize((pw, ph), Image.LANCZOS)).astype(np.float32) / 255
     # the region of the photo the print covers, with a margin for the fold shift
     pad = int(FOLD_SHIFT) + 2

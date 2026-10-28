@@ -779,15 +779,16 @@ def test_print_adjustment_moves_and_resizes_and_stays_within_limits(tmp_path):
 def test_print_checker_fixes_the_placement_or_flags_it(tmp_path):
     s = studio.Spec(top_colours=["Navy"], models=1, poses=["front_main"], keep_png=False)
     studio.Batch(s, out=tmp_path, generate=fake_generate).run()
-    arts = [("ok", make_print(tmp_path / "a.png")), ("stubborn", make_print(tmp_path / "b.png", size=(300, 400))),
+    arts = [("ok", make_print(tmp_path / "a.png")), ("stubborn", make_print(tmp_path / "b.png", size=(410, 300))),
             ("offline", make_print(tmp_path / "c.png", size=(380, 300)))]
     calls = []
 
-    def checker(photo, art):
+    def checker(photo, art, measured):
+        assert set(measured) == {"collar_gap", "hem_gap", "width", "off_centre", "hidden"}
         calls.append(art.size)
         if art.size == (380, 300):
             raise RuntimeError("no connection")
-        if art.size == (300, 400):
+        if art.size == (410, 300):
             return {"ok": False, "issues": ["too high: touches the collar"], "dx": 0, "dy": 0.05, "scale": 1}
         first = sum(1 for c in calls if c == art.size) == 1
         return {"ok": not first, "issues": ["too high"] if first else [], "dx": 0, "dy": 0.08 if first else 0, "scale": 1}
@@ -800,3 +801,28 @@ def test_print_checker_fixes_the_placement_or_flags_it(tmp_path):
     rows = {r["pose"]: r for r in studio.Batch(s, out=tmp_path).results()}
     assert rows["front_main_print_ok"]["print_check"] == {"ok": True, "fixed": True, "error": None, "issues": []}
     assert rows["front_main_print_stubborn"]["print_check"]["issues"] == ["too high: touches the collar"]
+
+
+def test_firm_rules_catch_a_print_on_the_collar_even_when_the_ai_says_ok(tmp_path):
+    import numpy as np
+    from PIL import Image
+    from jagimage.prints import measure, rule_check
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    from test_gemini_bases import fake_photo
+    photo = fake_photo("#1E4636")
+    mask, _ = garment_mask(rgb_to_lab(np.asarray(photo)), "#1E4636")
+    art = Image.open(make_print(tmp_path / "p.png"))
+    good = measure(mask, art)
+    assert rule_check(good) == ([], {"dx": 0.0, "dy": 0.0, "scale": 1.0})
+    high = measure(mask, art, dy=-0.12, scale=1.4)
+    issues, fix = rule_check(high)
+    assert "too high: touches the collar" in issues and "too big for the chest" in issues and fix["dy"] > 0.1 and fix["scale"] < 0.8
+    pleased = lambda photo, art, measured: {"ok": True, "issues": [], "dx": 0, "dy": 0, "scale": 1}
+    verdict = studio.judge_print(photo, art, mask, "chest_large", {"dx": 0, "dy": -0.12, "scale": 1.4}, pleased)
+    assert not verdict["ok"] and verdict["dy"] == fix["dy"]
+    # the batch's checker then moves it down and shrinks it until the rules pass
+    s = studio.Spec(top_colours=["Navy"], models=1, poses=["front_main"], keep_png=False, print_dy=-0.12, print_scale=1.4)
+    studio.Batch(s, out=tmp_path, generate=fake_generate).run()
+    counts = studio.Batch(s, out=tmp_path, prints=lambda *a: [("p", tmp_path / "p.png")], checker=pleased).run("prints")
+    qc = json.loads((tmp_path / s.name / "m0001" / "Navy__Navy" / "prints_qc.json").read_text())["front_main_print_p"]
+    assert counts["print_fixed"] == 1 and qc["ok"] and qc["adjust"]["dy"] >= 0 and qc["adjust"]["scale"] < 1.2  # back below the collar

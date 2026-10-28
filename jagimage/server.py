@@ -540,12 +540,12 @@ def make_handler(app: Studio):
                 art = Image.open(pick[1])
             adj = adjust(body.get("dx"), body.get("dy"), body.get("scale"))
             place = body.get("place") or "chest_large"
-            out = batch.preview_print(target, art, place, **adj)
+            out, mask = batch.preview_print(target, art, place, **adj)
             check = None
             if body.get("check"):
                 if not (ready().get("gemini") or ready().get("openai")):
                     raise ValueError("The print checker needs a Gemini or OpenAI key (Settings → API keys)")
-                check = c.agent.check_print(out, art)
+                check = studio.judge_print(out, art, mask, place, adj, c.agent.check_print)
             shown = out.convert("RGB")
             shown.thumbnail((900, 1200))
             buf = io.BytesIO()

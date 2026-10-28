@@ -483,6 +483,9 @@ placement and look on the shirt, as a buyer on Myntra or Amazon would:
   armpits, not cut off by an arm or hand, a sensible size for the chest;
 - the artwork itself intact: same design, colours and proportions as image 2, nothing missing or stretched;
 - it looks printed on the fabric (follows its light and folds), not like a sticker floating on top.
+Be strict: a print touching or overlapping the collar or neckband, cut by an arm, clearly off-centre, or covering
+the whole front is not ok. You also get the software's measurements of the placement (shares of the chest width);
+trust them for distances, and judge the look yourself. score: 1 (unusable) to 10 (perfect).
 Then give a fix as a move and a resize: dx moves the print right (+) or left (-) and dy moves it down (+) or up (-),
 both as a share of the chest width (0.05 = a small nudge, 0.15 = a lot); scale multiplies its size (0.9 = 10%
 smaller). Use 0, 0, 1 when the placement is right. ok is true only when a buyer would accept the photo as it is.
@@ -732,7 +735,7 @@ class Agent:
         total = {k: sum((r[k] or 0) for r in rows) for k in ("ai_images", "photos", "cost_inr")}
         return {"reply": str(ans.get("reply") or ""), "batches": rows, "bodies": bodies, "total": total, "problems": problems}
 
-    def check_print(self, photo, art) -> dict:
+    def check_print(self, photo, art, measured: Optional[dict] = None) -> dict:
         """The print checker: is the print on this photo placed right? {ok, score, issues, dx, dy, scale}
         with the move and resize that would fix it (kept within jagimage.prints.LIMITS)."""
         import io
@@ -746,11 +749,14 @@ class Agent:
             im.save(buf, "JPEG", quality=85)
             return buf.getvalue(), "image/jpeg"
 
-        ans = self._ask("Check the print placement on image 1 (image 2 is the artwork).", PRINT_CHECK_SYSTEM,
+        facts = ("" if not measured else "\nMeasured by the software: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in measured.items())
+                 + " (gaps, width and off-centre as shares of the chest width; hidden as a share of the print).")
+        ans = self._ask("Check the print placement on image 1 (image 2 is the artwork)." + facts, PRINT_CHECK_SYSTEM,
                         PRINT_CHECK_SCHEMA, [jpeg(photo, 1024), jpeg(art, 512)])
         fix = adjust(ans.get("dx"), ans.get("dy"), ans.get("scale"))
         issues = [" ".join(str(i).split())[:160] for i in (ans.get("issues") or []) if str(i).strip()][:5]
-        return {"ok": bool(ans.get("ok")), "score": int(ans.get("score") or 0), "issues": issues, **fix}
+        score = max(0, min(10, int(ans.get("score") or 0)))
+        return {"ok": bool(ans.get("ok")), "score": score, "issues": issues, **fix}
 
     def plan_print(self, message: str, current: dict) -> dict:
         """The shop's words ("a bit lower and smaller") as a placement: {place, dx, dy, scale, reply}."""
