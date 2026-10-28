@@ -702,3 +702,55 @@ def test_close_up_pose_from_a_guide_is_not_framed_head_to_toe():
     close = studio.prompt(sp, 1, sp.bases()[0], "detail_closeup", "face+front")
     assert studio.CLOSE_FRAMING in close and studio.FULL_FRAMING not in close and "full-body photo" not in close
     assert studio.FULL_FRAMING in studio.prompt(sp, 1, sp.bases()[0], "front_main", "none")
+
+
+def make_print(path, size=(400, 300), bg="white"):
+    from PIL import Image, ImageDraw
+    art = Image.new("RGB", size, bg)
+    d = ImageDraw.Draw(art)
+    d.rectangle((40, 40, size[0] - 40, size[1] - 40), fill="#D23C1E")
+    d.ellipse((150, 100, 250, 200), fill=bg)  # a hole: the background colour inside means no ink there too
+    art.save(path)
+    return path
+
+
+def test_print_is_placed_on_the_chest_and_its_white_background_is_not_ink(tmp_path):
+    from PIL import Image
+    from jagimage.prints import artwork, chest, place_print
+    from jagimage.recolor import garment_mask, rgb_to_lab
+    import numpy as np
+    from test_gemini_bases import fake_photo
+    photo = fake_photo("#1E4636")
+    mask, _ = garment_mask(rgb_to_lab(np.asarray(photo)), "#1E4636")
+    art = Image.open(make_print(tmp_path / "p.png"))
+    a = np.asarray(artwork(art))
+    assert a[5, 5, 3] == 0 and a[150, 200, 3] == 0 and a[60, 60, 3] == 255  # background and hole: no ink
+    cx, neck, w = chest(mask)
+    assert abs(cx - 150) < 8 and 115 <= neck <= 125 and 100 < w < 140
+    out = np.asarray(place_print(photo, mask, art)).astype(int)
+    before = np.asarray(photo).astype(int)
+    changed = np.abs(out - before).sum(-1) > 30
+    ys, xs = np.nonzero(changed)
+    assert changed.sum() > 500 and ys.min() > neck and abs(xs.mean() - cx) < 6  # centred, below the neckline
+    assert not changed[mask < 0.5].any()  # never on skin, hair or the backdrop
+    red = out[changed]
+    assert (red[:, 0] > red[:, 1] + 60).mean() > 0.9  # the print's own red, not mixed with the shirt
+
+
+def test_prints_stage_prints_every_front_photo_of_a_batch(tmp_path):
+    s = studio.Spec(top_colours=["Navy", "White"], models=1, poses=["front_main", "back"], keep_png=False)
+    studio.Batch(s, out=tmp_path, generate=fake_generate).run()
+    arts = [("Logo 1", make_print(tmp_path / "a.png")), ("237", make_print(tmp_path / "b.png", bg="black"))]
+    asked = []
+    prints = lambda cat, top, colour: (asked.append((cat, top, colour)), arts if colour == "Navy" else [])[1]
+    counts = studio.Batch(s, out=tmp_path, prints=prints).run("prints")
+    assert counts["printed"] == 2 and counts["errors"] == 0 and sorted(asked) == [(s.category, s.top, "Navy"), (s.category, s.top, "White")]
+    navy = tmp_path / s.name / "m0001" / "Navy__Navy"
+    assert (navy / "front_main_print_Logo_1_1500x1500.jpg").exists() and (navy / "front_main_print_237_1500x1500.jpg").exists()
+    assert not list(navy.glob("back_print*"))  # front pose only
+    rows = studio.Batch(s, out=tmp_path).results()
+    plain = next(r for r in rows if r["top"] == "Navy" and r["pose"] == "front_main")
+    assert plain["jpg"].endswith("front_main_1500x1500.jpg")  # the plain photo stays itself
+    assert any(r["pose"] == "front_main_print_237" for r in rows)
+    again = studio.Batch(s, out=tmp_path, prints=prints).run("prints")
+    assert again["printed"] == 0  # already printed: nothing redone

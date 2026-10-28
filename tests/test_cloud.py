@@ -435,3 +435,29 @@ def test_guide_screenshot_goes_to_openai_as_a_picture(monkeypatch):
     parts = seen[-1][1]["content"]
     assert g["marketplace"] == "Myntra" and parts[0]["type"] == "text"
     assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_print_folders_are_saved_and_their_prints_downloaded_once(tmp_path):
+    from jagimage.cloud import drive_folder_id
+    assert drive_folder_id("https://drive.google.com/drive/folders/1wfJz1wv8BYT5iN-1a7mzYWhlCrOkzwvr?usp=sharing") == "1wfJz1wv8BYT5iN-1a7mzYWhlCrOkzwvr"
+    with pytest.raises(ValueError, match="Drive folder link"):
+        drive_folder_id("https://example.com/x")
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"))
+    rows = cloud.set_print_rows([
+        {"category": "Men", "top": "HalfSleeveTee", "colour": "", "link": "https://drive.google.com/drive/folders/AAAAAAAAAAAA"},
+        {"category": "Men", "top": "HalfSleeveTee", "colour": "Black", "link": "https://drive.google.com/drive/folders/BBBBBBBBBBBB"}])
+    assert [r["folder"] for r in rows] == ["AAAAAAAAAAAA", "BBBBBBBBBBBB"]
+    with pytest.raises(ValueError, match="category and top style"):
+        cloud.set_print_rows([{"category": "Aliens", "top": "HalfSleeveTee", "link": "AAAAAAAAAAAA"}])
+    downloads = []
+    cloud.drive = SimpleNamespace(can_read=True, list_images=lambda folder: [{"id": folder + "-1", "name": "237.png", "modifiedTime": "t1"}],
+                                  download=lambda fid: (downloads.append(fid), b"png-bytes")[1])
+    black = cloud.print_files("Men", "HalfSleeveTee", "Black")
+    navy = cloud.print_files("Men", "HalfSleeveTee", "Navy")  # no folder of its own: the all-colours one
+    assert black[0][0] == "237" and black[0][1].read_bytes() == b"png-bytes" and "BBBB" in black[0][1].name
+    assert "AAAA" in navy[0][1].name and cloud.print_files("Women", "Hoodie", "Red") == []
+    cloud.print_files("Men", "HalfSleeveTee", "Black")
+    assert downloads == ["BBBBBBBBBBBB-1", "AAAAAAAAAAAA-1"]  # kept: not downloaded again
+    cloud.drive.can_read = False
+    with pytest.raises(RuntimeError, match="Reconnect Google Drive"):
+        cloud.print_files("Men", "HalfSleeveTee", "Black")

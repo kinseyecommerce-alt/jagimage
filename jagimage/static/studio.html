@@ -190,7 +190,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <div id="dashTab" class="hide">
   <div class="dhead">
     <div><h2>Overview</h2><div class="hint" id="dSub">Every finished photo is checked: exact colour, no colour bleeding onto skin or background, no base colour left.</div></div>
-    <div class="row"><span class="hint" id="dUpdated"></span><button class="btn" id="dRefresh" type="button">Refresh</button></div>
+    <div class="row"><span class="hint" id="dUpdated"></span>
+      <label class="hide" id="dPlaceBox" title="Where Add prints puts the print on the front photos"><span class="hint">Print position</span> <select id="dPlace"></select></label>
+      <button class="btn" id="dRefresh" type="button">Refresh</button></div>
   </div>
   <div class="dgrid">
     <section class="panel hero" aria-live="polite">
@@ -257,6 +259,20 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <button class="btn" id="driveOff">Disconnect</button>
       </div>
     </section>
+  <section class="panel hide" id="printPanel">
+    <h2>Print folders</h2>
+    <p class="hint">Where your prints (PNG artwork) are in Google Drive, for each category, top style and colour. On the Dashboard, <b>Add prints</b> puts every print from the matching folder on a batch's finished front photos: exactly as drawn, following the shirt's folds and light, no AI and no cost. A folder set for <i>All colours</i> is used for any colour that has no folder of its own.</p>
+    <p class="e hide" id="printRead">Google Drive is connected without permission to read your folders. An admin presses <a href="/drive/connect">Connect Google Drive</a> once more and allows it.</p>
+    <table class="agenttab" id="printRows"></table>
+    <div class="row" id="printAdd">
+      <label class="field"><span>Category</span><select id="pCat"></select></label>
+      <label class="field"><span>Top style</span><select id="pTop"></select></label>
+      <label class="field"><span>Colour</span><select id="pColour"></select></label>
+      <label class="field" style="flex:3"><span>Drive folder link</span><input type="text" id="pLink" placeholder="https://drive.google.com/drive/folders/…"></label>
+      <button class="btn primary" id="pAddBtn" type="button">Add</button>
+    </div>
+    <p class="e" id="printErr"></p>
+  </section>
   <section class="panel hide" id="accountPanel">
     <h2>My account</h2>
     <p>Signed in as <b id="meName"></b> <span class="hint" id="meRole"></span></p>
@@ -678,6 +694,36 @@ async function agentRuns() {
     + (x.running ? ` · running <button class="btn" data-stoprun="${esc(x.id)}">Stop</button>` : x.error ? ` · stopped: <span class="e">${esc(x.error)}</span>` : x.stopped ? " · stopped" : " · finished") + `</div>`).join("");
   if (r.runs.some((x) => x.running)) loadJobs();
 }
+// ---------- print folders (Settings) and Add prints (Dashboard)
+async function printsRefresh() {
+  const r = await api("/api/prints"); S.printRows = r.rows;
+  $("printRead").classList.toggle("hide", r.can_read);
+  if (!$("dPlace").options.length) $("dPlace").innerHTML = Object.entries(r.places).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
+  $("dPlaceBox").classList.remove("hide");
+  const admin = isAdmin(); $("printAdd").classList.toggle("hide", !admin);
+  $("printRows").innerHTML = r.rows.length ? `<tr><th>Category</th><th>Top style</th><th>Colour</th><th>Folder</th><th></th></tr>` + r.rows.map((x, i) =>
+    `<tr><td>${esc(label(x.category))}</td><td>${esc(nice(x.top))}</td><td>${esc(x.colour || "All colours")}</td><td><a href="${esc(x.link)}" target="_blank" rel="noopener">open</a></td><td class="r">${admin ? `<button class="btn" data-pdel="${i}">Remove</button>` : ""}</td></tr>`).join("")
+    : `<tr><td class="hint">No print folders yet.</td></tr>`;
+}
+async function printsSave(rows) {
+  try { const r = await api("/api/prints", { rows }); $("printErr").textContent = ""; await printsRefresh(); return r; }
+  catch (e) { $("printErr").textContent = e.message; }
+}
+function initPrints() {
+  $("printPanel").classList.remove("hide");
+  $("pCat").innerHTML = S.opts.categories.map((c) => `<option value="${esc(c)}">${esc(label(c))}</option>`).join("");
+  $("pTop").innerHTML = S.opts.tops.map((t) => `<option value="${esc(t)}">${esc(nice(t))}</option>`).join("");
+  const colours = [...new Set(Object.values(S.opts.palettes).flatMap((p) => Object.keys(p)))];
+  $("pColour").innerHTML = `<option value="">All colours</option>` + colours.map((c) => `<option>${esc(c)}</option>`).join("");
+  $("pAddBtn").onclick = async () => {
+    const row = { category: $("pCat").value, top: $("pTop").value, colour: $("pColour").value, link: $("pLink").value.trim() };
+    const rest = (S.printRows || []).filter((x) => !(x.category === row.category && x.top === row.top && x.colour === row.colour));
+    if (await printsSave([...rest, row])) $("pLink").value = "";
+  };
+  $("printRows").onclick = (e) => { const i = e.target.dataset.pdel; if (i != null) printsSave(S.printRows.filter((_, j) => j !== +i)); };
+  printsRefresh().catch(() => {});
+}
+
 // ---------- marketplace guide (e.g. Myntra): the AI reads it into the settings below
 function guideHtml(g) {
   const li = (k, v) => v ? `<li><b>${k}:</b> ${esc(v)}</li>` : "";
@@ -720,7 +766,7 @@ function initGuide() {
   $("guideDel").onclick = async () => { const id = $("guideSel").value; if (id && confirm("Delete this saved guide?")) { await api(`/api/guides/${encodeURIComponent(id)}/delete`, {}); guidesRefresh(); $("guideOut").innerHTML = ""; } };
 }
 function initCloud() {
-  initGuide();
+  initGuide(); initPrints();
   ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
@@ -813,7 +859,7 @@ async function loadDashboard() {
         <td class="num">${fmt(Math.min(b.on_drive, b.photos))}<div class="meta">of ${fmt(b.photos)}</div></td>
         <td class="num">₹${fmt(b.cost_inr)}<div class="meta">${b.cost_is_real ? "billed" : "estimate"}</div></td>
         <td class="meta" style="white-space:nowrap">${ago(b.updated)}</td>
-        <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button></td></tr>`; }).join("") + "</tbody>"
+        <td class="num"><button class="btn" data-redo="${esc(b.name)}" title="Make every photo again with the latest recolouring and quality check. No AI, no cost.">Recolour again</button>${S.opts.cloud ? ` <button class="btn" data-prints="${esc(b.name)}" title="Put your prints (Settings → Print folders) on this batch's finished front photos. No AI, no cost.">Add prints</button>` : ""}</td></tr>`; }).join("") + "</tbody>"
     : `<tbody><tr><td class="empty">${status("idle", "No batches yet")}<div class="hint" style="margin-top:6px">Start one in the Studio tab, or ask the Agent.</div></td></tr></tbody>`;
   // needs attention
   $("dIssues").innerHTML = d.attention.length ? `<div class="issues">` + d.attention.map((a) => {
@@ -827,6 +873,13 @@ async function loadDashboard() {
 function initDashboard() {
   $("dRefresh").onclick = loadDashboard;
   $("dTable").addEventListener("click", async (e) => {
+    const pr = e.target.dataset.prints;
+    if (pr) {
+      if (!confirm(`Put the prints from your print folders on every finished front photo of ${pr.replace(/_/g, " ")} (${$("dPlace").selectedOptions[0].text})? No AI is used, so it costs nothing. The printed photos go to Google Drive too.`)) return;
+      e.target.disabled = true;
+      try { await api(`/api/batches/${encodeURIComponent(pr)}/prints`, { print_place: $("dPlace").value }); loadDashboard(); } catch (err) { alert(err.message); e.target.disabled = false; }
+      return;
+    }
     const name = e.target.dataset.redo; if (!name) return;
     if (!confirm(`Recolour every photo in ${name.replace(/_/g, " ")} again with the latest recolouring and quality check? No AI is used, so it costs nothing. The photos in Google Drive are replaced.`)) return;
     e.target.disabled = true;

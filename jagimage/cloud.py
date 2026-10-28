@@ -20,6 +20,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -28,7 +29,9 @@ from typing import Callable, Optional
 from .studio import DRIVE_LIST_LOCK
 
 SESSION_DAYS = 30
-DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"  # only files and folders this app makes
+# the app's own files and folders, plus reading (never changing) the print folders the shop points it at
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly"
+READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
@@ -242,9 +245,35 @@ class Drive:
         if not tok.get("refresh_token"):
             raise RuntimeError("Google didn't return a refresh token; remove the app's access in your Google account and connect again")
         with self.lock:
-            self.state = {"refresh_token": tok["refresh_token"], "folders": {}}
+            self.state = {"refresh_token": tok["refresh_token"], "folders": {}, "scope": tok.get("scope", "")}
             self._access = (tok.get("access_token"), time.time() + int(tok.get("expires_in", 0)) - 60)
             self._save()
+
+    @property
+    def can_read(self) -> bool:
+        """Connected with permission to read the shop's own folders (needed for print folders)."""
+        return self.connected and READ_SCOPE in self.state.get("scope", "")
+
+    def list_images(self, folder: str) -> list:
+        """The pictures directly in a Drive folder: [{id, name, mimeType, modifiedTime}], by name."""
+        files, page = [], None
+        while True:
+            q = {"q": f"'{folder}' in parents and trashed = false and mimeType contains 'image/'", "pageSize": 1000,
+                 "fields": "nextPageToken, files(id, name, mimeType, modifiedTime)", "orderBy": "name",
+                 "supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
+            if page:
+                q["pageToken"] = page
+            r = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(q))
+            files += r.get("files") or []
+            page = r.get("nextPageToken")
+            if not page:
+                return files
+
+    def download(self, file_id: str) -> bytes:
+        req = urllib.request.Request(f"https://www.googleapis.com/drive/v3/files/{urllib.parse.quote(file_id)}?alt=media&supportsAllDrives=true",
+                                     headers={"Authorization": f"Bearer {self._token()}"})
+        with self.opener(req, timeout=120) as r:
+            return r.read()
 
     def disconnect(self):
         with self.lock:
@@ -450,6 +479,16 @@ GUIDE_TYPES = ".pdf, .docx, .txt, .md, .png, .jpg, .jpeg, .webp"
 POSE_ALIASES = [("front", "front_main"), ("straight", "front_main"), ("back", "back"), ("rear", "back"),
                 ("side", "side"), ("profile", "side"), ("three_quarter", "threequarter"), ("threequarter", "threequarter"),
                 ("angle", "threequarter"), ("45", "threequarter"), ("pocket", "handpocket")]
+
+
+def drive_folder_id(link: str) -> str:
+    """The folder id in a Google Drive folder link (or the id itself)."""
+    link = link.strip()
+    m = re.search(r"/folders/([A-Za-z0-9_-]{10,})", link) or re.search(r"[?&]id=([A-Za-z0-9_-]{10,})", link) \
+        or re.fullmatch(r"([A-Za-z0-9_-]{10,})", link)
+    if not m:
+        raise ValueError("Paste a Google Drive folder link, like https://drive.google.com/drive/folders/1AbC…")
+    return m.group(1)
 
 
 def guide_content(filename: str, data: bytes):
@@ -688,7 +727,58 @@ class Cloud:
         self.plans = {}  # plan id -> agent plan, until Start
 
     def drive_status(self) -> dict:
-        return {"configured": self.drive.configured, "connected": self.drive.connected, "folder": self.drive.folder, **self.sync.status}
+        return {"configured": self.drive.configured, "connected": self.drive.connected, "can_read": self.drive.can_read,
+                "folder": self.drive.folder, **self.sync.status}
+
+    # ---- print folders: which Drive folder holds the prints for a category, top style and colour
+    def print_rows(self) -> list:
+        f = self.data / "prints.json"
+        return json.loads(f.read_text()) if f.exists() else []
+
+    def set_print_rows(self, rows) -> list:
+        from . import library as L
+        from . import studio
+
+        clean = []
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                raise ValueError("send a list of print folders")
+            cat, top, colour = str(r.get("category", "")), str(r.get("top", "")), " ".join(str(r.get("colour") or "").split())
+            if cat not in L.CATEGORIES or top not in studio.TOPS:
+                raise ValueError(f"Pick a category and top style for every print folder ({cat or '?'} / {top or '?'})")
+            folder = drive_folder_id(str(r.get("link", "")))
+            clean.append({"category": cat, "top": top, "colour": colour[:40], "link": str(r.get("link", "")).strip()[:300], "folder": folder})
+        if len(clean) > 500:
+            raise ValueError("At most 500 print folders")
+        f = self.data / "prints.json"
+        f.write_text(json.dumps(clean, indent=1))
+        return clean
+
+    def print_files(self, category: str, top: str, colour: str) -> list:
+        """[(print name, local PNG path)] for one shirt: the folder set for this colour, else the one for
+        all colours of this category and top style. Downloaded once and kept until it changes on Drive."""
+        rows = [r for r in self.print_rows() if r["category"] == category and r["top"] == top]
+        row = next((r for r in rows if r["colour"].lower() == colour.lower()), None) or next((r for r in rows if not r["colour"]), None)
+        if not row:
+            return []
+        if not self.drive.can_read:
+            raise RuntimeError("Reconnect Google Drive (Settings → Google Drive → Connect) so the app may read your print folders")
+        try:
+            files = self.drive.list_images(row["folder"])
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Can't open the print folder for {category} {top} {colour or 'all colours'} (Drive says {exc.code}): "
+                               "check the link, and that the folder is shared with the Google account connected here") from exc
+        cache = self.data / "print_cache"
+        cache.mkdir(exist_ok=True)
+        out = []
+        for f in files:
+            local = cache / f"{f['id']}_{hashlib.sha1(f.get('modifiedTime', '').encode()).hexdigest()[:8]}{os.path.splitext(f['name'])[1].lower() or '.png'}"
+            if not local.exists():
+                tmp = local.with_suffix(".part")
+                tmp.write_bytes(self.drive.download(f["id"]))
+                tmp.replace(local)
+            out.append((os.path.splitext(f["name"])[0], local))
+        return out
 
     # ---- marketplace guides (e.g. Myntra's model photo guidelines), read once and kept for everyone
     def guides(self) -> list:

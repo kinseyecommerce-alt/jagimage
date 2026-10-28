@@ -113,6 +113,7 @@ class Spec:
     canvas: Optional[Tuple[int, int]] = (1500, 1500)
     background: str = ""     # a marketplace guide's backdrop, e.g. "pure white (#FFFFFF)"; empty: the studio grey
     guide: str = ""          # the marketplace guide these settings came from (shown on the dashboard), e.g. "Myntra"
+    print_place: str = "chest_large"  # where prints go on the front photos (jagimage.prints.PLACES)
     name: str = ""
 
     def __post_init__(self):
@@ -146,6 +147,10 @@ class Spec:
             raise ValueError("each custom pose needs a name and a description")
         self.extra = " ".join(str(self.extra or "").split())
         self.background, self.guide = " ".join(str(self.background).split()), " ".join(str(self.guide).split())
+        from .prints import PLACES
+
+        if self.print_place not in PLACES:
+            raise ValueError(f"print_place must be one of {', '.join(PLACES)}")
         if len(self.background) > 200 or len(self.guide) > 80:
             raise ValueError("background must be at most 200 characters and guide at most 80")
         if len(self.extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
@@ -435,7 +440,8 @@ class Batch:
 
     def __init__(self, spec: Spec, out="output/studio", generate: Optional[Callable[[str, List[str]], bytes]] = None,
                  workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
-                 export: Optional[str] = None, export_what="jpg", redo: bool = False):
+                 export: Optional[str] = None, export_what="jpg", redo: bool = False,
+                 prints: Optional[Callable[[str, str, str], list]] = None):
         """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
         photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
@@ -454,7 +460,9 @@ class Batch:
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
-        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0}
+        self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0, "printed": 0}
+        # prints(category, top style, colour) -> [(print name, PNG path)]: the shop's prints for that shirt
+        self.prints = prints
         if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
             generate.set_usage_log(self.root / "_usage.jsonl")
 
@@ -476,9 +484,12 @@ class Batch:
 
     # ---- run
     def run(self, stage="all"):
-        """stage: all | bases (AI only) | recolor (no AI calls)."""
+        """stage: all | bases (AI only) | recolor (no AI calls) | prints (prints on the finished fronts, no AI)."""
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "spec.json").write_text(json.dumps(asdict(self.spec), indent=2))
+        if stage == "prints":
+            self.run_prints()
+            return self.counts
         if stage != "recolor" and self.generate is None:
             raise RuntimeError("No image engine: pass generate=, or use stage='recolor'")
         if stage != "recolor" and self.spec.batch:
@@ -775,6 +786,66 @@ class Batch:
             if rel in lines:
                 done.write_text("".join(f"{x}\n" for x in lines if x != rel))
 
+    def run_prints(self):
+        """Every print the shop has for this category, top style and colour, on every finished front photo
+        (front_main, and front_main_white when made): <pose>_print_<print name>.png and its marketplace JPG,
+        next to the plain photo. No AI: the artwork is placed exactly (jagimage.prints)."""
+        from .prints import PrintError, place_print
+        from .recolor import fit_canvas
+
+        if self.prints is None:
+            raise RuntimeError("Print folders aren't set up (Settings → Print folders)")
+        spec = self.spec
+        cache: Dict[str, list] = {}
+        for m in spec.model_numbers():
+            for base in spec.bases():
+                for pose in [p for p in ("front_main", "front_main_white") if p in spec.poses]:
+                    todo = [(t, b) for t, b in spec.pairs() if spec.base_key(t, b) == base]
+                    if not todo or not self.base_path(m, base, pose).exists():
+                        continue
+                    try:
+                        img, tmask, bmask = self.masks(m, base, pose)
+                    except Exception as exc:
+                        self._event("errors", model=m, path=str(self.base_path(m, base, pose)), error=f"mask: {exc}")
+                        continue
+                    for t, b in todo:
+                        if self.stop.is_set():
+                            return
+                        if t not in cache:
+                            try:
+                                cache[t] = self.prints(spec.category, spec.top, t)
+                            except Exception as exc:  # e.g. Drive can't be read: no use trying every photo
+                                raise RuntimeError(f"prints: {exc}") from exc
+                        path = self.out_path(m, t, b, pose)
+                        plain = None
+                        for name, art_path in cache[t]:
+                            dest = path.with_name(f"{pose}_print_{slug(name)}.png")
+                            jpg = dest.with_name(f"{dest.stem}_{spec.canvas[0]}x{spec.canvas[1]}.jpg") if spec.canvas else None
+                            if (dest.exists() or (jpg and jpg.exists())) and not self.redo:
+                                continue
+                            try:
+                                if plain is None:
+                                    plain = self._recoloured(img, tmask, bmask, base, t, b)
+                                from PIL import Image
+                                out = place_print(plain, tmask, Image.open(art_path), spec.print_place)
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                if spec.keep_png:
+                                    out.save(dest)
+                                if jpg:
+                                    fit_canvas(out, *spec.canvas).save(jpg, quality=95)
+                                self._event("printed", model=m, path=str(dest), top=t, bottom=b, pose=pose, print=name)
+                            except (PrintError, OSError) as exc:
+                                self._event("errors", model=m, path=str(dest), error=f"print {name}: {exc}")
+
+    def _recoloured(self, img, tmask, bmask, base, top, bottom):
+        from .recolor import recolor_image
+
+        spec = self.spec
+        out, _, _ = recolor_image(img, TOP_BASES[base[0]][1], colour_hex(top, spec.fabric), mask=tmask, others=bmask if bottom else None)
+        if bottom:
+            out, _, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], colour_hex(bottom, spec.fabric), mask=bmask, others=tmask)
+        return out
+
     def _recolour_one(self, img, tmask, bmask, base, top, bottom, path: Path, pose):
         from .recolor import fit_canvas, quality_check, recolor_image, write_qc
 
@@ -858,7 +929,8 @@ class Batch:
                 poses |= {size.match(f.stem).group(1) for f in pd.glob("*_*x*.jpg") if size.match(f.stem) and not f.name.startswith(".")}
                 for pose in sorted(poses):
                     png = pd / f"{pose}.png"
-                    canvas = sorted(pd.glob(f"{pose}_*x*.jpg"))
+                    # this pose's own JPG, not a printed one (front_main_print_237_...) that starts the same
+                    canvas = sorted(c for c in pd.glob(f"{pose}_*x*.jpg") if size.match(c.stem) and size.match(c.stem).group(1) == pose)
                     rows.append({"model": md.name, "top": top, "bottom": bottom or None, "pose": pose,
                                  "png": str(png.relative_to(self.root)) if png.exists() else None,
                                  "jpg": str(canvas[0].relative_to(self.root)) if canvas else None})
