@@ -60,3 +60,10 @@ def test_meta_needs_a_key_and_is_priced_flat(monkeypatch):
                        poses=["front_main", "back"], provider="meta")
     e = pricing.estimate(spec)
     assert e["per_image_usd"] == 0.01 and e["model"] == "muse-image-1.0"
+
+
+def test_account_errors_name_the_engine_and_keep_its_words():
+    msg = studio.account_problem(RuntimeError('Meta API error 402: {"error": {"message": "Add a payment method"}}'), "meta")
+    assert msg.startswith("The Meta account") and "dev.meta.ai" in msg and "Add a payment method" in msg
+    bad = studio.account_problem(RuntimeError('Meta API error 401: {"error": "invalid key"}'), "meta")
+    assert bad.startswith("The Meta API key was refused")

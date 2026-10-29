@@ -355,22 +355,31 @@ CHILD_SAFE = [
 ]
 
 
-def account_problem(exc: Exception) -> Optional[str]:
+BILLING_PAGES = {"gemini": "AI Studio > Billing", "openai": "platform.openai.com > Billing", "meta": "dev.meta.ai > Billing"}
+ENGINE_NAMES = {"gemini": "Gemini", "openai": "OpenAI", "meta": "Meta", "runpod": "RunPod"}
+
+
+def account_problem(exc: Exception, provider: Optional[str] = None) -> Optional[str]:
     """A plain explanation when an AI error means the account can't make images at all, so the
-    batch stops at once instead of failing every model. None for errors worth retrying."""
+    batch stops at once instead of failing every model. None for errors worth retrying. It names the
+    engine and ends with the engine's own words, which tell e.g. a missing payment method from no credit."""
     text = f"{type(exc).__name__} {exc}".lower()
     code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    if "credits are depleted" in text or "insufficient_quota" in text or "billing" in text and "402" in text or code == 402:
-        return ("The AI account is out of credits or billing isn't set up. Add credits (Gemini: AI Studio > "
-                "Billing; OpenAI: platform.openai.com > Billing), then start the batch again: finished photos are kept.")
-    if code in (401, 403) or "api key not valid" in text or "invalid_api_key" in text or "incorrect api key" in text \
-            or "permission_denied" in text:
-        return "The API key was refused (wrong, expired or without access to this model). Save a working key and start again."
+    who = ENGINE_NAMES.get(provider, "AI")
+    said = f' {who} said: "{" ".join(str(exc).split())[:240]}"'
     if "runpod token not accepted" in text:
         return "The RunPod pod refused the token. Save the same token the pod was started with, then start again."
     if "runpod pod unreachable" in text:
         return ("The RunPod pod isn't answering: check it is running in the RunPod console (Pods) and the address "
                 "ends in -8000.proxy.runpod.net, then start again: finished photos are kept.")
+    if "credits are depleted" in text or "insufficient_quota" in text or "billing" in text and "402" in text or "error 402" in text or code == 402:
+        where = BILLING_PAGES.get(provider) or ", ".join(f"{ENGINE_NAMES[k]}: {v}" for k, v in BILLING_PAGES.items())
+        return (f"The {who} account is out of credits or billing isn't set up. Add credits ({where}), then start "
+                "the batch again: finished photos are kept." + said)
+    if code in (401, 403) or "api key not valid" in text or "invalid_api_key" in text or "incorrect api key" in text \
+            or "permission_denied" in text or "error 401" in text or "error 403" in text:
+        return (f"The {who} API key was refused (wrong, expired or without access to this model). Save a working "
+                "key and start again." + said)
     return None
 
 
@@ -588,7 +597,7 @@ class Batch:
                 if got is None:
                     continue  # stopped, or the job is still with Google: picked up on the next start
                 if isinstance(got, Exception):
-                    fatal = account_problem(got)
+                    fatal = account_problem(got, self.spec.provider)
                     if fatal:
                         self.fatal = fatal
                         self.stop.set()
@@ -701,7 +710,7 @@ class Batch:
                 return True
             except Exception as exc:  # API errors, rate limits, wrong colours: retry with backoff
                 last = exc
-                fatal = account_problem(exc)
+                fatal = account_problem(exc, self.spec.provider)
                 if fatal:  # no credits / bad key: every other request would fail the same way
                     self.fatal = fatal
                     self.stop.set()
