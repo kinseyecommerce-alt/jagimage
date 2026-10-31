@@ -23,6 +23,7 @@ CREASE_DROP = 0.15  # crease pixels are at least this much darker than the garme
 CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
 EDGE_ALPHA_BLUR = 0.8   # px: alpha along the edge is smoothed this much before it is steepened
+EDGE_CRISP_PX = 3.0     # px: an edge blend this narrow is already crisp (the AI anti-aliases over 2-5 px): barely steepened
 OUTLINE_SMOOTH = 1.5    # px: the garment outline is smoothed this much (removes notches and spikes)
 SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is smoothed
 SHADOW_SMOOTH = 1.2     # px blur for that ring
@@ -412,7 +413,16 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=3, garment=None, back
         # line beside a hem) would turn it into a torn, stair-stepped edge on a dark or bright colour.
         A = inner.astype(np.float32)
         A[ys, xs] = a
-        a = ndimage.gaussian_filter(A, EDGE_ALPHA_BLUR)[ys, xs]
+        As = ndimage.gaussian_filter(A, EDGE_ALPHA_BLUR)
+        a = As[ys, xs]
+        # Against skin or hair only a blurred edge is steepened: one the AI drew crisp (a neck rib on skin,
+        # anti-aliased over 2-5 px) keeps its own blend, or a dark colour shows a pixel staircase. Against
+        # the studio backdrop edges stay fully steepened, so thin backdrop gaps (arm and body) stay clean.
+        gy, gx = np.gradient(As)
+        width = 1.0 / np.maximum(np.hypot(gy, gx)[ys, xs], 1e-3)  # px the blend takes to go from 0 to 1
+        studio = (np.abs(Bc - np.asarray(backdrop, np.float32)[None]).max(-1) < 30) if backdrop is not None \
+            else np.zeros(len(ys), bool)
+        k = np.where(studio, k, np.minimum(k, np.maximum(1.0, width / EDGE_CRISP_PX)))
         a = np.clip((a - 0.5) * k + 0.5, 0, 1)[:, None]
         # The pure garment colour behind this pixel, recoloured: the neighbour's new colour with
         # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
