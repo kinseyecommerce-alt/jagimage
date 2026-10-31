@@ -93,6 +93,19 @@ def _base_hued(lab, base):
     return (dh < np.radians(40)) & (C > 0.015)
 
 
+WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
+
+
+def is_white(name: str, fabric: str) -> bool:
+    """White or an off-white (e.g. Cotton Mix #E7E7EC), not a light grey such as Melange or a pastel."""
+    import numpy as np
+
+    from .recolor import hex_to_lab
+
+    lab = hex_to_lab(colour_hex(name, fabric))
+    return float(lab[0]) >= 0.92 and float(np.hypot(lab[1], lab[2])) < 0.02
+
+
 def base_of(hex_: str) -> str:
     from .recolor import lightness
 
@@ -165,6 +178,8 @@ class Spec:
             raise ValueError("shot must be outfit (top and bottom) or top (top only)")
         if self.shot == "top":
             colour_hex(self.bottom_colour, self.fabric)
+            if is_white(self.bottom_colour, self.fabric):
+                raise ValueError("Bottoms aren't made in white: pick another bottom colour")
         elif self.pairing == "each" and not self.bottom_colours and self.bottom not in FIXED_BOTTOMS:
             raise ValueError("pick at least one bottom colour, or pair the bottom with the top colour")
         self.custom_poses = {slug(k).lower(): " ".join(str(v).split()) for k, v in (self.custom_poses or {}).items()}
@@ -201,6 +216,9 @@ class Spec:
             raise ValueError(f"model numbers go from 1 to {faces.capacity(self.category)} for {self.category}")
         for c in self.top_colours + self.bottom_colours:
             colour_hex(c, self.fabric)
+        whites = [c for c in self.bottom_colours if is_white(c, self.fabric)]
+        if whites:
+            raise ValueError(f"Bottoms aren't made in white: take {', '.join(whites)} out of the bottom colours")
         if self.canvas:
             try:
                 self.canvas = tuple(int(v) for v in self.canvas)
@@ -224,15 +242,17 @@ class Spec:
         """(top colour, bottom colour) pairs; bottom None when it isn't recoloured (jeans, top-only shots)."""
         if self.bottom in FIXED_BOTTOMS or self.shot == "top":
             return [(t, None) for t in self.top_colours]
-        if self.pairing == "match" or not self.bottom_colours:
-            return [(t, t) for t in self.top_colours]
+        if self.pairing == "match" or not self.bottom_colours:  # a white top goes with WHITE_TOP_BOTTOM
+            return [(t, WHITE_TOP_BOTTOM if is_white(t, self.fabric) else t) for t in self.top_colours]
         return [(t, b) for t in self.top_colours for b in self.bottom_colours]
 
     def base_key(self, top: str, bottom: Optional[str]) -> Tuple[str, Optional[str]]:
         if self.one_base:
             return ("light", "light" if bottom else None)
-        return (base_of(colour_hex(top, self.fabric)),
-                base_of(colour_hex(bottom, self.fabric)) if bottom else None)
+        tb = base_of(colour_hex(top, self.fabric))
+        if bottom == WHITE_TOP_BOTTOM and is_white(top, self.fabric):
+            return (tb, tb)  # a white top's black bottom comes from the same light shoot: no extra AI photo
+        return (tb, base_of(colour_hex(bottom, self.fabric)) if bottom else None)
 
     def bases(self) -> List[Tuple[str, Optional[str]]]:
         """The base shoots each model needs, the most used first (that one is made from the text)."""

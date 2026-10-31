@@ -635,8 +635,11 @@ const palFor = (fabric) => ((S.opts.category_palettes || {})[fabric] || {})[S.ca
 function categoryColours() {  // a new category: drop picked colours it isn't made in
   for (const w of ["top", "bottom"]) { const pal = palFor(S[w + "Pal"]); for (const c of [...S[w]]) if (!/^#/.test(c) && !(c in pal)) S[w].delete(c); chips(w); }
 }
+// white or off-white, not a light grey such as Melange (as studio.is_white): bottoms aren't made in white
+const isWhite = (hex) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); return Math.min(r, g, b) >= 0xE0 && Math.max(r, g, b) - Math.min(r, g, b) <= 10; };
 function chips(which) {
-  const pal = palFor(S[which + "Pal"]), set = S[which];
+  let pal = palFor(S[which + "Pal"]), set = S[which];
+  if (which === "bottom") { pal = Object.fromEntries(Object.entries(pal).filter(([, h]) => !isWhite(h))); for (const c of [...set]) if (!/^#/.test(c) && !(c in pal)) set.delete(c); }
   const names = [...Object.keys(pal), ...S.custom[which]];
   $(which + "Chips").innerHTML = names.map((n) => `<button class="chip ${set.has(n) ? "on" : ""}" data-n="${esc(n)}"><i style="background:${esc(pal[n] || n)}"></i>${esc(n)}${S.custom[which].includes(n) ? '<span class="x" title="Remove">×</span>' : ""}</button>`).join("");
   $(which + "Count").textContent = set.size ? `${set.size} selected` : "";
@@ -1179,7 +1182,7 @@ async function init() {
   seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; categoryColours(); if (S.topOptions) { S.topOptions(); S.moreTopsRender && S.moreTopsRender(); autoShot(); } refreshPlan(); });
   seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; S.shotPicked = true; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
   const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";
-    $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
+    $("bottomColour").innerHTML = Object.keys(pal).filter((c) => !isWhite(pal[c])).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };
   bc(); $("fabric").addEventListener("input", bc); $("bottomColour").addEventListener("input", refreshPlan);
   const topOptions = () => { const cur = $("top").value, list = topsFor(S.category);
     $("top").innerHTML = list.map((t) => `<option value="${t}">${nice(t)}</option>`).join("");

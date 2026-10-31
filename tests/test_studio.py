@@ -98,7 +98,7 @@ def test_plan_bases_and_pairs():
 
 
 def test_prompt_asks_for_a_real_person_in_both_base_colours():
-    s = studio.Spec(category="Women", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], bottom_colours=["White"], pairing="each")
+    s = studio.Spec(category="Women", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], bottom_colours=["Light Pink"], pairing="each")
     p = studio.prompt(s, 12, ("dark", "light"), "front_main", "none")
     assert "real, living human model (not a mannequin" in p and "mannequin, dummy" in p.split("Avoid:")[1]
     assert "bottle green (#1E4636)" in p and "lilac (#C4A3EE)" in p and faces.describe("Women", 12) in p
@@ -620,8 +620,9 @@ def test_one_base_per_model_halves_the_ai_images(tmp_path):
     small = studio.Spec(top_colours=["Navy", "Black", "White"], models=1, one_base=True)
     counts = studio.Batch(small, out=tmp_path, generate=fake_generate).run()
     assert counts["ai_done"] == 1 and counts["recoloured"] == 3 and counts["errors"] == 0
-    for c in ["Navy", "Black", "White"]:
-        qc = json.loads((tmp_path / small.name / "m0001" / f"{c}__{c}" / "qc.json").read_text())["front_main"]
+    for c in ["Navy", "Black", "White"]:  # a white top's bottom is black (bottoms aren't made in white)
+        b = studio.WHITE_TOP_BOTTOM if c == "White" else c
+        qc = json.loads((tmp_path / small.name / "m0001" / f"{c}__{b}" / "qc.json").read_text())["front_main"]
         assert qc["top"]["deltaE"] < 3 and qc["bottom"]["deltaE"] < 3
 
 
@@ -1000,3 +1001,15 @@ def test_colours_can_differ_by_category(tmp_path):
         httpd.shutdown()
         for f, c in before.items():
             L.set_colours(f, c)
+
+
+def test_bottoms_are_never_white():
+    s = studio.Spec(category="Men", top="FullSleeveTee", bottom="Trackpants", fabric="CottonMix", top_colours=["White", "Red"])
+    assert s.pairs() == [("White", studio.WHITE_TOP_BOTTOM), ("Red", "Red")]   # a white top gets black track pants
+    assert s.base_key("White", "Black") == ("light", "light")  # ...from its own light shoot, no extra AI photo
+    with pytest.raises(ValueError, match="aren't made in white"):
+        studio.Spec(category="Men", top="FullSleeveTee", bottom="Trackpants", top_colours=["Red"], pairing="each", bottom_colours=["White"])
+    with pytest.raises(ValueError, match="aren't made in white"):
+        studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], shot="top", bottom_colour="White")
+    assert not studio.is_white("Melange", "CottonMix") and not studio.is_white("Light Pink", "PureCotton")
+    assert studio.is_white("White", "CottonMix") and studio.is_white("#F2F2F2", "PureCotton")

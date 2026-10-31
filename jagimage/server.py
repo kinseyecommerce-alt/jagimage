@@ -55,7 +55,7 @@ def drive_folders() -> list:
 def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "kids_only_tops": sorted(studio.KIDS_ONLY_TOPS), "bottoms": studio.BOTTOMS,
-        "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS, "category_palettes": L.CATEGORY_COLOURS, "default_palettes": L.DEFAULT_COLOURS,
+        "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS, "category_palettes": L.CATEGORY_COLOURS, "white_top_bottom": studio.WHITE_TOP_BOTTOM, "default_palettes": L.DEFAULT_COLOURS,
         "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
