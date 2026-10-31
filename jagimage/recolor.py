@@ -24,6 +24,9 @@ CREASE_MAX = 5      # and in lines thinner than this (px), unlike hair
 EDGE_SHARPEN_MAX = 3.0  # most an edge blend is steepened when the colour contrast to the surround grows
 EDGE_ALPHA_BLUR = 0.8   # px: alpha along the edge is smoothed this much before it is steepened
 EDGE_GAP_PX = 3         # px: a backdrop strip up to twice this wide (arm and body, beside a hand) is kept sharp and unpainted
+EDGE_SMOOTH_PX = 1.2    # px: the garment outline is smoothed this much to draw a staircase-free edge
+EDGE_SMOOTH_SLOPE = 1.6  # how quickly the smoothed outline goes from backdrop to garment (about 2 px)
+EDGE_SMOOTH_MIX = 0.7   # share of the smoothed outline in an edge pixel's blend (the rest: the photo's own)
 EDGE_CRISP_PX = 3.0     # px: an edge blend this narrow is already crisp (the AI anti-aliases over 2-5 px): barely steepened
 OUTLINE_SMOOTH = 1.5    # px: the garment outline is smoothed this much (removes notches and spikes)
 SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is smoothed
@@ -428,7 +431,15 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=3, garment=None, back
             thin = ndimage.binary_closing(m, iterations=EDGE_GAP_PX) & ~m
         gap = ndimage.binary_dilation(thin, iterations=1)[ys, xs]
         k = np.where(gap, k, np.minimum(k, np.maximum(1.0, width / EDGE_CRISP_PX)))
-        a = np.clip((a - 0.5) * k + 0.5, 0, 1)[:, None]
+        a = np.clip((a - 0.5) * k + 0.5, 0, 1)
+        # The mask's outline is a pixel staircase and the AI's own blend is only ~1 px wide, so a dark
+        # colour on the light studio backdrop shows steps. There the edge follows the smoothed outline (like
+        # anti-aliased vector art), mixed with the photo's own blend; thin backdrop strips keep theirs.
+        # Against skin the mask can hold a shadow on the skin, so there the photo's own blend decides.
+        smooth_a = np.clip((ndimage.gaussian_filter(m.astype(np.float32), EDGE_SMOOTH_PX)[ys, xs] - 0.5) * EDGE_SMOOTH_SLOPE + 0.5, 0, 1)
+        on_studio = (np.abs(Bc - np.asarray(backdrop, np.float32)[None]).max(-1) < 30) if backdrop is not None \
+            else np.zeros(len(ys), bool)
+        a = np.where(on_studio & ~gap, EDGE_SMOOTH_MIX * smooth_a + (1 - EDGE_SMOOTH_MIX) * a, a)[:, None]
         # The pure garment colour behind this pixel, recoloured: the neighbour's new colour with
         # this pixel's own lightness difference (scaled like the texture), so edge creases survive.
         fg = np.where(a > 0.05, Bc + (P - Bc) / np.maximum(a, 0.05), Fo)
