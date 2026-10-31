@@ -72,12 +72,12 @@ def test_ledger_survives_batches_starting_together(tmp_path):
 
 
 def test_top_only_shot_is_above_the_knee_and_recolours_only_the_top(tmp_path):
-    s = studio.Spec(top_colours=["Red", "White"], shot="top", bottom="Shorts", bottom_colour="Black", models=1)
+    s = studio.Spec(top_colours=["Red", "White"], shot="top", bottom="Shorts", bottom_colour="Black", models=1, provider="openai")
     assert s.pairs() == [("Red", None), ("White", None)] and s.name.endswith("_top_only")
     p = studio.prompt(s, 1, s.bases()[0], "front_main", "none")
     assert "just above the knees" in p and "Full body head to shoes" not in p and "plain black regular-fit knit shorts" in p
     assert "sneakers" not in p.split("Avoid:")[0] and "feet or shoes in frame" in p.split("Avoid:")[1]
-    full = studio.prompt(studio.Spec(top_colours=["Red"]), 1, ("dark", "dark"), "front_main", "none")
+    full = studio.prompt(studio.Spec(top_colours=["Red"], provider="openai"), 1, ("dark", "dark"), "front_main", "none")
     assert "Full body head to shoes" in full and "sneakers" in full
     counts = studio.Batch(s, out=tmp_path, generate=fake_generate).run()
     assert counts["ai_done"] == 2 and counts["recoloured"] == 2 and counts["errors"] == 0
@@ -98,7 +98,7 @@ def test_plan_bases_and_pairs():
 
 
 def test_prompt_asks_for_a_real_person_in_both_base_colours():
-    s = studio.Spec(category="Women", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], bottom_colours=["Light Pink"], pairing="each")
+    s = studio.Spec(category="Women", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], bottom_colours=["Light Pink"], pairing="each", provider="openai")
     p = studio.prompt(s, 12, ("dark", "light"), "front_main", "none")
     assert "real, living human model (not a mannequin" in p and "mannequin, dummy" in p.split("Avoid:")[1]
     assert "bottle green (#1E4636)" in p and "lilac (#C4A3EE)" in p and faces.describe("Women", 12) in p
@@ -135,7 +135,7 @@ def test_cost_estimate():
 
 
 def test_hands_free_pose():
-    s = studio.Spec(top_colours=["Red"], poses=["front_main", "back", "handpocket"])
+    s = studio.Spec(top_colours=["Red"], poses=["front_main", "back", "handpocket"], provider="openai")
     front = studio.prompt(s, 1, ("dark", "dark"), "front_main", "none")
     assert studio.HANDS_FREE in front and "hands in pockets" in front.split("Avoid:")[1]
     assert studio.HANDS_FREE in studio.prompt(s, 1, ("dark", "dark"), "back", "front")
@@ -1013,3 +1013,16 @@ def test_bottoms_are_never_white():
         studio.Spec(category="Men", top="HalfSleeveTee", bottom="Trackpants", top_colours=["Red"], shot="top", bottom_colour="White")
     assert not studio.is_white("Melange", "CottonMix") and not studio.is_white("Light Pink", "PureCotton")
     assert studio.is_white("White", "CottonMix") and studio.is_white("#F2F2F2", "PureCotton")
+
+
+def test_gemini_is_told_plain_bottoms_without_naming_drawstrings_or_pockets():
+    """Gemini draws what the text names, even after "no": a drawstring appeared on shorts told "NO drawstring"."""
+    for top, bottom in (("HalfSleeveTee", "Shorts"), ("FullSleeveTee", "Trackpants")):
+        g = studio.Spec(category="Kids_Boys", top=top, bottom=bottom, fabric="CottonMix", top_colours=["Red"], provider="gemini")
+        text = studio.prompt(g, 13, g.bases()[0], "front_main", "none").lower()
+        assert "drawstring" not in text and "drawcord" not in text and "pocket" not in text
+        assert "clean flat waistband covered in the same fabric" in text and "completely plain smooth front and sides" in text
+        o = studio.Spec(category="Kids_Boys", top=top, bottom=bottom, fabric="CottonMix", top_colours=["Red"], provider="openai")
+        assert "NO drawstring" in studio.prompt(o, 13, o.bases()[0], "front_main", "none")  # OpenAI follows the plain "no"
+    hoodie = studio.Spec(category="Kids_Boys", top="Hoodie", bottom="Trackpants", top_colours=["Red"], provider="gemini")
+    assert "kangaroo pocket" in studio.prompt(hoodie, 13, hoodie.bases()[0], "front_main", "none")  # the hoodie's own pocket stays

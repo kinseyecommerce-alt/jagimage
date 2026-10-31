@@ -197,6 +197,16 @@ RULES = ("Exact garment colour {COLOUR} ({HEX}), uniform and true under neutral 
          "photorealistic e-commerce catalogue photo, no text, no logo, no watermark, no props, compliant with Amazon, Flipkart, Myntra and Meesho.")
 KIDS_RULE = " The child must clearly look 4-5 years old with toddler proportions."
 JOGGER_RULE = " Joggers end in a plain straight hem, no ribbed cuffs."
+# Gemini draws what the text names, even after "no": for it plain bottoms are described only by what they are
+POSITIVE_BOTTOMS = {
+    "Shorts": ("plain {COLOUR} simple pull-on knit shorts ending just above the knee, a clean flat waistband covered in the same "
+               "fabric, completely plain smooth front and sides, the only seam the outer side seam, straight flat hem, no logo"),
+    "Trackpants": ("plain {COLOUR} simple pull-on knit pants, full length, a clean flat waistband covered in the same fabric, "
+                   "completely plain smooth front and sides, the only seam the outer side seam, straight-leg with a plain straight "
+                   "hem at the ankle, no logo"),
+}
+POSITIVE_BOTTOM_RULE = (" The shorts or pants are simple pull-on bottoms: a clean flat fabric-covered waistband and completely plain, "
+                        "smooth front and sides.")
 PLAIN_BOTTOM_RULE = (" The shorts or pants have a plain waistband with no drawstring and no pockets anywhere: smooth flat front and "
                      "sides with no seams other than the outer side seam.")
 NEGATIVE_PLAIN_BOTTOM = ("drawstring, drawcord, waist cord, tie cord, pockets on shorts or pants, side pockets, back pockets, "

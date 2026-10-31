@@ -352,14 +352,16 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     kids = L.is_kids(spec.category)
     top_text = L.GARMENTS[spec.top].replace("{COLOUR}", tname)
     top_only = spec.shot == "top"
+    positive = spec.provider == "gemini" and spec.bottom in L.POSITIVE_BOTTOMS  # Gemini draws what the text names
+    garments = {**L.GARMENTS, **(L.POSITIVE_BOTTOMS if positive else {})}
     if spec.bottom in FIXED_BOTTOMS:
         bottom_text, bcol = FIXED_BOTTOMS[spec.bottom], None
     elif top_only:  # the bottom only completes the look: the AI makes it in the chosen colour
         name = spec.bottom_colour if not HEX.match(spec.bottom_colour) else "solid colour " + spec.bottom_colour.upper()
-        bottom_text, bcol = L.GARMENTS[spec.bottom].replace("{COLOUR}", name.lower()), None
+        bottom_text, bcol = garments[spec.bottom].replace("{COLOUR}", name.lower()), None
     else:
         bname, bhex = BOTTOM_BASES[base[1]]
-        bottom_text, bcol = L.GARMENTS[spec.bottom].replace("{COLOUR}", bname), (bname, bhex)
+        bottom_text, bcol = garments[spec.bottom].replace("{COLOUR}", bname), (bname, bhex)
     shoes = "small white kids sneakers" if kids else "clean white low-top sneakers"
     lines = {"none": "", "face": L.REFERENCE_LINE, "front": L.FRONT_ONLY_LINE,
              "face+front": L.REFERENCE_LINE + L.MATCH_FRONT_LINE}
@@ -392,7 +394,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     negative = L.build_negative(spec.category, product, pose)
     if spec.bottom == "Trackpants":
         text += L.JOGGER_RULE
-    if spec.bottom in ("Shorts", "Trackpants"):  # plain bottoms: no drawstring, no pockets
+    if positive:
+        text += L.POSITIVE_BOTTOM_RULE
+    elif spec.bottom in ("Shorts", "Trackpants"):  # plain bottoms: no drawstring, no pockets
         text += L.PLAIN_BOTTOM_RULE
         negative += ", " + L.NEGATIVE_PLAIN_BOTTOM
     if hands:
@@ -400,6 +404,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     if top_only:
         negative = negative.replace("cut-off feet, ", "") + ", full body shot, feet or shoes in frame, knees in frame"
     text = text + " Avoid: " + negative + ", " + NOT_MANNEQUIN + (", top and bottom in the same colour." if bcol else ".")
+    if positive:  # nothing that names a pocket either, except a garment's own (a hoodie's kangaroo pocket)
+        for phrase in (", no pocket", ", not in pockets", "chest pocket, ", "hands in pockets, "):
+            text = text.replace(phrase, "")
     return child_safe(text) if kids and spec.provider == "openai" else text
 
 
