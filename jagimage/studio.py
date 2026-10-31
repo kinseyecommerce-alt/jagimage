@@ -124,7 +124,11 @@ class Spec:
     fabric: str = "PureCotton"
     top_colours: List[str] = field(default_factory=lambda: ["Navy"])
     bottom_colours: List[str] = field(default_factory=list)  # empty: same colour as the top
-    pairing: str = "match"   # match: bottom = top colour; each: every top with every bottom
+    pairing: str = "match"   # match: bottom = top colour; each: every top with every bottom; pairs: colour_pairs
+    # Sets: exact (top colour, bottom colour, models) pairs, e.g. a combo set Black top + Melange bottom on the
+    # first 45 models. The batch makes max(models) models; a pair goes on only its first `models` of them.
+    colour_pairs: List[List] = field(default_factory=list)
+    set_type: str = ""       # coord (same colour top and bottom), combo (contrast colours), or empty
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -166,8 +170,12 @@ class Spec:
             raise ValueError(f"fabric must be one of {', '.join(L.FABRICS)}")
         if not self.top_colours:
             raise ValueError("pick at least one top colour")
-        if self.pairing not in ("match", "each"):
-            raise ValueError("pairing must be match or each")
+        if self.colour_pairs:
+            self._check_pairs()
+        if self.pairing not in ("match", "each", "pairs"):
+            raise ValueError("pairing must be match, each or pairs")
+        if self.set_type not in ("", "coord", "combo"):
+            raise ValueError("set_type must be coord or combo")
         if self.provider not in ("gemini", "openai", "meta", "runpod"):
             raise ValueError("provider must be gemini, openai, meta or runpod")
         if self.gemini_model not in ("flash", "pro"):
@@ -230,6 +238,7 @@ class Spec:
             self.keep_png = True  # without a marketplace JPG the PNG is the only copy
         if not self.name:
             self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else "")
+                             + (f"_{self.set_type.capitalize()}" if self.set_type else "")
                              + (f"_{self.guide}" if self.guide else ""))  # e.g. ..._Myntra: its own size and backdrop
         if not SAFE_NAME.match(self.name) or ".." in self.name:  # a folder inside the photos folder, nothing else
             raise ValueError("batch name: letters, digits, dot, dash and underscore only")
@@ -238,8 +247,33 @@ class Spec:
         return {**L.POSES, **self.custom_poses}
 
     # ---- what the batch makes
-    def pairs(self) -> List[Tuple[str, Optional[str]]]:
-        """(top colour, bottom colour) pairs; bottom None when it isn't recoloured (jeans, top-only shots)."""
+    def _check_pairs(self):
+        rows = []
+        for p in self.colour_pairs:
+            if not isinstance(p, (list, tuple)) or len(p) not in (2, 3):
+                raise ValueError("each colour pair is [top colour, bottom colour] or [top, bottom, models]")
+            t, b = str(p[0]), str(p[1])
+            n = int(p[2]) if len(p) == 3 else int(self.models)
+            if not 1 <= n <= int(self.models):
+                raise ValueError(f"{t}/{b}: models must be between 1 and {self.models}")
+            colour_hex(t, self.fabric), colour_hex(b, self.fabric)
+            if is_white(b, self.fabric):
+                raise ValueError(f"Bottoms aren't made in white: {t}/{b}")
+            if [t, b] in [r[:2] for r in rows]:
+                raise ValueError(f"{t}/{b} is listed twice")
+            rows.append([t, b, n])
+        if self.shot == "top" or self.bottom in FIXED_BOTTOMS:
+            raise ValueError("Colour pairs need the full outfit shot with a recoloured bottom")
+        self.colour_pairs, self.pairing = rows, "pairs"
+        self.top_colours = list(dict.fromkeys(t for t, _, _ in rows))
+        self.bottom_colours = []
+
+    def pairs(self, m: Optional[int] = None) -> List[Tuple[str, Optional[str]]]:
+        """(top colour, bottom colour) pairs; bottom None when it isn't recoloured (jeans, top-only shots).
+        With colour_pairs and a model number m, only the pairs that model wears."""
+        if self.colour_pairs:
+            k = None if m is None else m - self.first_model + 1
+            return [(t, b) for t, b, n in self.colour_pairs if k is None or k <= n]
         if self.bottom in FIXED_BOTTOMS or self.shot == "top":
             return [(t, None) for t in self.top_colours]
         if self.pairing == "match" or not self.bottom_colours:  # a white top goes with WHITE_TOP_BOTTOM
@@ -254,10 +288,10 @@ class Spec:
             return (tb, tb)  # a white top's black bottom comes from the same light shoot: no extra AI photo
         return (tb, base_of(colour_hex(bottom, self.fabric)) if bottom else None)
 
-    def bases(self) -> List[Tuple[str, Optional[str]]]:
-        """The base shoots each model needs, the most used first (that one is made from the text)."""
+    def bases(self, m: Optional[int] = None) -> List[Tuple[str, Optional[str]]]:
+        """The base shoots each model (or model m) needs, the most used first (that one is made from the text)."""
         count: Dict[Tuple[str, Optional[str]], int] = {}
-        for t, b in self.pairs():
+        for t, b in self.pairs(m):
             k = self.base_key(t, b)
             count[k] = count.get(k, 0) + 1
         return sorted(count, key=lambda k: (-count[k], str(k)))
@@ -267,7 +301,11 @@ class Spec:
 
     def plan(self) -> dict:
         n, poses = int(self.models), len(self.poses)
-        ai, photos = n * len(self.bases()) * poses, n * len(self.pairs()) * poses
+        if self.colour_pairs:  # pairs on only some of the models
+            ai = sum(len(self.bases(m)) for m in self.model_numbers()) * poses
+            photos = sum(n for _, _, n in self.colour_pairs) * poses
+        else:
+            ai, photos = n * len(self.bases()) * poses, n * len(self.pairs()) * poses
         mb = ai * BASE_MB + photos * (JPG_MB + (PNG_MB if self.keep_png else 0))
         return {"models": n, "bases_per_model": len(self.bases()), "colour_pairs": len(self.pairs()),
                 "poses": poses, "ai_images": ai, "recoloured_images": photos, "disk_gb": round(mb / 1000, 1)}
@@ -601,7 +639,7 @@ class Batch:
         while not self.stop.is_set():
             todo = []
             for m in self.spec.model_numbers():
-                bases = self.spec.bases()
+                bases = self.spec.bases(m)
                 first = self.identity_front(m, bases)
                 for base in bases:
                     for pose in poses:
@@ -652,7 +690,7 @@ class Batch:
         md.mkdir(parents=True, exist_ok=True)
         (md / "model.json").write_text(json.dumps({"model": m, "look": faces.look(spec.category, m),
                                                     "description": faces.describe(spec.category, m)}, indent=2))
-        bases = spec.bases()
+        bases = spec.bases(m)
         first_front = self.identity_front(m, bases)
         poses = ["front_main"] + [p for p in spec.poses if p != "front_main"]
         for base in bases:
@@ -842,7 +880,7 @@ class Batch:
 
     def _recolour_base(self, m, base, pose):
         spec = self.spec
-        todo = [(t, b) for t, b in spec.pairs() if spec.base_key(t, b) == base]
+        todo = [(t, b) for t, b in spec.pairs(m) if spec.base_key(t, b) == base]
         if not todo:
             return
         try:
@@ -889,9 +927,9 @@ class Batch:
         spec = self.spec
         cache: Dict[str, list] = {}
         for m in spec.model_numbers():
-            for base in spec.bases():
+            for base in spec.bases(m):
                 for pose in [p for p in ("front_main", "front_main_white") if p in spec.poses]:
-                    todo = [(t, b) for t, b in spec.pairs() if spec.base_key(t, b) == base]
+                    todo = [(t, b) for t, b in spec.pairs(m) if spec.base_key(t, b) == base]
                     if not todo or not self.base_path(m, base, pose).exists():
                         continue
                     try:
@@ -938,7 +976,7 @@ class Batch:
         spec, rows = self.spec, []
         for m in spec.model_numbers():
             for pose in [p for p in ("front_main", "front_main_white") if p in spec.poses]:
-                for t, b in spec.pairs():
+                for t, b in spec.pairs(m):
                     if self.base_path(m, spec.base_key(t, b), pose).exists():
                         rows.append({"model": m, "top": t, "bottom": b, "pose": pose})
         return rows

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "E-commerce product image agent powered by OpenAI's gpt-image-2.5-flare model"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["openai>=3.31", "numpy", "pillow", "scipy", "pypdf"]
+dependencies = ["openai>=3.31", "numpy", "pillow", "scipy", "pypdf", "openpyxl"]
 
 [project.optional-dependencies]
 gemini = ["google-genai>=2.31"]

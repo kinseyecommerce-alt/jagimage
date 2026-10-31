@@ -77,7 +77,7 @@ header .sub { color: var(--muted); font-size: 13px; }
 .zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 /* ---------- Studio: guided steps + sticky run column ---------- */
 main.studio { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; max-width: 1320px; }
-main.studio > .studiohead, main.studio > #agentPanel, main.studio > .results { grid-column: 1 / -1; }
+main.studio > .studiohead, main.studio > #agentPanel, main.studio > #setsPanel, main.studio > .results { grid-column: 1 / -1; }
 .tabpage { max-width: 1040px; margin: 0 auto; padding: 18px 20px; }
 .pvbox { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pvimg { min-height: 220px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; padding: 10px; overflow: hidden; }
@@ -397,6 +397,16 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="row"><button class="btn primary" id="agentPlan">Plan it</button></div>
       <div id="agentOut"></div>
       <div id="agentRuns"></div>
+    </section>
+  <section class="panel hide" id="setsPanel">
+      <h2>Sets plan from Excel <span class="n">coord and combo sets</span></h2>
+      <p class="hint">Upload a sheet with CATEGORY, STYLE (e.g. <i>COORD-HOOD-TRACK PANT</i> or <i>SET-HALF SLEEVE-SHORTS</i>), TOP COLOR, BOTTOM COLOR and the quantity of model image sets. It shows every batch and the cost first; nothing is made until you press Start. It uses the engine in Settings.</p>
+      <div class="row">
+        <input type="file" id="setsFile" accept=".xlsx">
+        <label class="field" style="margin:0"><span>Fabric</span><select id="setsFabric"></select></label>
+        <button class="btn primary" id="setsPlan" type="button">Read the plan</button>
+      </div>
+      <div id="setsOut"></div>
     </section>
   
   <div class="builder">
@@ -947,7 +957,7 @@ function initGuide() {
 function initCloud() {
   ["tabPrints", "tabMarket"].forEach((id) => $(id).classList.remove("hide"));
   initGuide(); initPrints();
-  ["signOut", "agentPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
+  ["signOut", "agentPanel", "setsPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
   driveRefresh(); agentRuns(); setInterval(() => { driveRefresh(); agentRuns(); }, 15000);
@@ -959,6 +969,22 @@ function initCloud() {
   };
   $("driveSync").onclick = async () => { await api("/api/drive/sync", {}); driveRefresh(); };
   $("driveOff").onclick = async () => { if (confirm("Disconnect Google Drive? Photos stop uploading until you connect again.")) { await api("/api/drive/disconnect", {}); driveRefresh(); } };
+  $("setsFabric").innerHTML = Object.keys(S.opts.palettes).map((f) => `<option value="${esc(f)}" ${f === "CottonMix" ? "selected" : ""}>${esc(S.opts.fabrics[f].split(" (")[0])}</option>`).join("");
+  $("setsPlan").onclick = async () => {
+    const f = $("setsFile").files[0]; if (!f) { $("setsOut").innerHTML = '<p class="e">Choose the Excel sheet first.</p>'; return; }
+    const s = spec(), base = { provider: s.provider, gemini_model: s.gemini_model, image_size: s.image_size, quality: s.quality, batch: s.batch, keep_png: s.keep_png, hands_free: s.hands_free };
+    $("setsOut").innerHTML = '<p class="hint">Reading the sheet…</p>';
+    try {
+      const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
+      const p = await api("/api/sets", { filename: f.name, data, fabric: $("setsFabric").value, ...base });
+      const rows = p.batches.map((b) => `<tr><td>${esc(label(b.category))}</td><td>${b.styles.map((x) => esc(NAMES[x] || x)).join(" + ")}<br><span class="hint">${esc(b.set_type === "coord" ? "Coord set" : "Combo set")}</span></td><td class="r">${fmt(b.models)}<br><span class="hint">from no. ${b.first_model}</span></td><td>${b.pairs.map(esc).join("<br>")}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
+      $("setsOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<div class="tablewrap"><table class="agenttab"><tr><th>Category</th><th>Style</th><th class="r">Models</th><th>Top/bottom × sets</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
+        <tr><th colspan="4">Total: ${fmt(p.total.ai_images)} AI images</th><th class="r">${fmt(p.total.photos)}</th><th class="r">₹${fmt(p.total.cost_inr)}</th></tr></table></div>
+        <div class="row"><button class="btn primary" id="setsGo">Start: ${fmt(p.total.photos)} photos for about ₹${fmt(p.total.cost_inr)}</button></div>` : "")
+        + (p.problems.length ? `<p class="hint">Notes:<br>${p.problems.map(esc).join("<br>")}</p>` : "");
+      if (p.batches.length) $("setsGo").onclick = async () => { try { await api("/api/agent/start", { plan_id: p.plan_id }); $("setsOut").innerHTML = '<p class="hint">Started. The batches run one after another; progress shows under Ask the Agent and in the batch panel.</p>'; agentRuns(); } catch (e) { $("setsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; } };
+    } catch (e) { $("setsOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+  };
   $("agentPlan").onclick = async () => {
     const msg = $("agentMsg").value.trim(); if (!msg) return;
     const s = spec(), base = { provider: s.provider, gemini_model: s.gemini_model, image_size: s.image_size, quality: s.quality, batch: s.batch, one_base: s.one_base, keep_png: s.keep_png, hands_free: s.hands_free };

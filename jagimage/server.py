@@ -711,6 +711,44 @@ def make_handler(app: Studio):
                 plan_id = uuid.uuid4().hex[:10]
                 c.plans[plan_id] = {"bodies": plan.pop("bodies"), "label": message[:120], "time": time.time()}
                 return self._json({**plan, "plan_id": plan_id})
+            if parts == ["api", "sets"]:
+                # a sets plan from Excel (coord and combo sets): read, priced, kept for /api/agent/start
+                import base64
+
+                from . import pricing, sheets
+
+                try:
+                    data = base64.b64decode(str(body.get("data") or ""), validate=True)
+                except ValueError:
+                    raise ValueError("The file didn't arrive in one piece: upload it again")
+                if not data:
+                    raise ValueError("Choose the Excel sheet first")
+                fabric = body.get("fabric") if body.get("fabric") in L.FABRICS else "CottonMix"
+                engine = {k: body[k] for k in ("provider", "gemini_model", "image_size", "quality", "batch", "keep_png", "hands_free") if k in body}
+                if not ready().get(engine.get("provider", "gemini")):
+                    raise ValueError(f"Add a key for {engine.get('provider', 'gemini')} in Settings → API keys first")
+                bodies, problems = sheets.read_plan(data, fabric)
+                ledger, rows, kept = studio.ModelLedger(app.out), [], []
+                for b in bodies:
+                    b.update(engine)
+                    try:
+                        sp = specs_from(dict(b), ledger)[0]
+                    except ValueError as exc:
+                        problems.append(f"{b['category']} {b['top']}: {exc}")
+                        continue
+                    p, cost = sp.plan(), pricing.estimate(sp)
+                    rows.append({"category": sp.category, "styles": [sp.top, sp.bottom], "set_type": sp.set_type,
+                                 "models": sp.models, "first_model": sp.first_model, "colours": len(sp.colour_pairs),
+                                 "pairs": [f"{t}/{bb} ×{n}" for t, bb, n in sp.colour_pairs], "ai_images": p["ai_images"],
+                                 "photos": p["recoloured_images"], "cost_inr": cost.get("with_retries_inr"), "name": sp.name})
+                    kept.append(b)
+                total = {k: sum((r[k] or 0) for r in rows) for k in ("ai_images", "photos", "cost_inr")}
+                sets = sum(n for b in kept for _, _, n in b["colour_pairs"])
+                plan_id = uuid.uuid4().hex[:10]
+                c.plans[plan_id] = {"bodies": kept, "label": "Sets plan: " + str(body.get("filename") or "sheet")[:80], "time": time.time()}
+                reply = (f"{len(kept)} batches, {sets:,} model image sets in {fabric}. The same models wear every colour of a style; "
+                         "colours are recoloured for free, so only the base photos cost money.")
+                return self._json({"reply": reply, "batches": rows, "total": total, "problems": problems, "plan_id": plan_id})
             if parts == ["api", "agent", "start"]:
                 plan = c.plans.pop(str(body.get("plan_id", "")), None)
                 if not plan or not plan["bodies"]:
