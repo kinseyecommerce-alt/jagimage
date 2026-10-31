@@ -93,6 +93,11 @@ def _base_hued(lab, base):
     return (dh < np.radians(40)) & (C > 0.015)
 
 
+RETOUCH_BOTTOMS = ("Edit image 1. Change only the shorts or pants: remove the drawstring cords, their ends and eyelets, and remove "
+                   "every pocket and pocket opening, so the waistband is a clean flat band covered in the same fabric and the "
+                   "front and sides are completely plain and smooth, with only the outer side seam. Keep everything else exactly "
+                   "the same: the child, face, hair, pose, hands, the top, all colours (the top's and the bottom's), lighting, "
+                   "background, framing and image size. Return one photo.")
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
 
 
@@ -129,6 +134,7 @@ class Spec:
     # first 45 models. The batch makes max(models) models; a pair goes on only its first `models` of them.
     colour_pairs: List[List] = field(default_factory=list)
     set_type: str = ""       # coord (same colour top and bottom), combo (contrast colours), or empty
+    retouch_bottoms: bool = False  # Gemini: an edit pass takes drawstrings and pockets off plain shorts and pants
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -296,16 +302,24 @@ class Spec:
             count[k] = count.get(k, 0) + 1
         return sorted(count, key=lambda k: (-count[k], str(k)))
 
+    def retouch_poses(self) -> List[str]:
+        """Poses whose base photo gets an edit pass that takes drawstrings and pockets off plain bottoms:
+        Gemini draws them on kids' shorts and pants whatever the text says (the back view shows neither)."""
+        if not self.retouch_bottoms or self.provider != "gemini" or self.bottom not in L.POSITIVE_BOTTOMS:
+            return []
+        return [p for p in self.poses if p != "back"]
+
     def model_numbers(self) -> List[int]:
         return list(range(self.first_model, self.first_model + int(self.models)))
 
     def plan(self) -> dict:
         n, poses = int(self.models), len(self.poses)
+        edits = len(self.retouch_poses())  # the retouch pass is one more AI image per such pose
         if self.colour_pairs:  # pairs on only some of the models
-            ai = sum(len(self.bases(m)) for m in self.model_numbers()) * poses
+            ai = sum(len(self.bases(m)) for m in self.model_numbers()) * (poses + edits)
             photos = sum(n for _, _, n in self.colour_pairs) * poses
         else:
-            ai, photos = n * len(self.bases()) * poses, n * len(self.pairs()) * poses
+            ai, photos = n * len(self.bases()) * (poses + edits), n * len(self.pairs()) * poses
         mb = ai * BASE_MB + photos * (JPG_MB + (PNG_MB if self.keep_png else 0))
         return {"models": n, "bases_per_model": len(self.bases()), "colour_pairs": len(self.pairs()),
                 "poses": poses, "ai_images": ai, "recoloured_images": photos, "disk_gb": round(mb / 1000, 1)}
@@ -761,6 +775,12 @@ class Batch:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp.png")
         tmp.write_bytes(data)
+        if pose in self.spec.retouch_poses():  # Gemini draws drawstrings and pockets anyway: edit them out
+            try:
+                tmp.write_bytes(self.generate(RETOUCH_BOTTOMS, [str(tmp)]))
+            except Exception:
+                tmp.unlink(missing_ok=True)
+                raise
         try:
             self._check_base(tmp, base)
         except Exception:

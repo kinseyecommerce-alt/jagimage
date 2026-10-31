@@ -263,7 +263,8 @@ def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path, monke
         assert code == 200 and llm.asked[0] == "gemini-test"
         assert [b["styles"] for b in plan["batches"]] == [["HalfSleeveTee", "Hoodie"]]  # "Tuxedo" isn't a style
         b = plan["batches"][0]
-        assert b["colours"] == 2 and b["ai_images"] == 3 * 2 * 2 and b["photos"] == 3 * 2 * 2 * 2 and b["cost_inr"] > 0
+        # 3 models x 2 styles x (front + back + Gemini's edit pass on the front, for plain bottoms)
+        assert b["colours"] == 2 and b["ai_images"] == 3 * 2 * 3 and b["photos"] == 3 * 2 * 2 * 2 and b["cost_inr"] > 0
         assert plan["problems"] and "Aliens" in plan["problems"][0]  # unknown category: reported, not made
         assert "bodies" not in plan  # the plan stays on the server until Start
         code, _, body = call(base + "/api/agent/start", {"plan_id": plan["plan_id"]}, cookie=cookie)

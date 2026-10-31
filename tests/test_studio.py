@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,7 +19,10 @@ from jagimage.server import serve
 
 
 def fake_generate(prompt, refs):
-    """A figure whose top and bottom are in the base colours the prompt asks for."""
+    """A figure whose top and bottom are in the base colours the prompt asks for. An edit (the retouch pass)
+    returns its photo unchanged, as a perfect retouch of an already plain garment would."""
+    if prompt == studio.RETOUCH_BOTTOMS:
+        return Path(refs[0]).read_bytes()
     top, bottom = re.findall(r"top [a-z ]+ \((#[0-9A-F]{6})\)(?:, bottom [a-z ]+ \((#[0-9A-F]{6})\))?", prompt)[0]
     img = Image.new("RGB", (300, 400), "#EDEDED")
     d = ImageDraw.Draw(img)
@@ -316,7 +320,7 @@ def test_studio_server_runs_a_batch(tmp_path):
         body = {"category": "Kids_Girls", "top": "HalfSleeveTee", "bottom": "Shorts", "top_colours": ["Red", "White"],
                 "bottom_colours": [], "pairing": "match", "models": 3}
         code, plan = _post(base + "/api/plan", body)
-        assert code == 200 and plan["ai_images"] == 6 and plan["recoloured_images"] == 6
+        assert code == 200 and plan["ai_images"] == 12 and plan["recoloured_images"] == 6  # 6 photos + Gemini's 6 edits
         assert _post(base + "/api/plan", {**body, "top_colours": []})[0] == 400
         code, job = _post(base + "/api/jobs", body)
         assert code == 200
@@ -1026,3 +1030,24 @@ def test_gemini_is_told_plain_bottoms_without_naming_drawstrings_or_pockets():
         assert "NO drawstring" in studio.prompt(o, 13, o.bases()[0], "front_main", "none")  # OpenAI follows the plain "no"
     hoodie = studio.Spec(category="Kids_Boys", top="Hoodie", bottom="Trackpants", top_colours=["Red"], provider="gemini")
     assert "kangaroo pocket" in studio.prompt(hoodie, 13, hoodie.bases()[0], "front_main", "none")  # the hoodie's own pocket stays
+
+
+def test_gemini_bases_with_plain_bottoms_get_an_edit_pass(tmp_path):
+    """Gemini draws drawstrings and pockets on kids' shorts whatever the text says: every base photo but the back
+    gets one edit that takes them off, before it is checked and recoloured. OpenAI's need none."""
+    calls = []
+
+    def gen(prompt, refs):
+        calls.append((prompt == studio.RETOUCH_BOTTOMS, [Path(r).name for r in refs]))
+        return fake_generate(prompt, refs)
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", top_colours=["Navy"], models=1,
+                     poses=["front_main", "back"], provider="gemini", one_base=True, retouch_bottoms=True)
+    assert sp.retouch_poses() == ["front_main"] and sp.plan()["ai_images"] == 3  # 2 photos + 1 edit
+    counts = studio.Batch(sp, out=tmp_path, generate=gen, workers=1).run()
+    assert counts["ai_done"] == 2 and counts["errors"] == 0
+    edits = [refs for is_edit, refs in calls if is_edit]
+    assert edits == [["front_main.tmp.png"]]  # the front, edited before it is accepted; the back isn't
+    o = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", top_colours=["Navy"], provider="openai", retouch_bottoms=True)
+    j = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Jeans", top_colours=["Navy"], provider="gemini", retouch_bottoms=True)
+    assert o.retouch_poses() == [] and j.retouch_poses() == []
