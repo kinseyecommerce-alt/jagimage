@@ -28,8 +28,15 @@ from typing import Callable, Dict, List, Optional, Tuple
 from . import faces
 from . import library as L
 
-TOPS = ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt", "OversizedTee"]
+TOPS = ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt", "OversizedTee", "ZipHoodie"]
 ADULT_ONLY_TOPS = {"OversizedTee"}  # drop-shoulder oversized tees are made for Men and Women only
+KIDS_ONLY_TOPS = {"ZipHoodie"}      # full-zip hoodies are made for Kids Boys and Kids Girls only
+
+
+def tops_for(category: str) -> list:
+    """The top styles made for a category, in TOPS order."""
+    left_out = ADULT_ONLY_TOPS if L.is_kids(category) else KIDS_ONLY_TOPS
+    return [t for t in TOPS if t not in left_out]
 BOTTOMS = ["Shorts", "Trackpants", "Jeans"]
 FIXED_BOTTOMS = {"Jeans": "straight-leg light-wash blue denim jeans"}  # not recoloured
 TOP_BASES = {"light": ("mint green", "#8FD3A8"), "dark": ("bottle green", "#1E4636")}
@@ -136,8 +143,9 @@ class Spec:
             raise ValueError(f"category must be one of {', '.join(L.CATEGORIES)}")
         if self.top not in TOPS:
             raise ValueError(f"top must be one of {', '.join(TOPS)}")
-        if self.top in ADULT_ONLY_TOPS and L.is_kids(self.category):
-            raise ValueError("Oversized drop-shoulder T-shirts are for Men and Women only")
+        if self.top not in tops_for(self.category):
+            raise ValueError("Oversized drop-shoulder T-shirts are for Men and Women only" if self.top in ADULT_ONLY_TOPS
+                             else "Zip hoodies are for Kids Boys and Kids Girls only")
         if self.bottom not in BOTTOMS:
             raise ValueError(f"bottom must be one of {', '.join(BOTTOMS)}")
         if self.fabric not in L.FABRICS:

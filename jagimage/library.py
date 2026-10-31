@@ -49,7 +49,7 @@ FABRIC_TEXT = {
     },
 }
 FABRIC_KIND = {"HalfSleeveTee": "top", "FullSleeveTee": "top", "SleevelessTee": "top", "OversizedTee": "top", "Shorts": "bottom",
-               "Trackpants": "bottom", "Hoodie": "fleece", "Sweatshirt": "fleece"}
+               "Trackpants": "bottom", "Hoodie": "fleece", "Sweatshirt": "fleece", "ZipHoodie": "fleece"}
 
 GARMENTS = {
     "HalfSleeveTee": "a plain {COLOUR} regular-fit crew-neck half-sleeve t-shirt, 1x1 ribbed neckband, set-in shoulder seam at the natural shoulder, sleeves ending mid-bicep, straight hem at the hip, worn untucked, no print, no logo, no pocket",
@@ -61,6 +61,10 @@ GARMENTS = {
                      "drape, no print, no logo, no pocket"),
     "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, covered elastic waistband with flat drawcord, two side seam pockets, straight flat hem, no logo",
     "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, covered elastic waistband with flat drawcord, two side seam pockets, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
+    "ZipHoodie": ("a plain {COLOUR} kids full-zip hoodie: full-length front zip from hem to neck in the same colour (matching zip "
+                  "tape and a small matching zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
+                  "pockets either side of the zip, slightly dropped shoulders, relaxed boxy fit, ribbed cuffs and ribbed hem "
+                  "band, soft brushed fleece, no print, no logo"),
     "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, ribbed cuffs and ribbed hem band, no print, no logo",
     "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, ribbed neckband, ribbed cuffs and ribbed hem band, set-in sleeves, no print, no logo, no pocket",
 }

@@ -54,7 +54,7 @@ def drive_folders() -> list:
 
 def options(app=None) -> dict:
     return {
-        "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "bottoms": studio.BOTTOMS,
+        "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "kids_only_tops": sorted(studio.KIDS_ONLY_TOPS), "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
         "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
@@ -198,8 +198,8 @@ def specs_from(body: dict, ledger) -> list:
     same models. Model numbers are automatic (faces never used before) unless given."""
     tops = [t for t in (body.pop("tops", None) or []) if t]
     tops = [body.get("top", "HalfSleeveTee")] + [t for t in tops if t != body.get("top", "HalfSleeveTee")]
-    if str(body.get("category", "")).startswith("Kids"):  # "all styles" for kids leaves out the adult-only ones
-        tops = tops[:1] + [t for t in tops[1:] if t not in studio.ADULT_ONLY_TOPS]
+    if body.get("category") in L.CATEGORIES:  # "all styles" leaves out styles not made for the category
+        tops = tops[:1] + [t for t in tops[1:] if t in studio.tops_for(body["category"])]
     if not body.get("first_model"):
         body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
     first = studio.Spec(**body)

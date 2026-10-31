@@ -583,9 +583,9 @@ const api = async (path, body) => {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Number(n).toLocaleString();
 const label = (c) => c.replace(/_/g, " ");
-const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", OversizedTee: "Oversized tee (drop shoulder)", Trackpants: "Track pants" };
+const NAMES = { HalfSleeveTee: "Half sleeve tee", FullSleeveTee: "Full sleeve tee", SleevelessTee: "Sleeveless tee", OversizedTee: "Oversized tee (drop shoulder)", ZipHoodie: "Zip hoodie (kids)", Trackpants: "Track pants" };
 // the top styles a category can have: oversized drop-shoulder tees are for Men and Women only
-const topsFor = (cat) => S.opts.tops.filter((t) => !(String(cat).startsWith("Kids") && (S.opts.adult_only_tops || []).includes(t)));
+const topsFor = (cat) => S.opts.tops.filter((t) => !(String(cat).startsWith("Kids") ? S.opts.adult_only_tops || [] : S.opts.kids_only_tops || []).includes(t));
 const nice = (v) => NAMES[v] || label(v);
 const hexOf = (name) => { if (/^#[0-9a-f]{6}$/i.test(name)) return name; for (const f of [S.fabric(), ...Object.keys(S.opts.palettes)]) if (S.opts.palettes[f][name]) return S.opts.palettes[f][name]; return "#888"; };
 S.fabric = () => $("fabric").value;

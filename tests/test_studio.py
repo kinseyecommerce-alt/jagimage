@@ -841,10 +841,24 @@ def test_oversized_drop_shoulder_tee_is_for_men_and_women_only(tmp_path):
     ledger = studio.ModelLedger(tmp_path)
     kids = specs_from({"category": "Kids_Girls", "top": "HalfSleeveTee", "bottom": "Shorts", "top_colours": ["Navy"],
                        "tops": list(studio.TOPS)}, ledger)
-    assert "OversizedTee" not in [s.top for s in kids] and len(kids) == 5
+    assert "OversizedTee" not in [s.top for s in kids] and [s.top for s in kids][-1] == "ZipHoodie" and len(kids) == 6
     adults = specs_from({"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy"],
                          "tops": list(studio.TOPS)}, ledger)
-    assert [s.top for s in adults][-1] == "OversizedTee" and len(adults) == 6
+    assert [s.top for s in adults][-1] == "OversizedTee" and "ZipHoodie" not in [s.top for s in adults] and len(adults) == 6
+
+
+def test_zip_hoodie_is_for_kids_only():
+    from jagimage import library as L
+
+    for cat in ("Kids_Boys", "Kids_Girls"):
+        sp = studio.Spec(category=cat, top="ZipHoodie", bottom="Shorts", top_colours=["Navy"])
+        assert "full-zip hoodie" in studio.prompt(sp, 1, sp.bases()[0], "front_main", "none")
+        assert studio.default_shot("ZipHoodie") == "outfit"
+    for cat in ("Men", "Women"):
+        with pytest.raises(ValueError, match="Kids Boys and Kids Girls only"):
+            studio.Spec(category=cat, top="ZipHoodie", bottom="Trackpants", top_colours=["Navy"])
+    assert "NO drawcords" in L.GARMENTS["ZipHoodie"]  # no cords on children's hoods
+    assert studio.tops_for("Kids_Girls")[-1] == "ZipHoodie" and "ZipHoodie" not in studio.tops_for("Women")
 
 
 def test_top_only_trim_keeps_dark_folds_far_above_the_hem(tmp_path):
