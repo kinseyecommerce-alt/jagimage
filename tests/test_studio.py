@@ -858,7 +858,7 @@ def test_zip_hoodie_is_for_kids_only():
         with pytest.raises(ValueError, match="Kids Boys and Kids Girls only"):
             studio.Spec(category=cat, top="ZipHoodie", bottom="Trackpants", top_colours=["Navy"])
     assert "NO drawcords" in L.GARMENTS["ZipHoodie"]  # no cords on children's hoods
-    assert "BLACK zip" in L.GARMENTS["ZipHoodie"]      # the zip is black in every colour
+    assert "SAME colour as the hoodie" in L.GARMENTS["ZipHoodie"]  # the zip matches the hoodie in every colour
     assert studio.tops_for("Kids_Girls")[-1] == "ZipHoodie" and "ZipHoodie" not in studio.tops_for("Women")
 
 

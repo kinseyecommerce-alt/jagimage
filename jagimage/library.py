@@ -61,8 +61,8 @@ GARMENTS = {
                      "drape, no print, no logo, no pocket"),
     "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, covered elastic waistband with flat drawcord, two side seam pockets, straight flat hem, no logo",
     "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, covered elastic waistband with flat drawcord, two side seam pockets, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
-    "ZipHoodie": ("a plain {COLOUR} kids full-zip hoodie: full-length front zip from hem to neck with a BLACK zip (black zip tape, "
-                  "black teeth and a small black zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
+    "ZipHoodie": ("a plain {COLOUR} kids full-zip hoodie: full-length front zip from hem to neck in the SAME colour as the "
+                  "hoodie (matching zip tape, teeth and a small matching zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
                   "pockets either side of the zip, slightly dropped shoulders, relaxed boxy fit, ribbed cuffs and ribbed hem "
                   "band, soft brushed fleece, no print, no logo"),
     "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, ribbed cuffs and ribbed hem band, no print, no logo",
