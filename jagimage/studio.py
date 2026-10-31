@@ -66,6 +66,7 @@ TOP_ONLY_NEW_PHOTO = "Create a new three-quarter photo framed from the top of th
 BOTTOM_LIKE = 0.06  # OKLab distance: pixels this close to a top-only shot's photographed bottom aren't the top
 BOTTOM_TRIM_BAND = 0.06  # of photo height: only that close above the top's hem can pixels be trimmed as the bottom
 BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
+ZIP_GAP = 0.02  # of photo width: a gap this narrow inside the top (a black zip) doesn't make two figures
 MIN_BASE_STRENGTH = 0.33  # a base garment keeps at least this share of its base colour's chroma (good ones: >= 0.38)
 BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -423,9 +424,12 @@ def garment_problem(lab, masks: dict, base) -> Optional[str]:
 
     from .recolor import hex_to_lab
 
-    pieces, n = ndimage.label(masks["top"] > 0.5)
+    top = masks["top"] > 0.5
+    # a contrast zip or placket cuts the top into halves a few px apart; separate figures stand far apart
+    joined = ndimage.binary_dilation(top, iterations=max(2, round(ZIP_GAP * top.shape[1] / 2)))
+    pieces, n = ndimage.label(joined)
     if n > 1:
-        sizes = np.sort(ndimage.sum(masks["top"] > 0.5, pieces, index=np.arange(1, n + 1)))[::-1]
+        sizes = np.sort(ndimage.sum(top, pieces, index=np.arange(1, n + 1)))[::-1]
         if (sizes >= 0.3 * sizes[0]).sum() > 1:
             return "the photo shows more than one figure (a collage or several views), not one model"
     chroma = np.hypot(lab[..., 1], lab[..., 2])

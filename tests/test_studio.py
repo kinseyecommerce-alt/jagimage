@@ -913,3 +913,15 @@ def test_face_test_changes_only_the_face_of_a_finished_base(tmp_path, monkeypatc
         assert _get(f"{base}/files/{ft['done'][0]}")[0] == 200
     finally:
         httpd.shutdown()
+
+
+def test_a_black_zip_is_not_two_figures():
+    lab = np.zeros((600, 400, 3), np.float32)
+    top = np.zeros((600, 400), np.float32)
+    top[100:400, 100:197] = 1   # left half of a hoodie
+    top[100:400, 203:300] = 1   # right half, past a 6 px black zip
+    assert studio.garment_problem(lab, {"top": top}, ("dark", None)) is None or "figure" not in studio.garment_problem(lab, {"top": top}, ("dark", None))
+    collage = np.zeros((600, 400), np.float32)
+    collage[100:400, 20:150] = 1
+    collage[100:400, 250:380] = 1  # two figures 100 px apart
+    assert "more than one figure" in studio.garment_problem(lab, {"top": collage}, ("dark", None))
