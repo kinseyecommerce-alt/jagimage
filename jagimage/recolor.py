@@ -28,7 +28,7 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 5       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 6       # bump when garment_mask changes: masks saved by older code are made again
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
@@ -37,6 +37,7 @@ KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clip
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or skin is mistaken for it
 GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
+SHADOW_HOLE = 0.006  # of the garment: an enclosed near-black hole up to this size is a deep fold, filled
 GROW_DARKER = 0.4    # shadow growth never takes pixels darker than this share of the garment's typical lightness
 
 
@@ -146,7 +147,9 @@ def _fill_holes(m, lab, centre):
         hs = ndimage.sum(holes, hl, index=idx)
         hm = np.stack([ndimage.mean(lab[..., c], hl, index=idx) for c in range(3)], axis=1)
         same = (np.abs(hm[:, 0] - centre[0]) < 0.25) & (np.hypot(hm[:, 1] - centre[1], hm[:, 2] - centre[2]) < 0.06)
-        m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same) & ~backdrop(hm)])
+        # a deep fold between arm and body photographs near-black and colourless: still fabric when enclosed
+        shadow = (hm[:, 0] < centre[0]) & (np.hypot(hm[:, 1], hm[:, 2]) < 0.03) & (hs <= SHADOW_HOLE * m.sum())
+        m = m | np.isin(hl, idx[((hs <= 0.002 * m.sum()) | same | shadow) & ~backdrop(hm)])
     # Smooth the outline: a hem's dark underside or the shadow just below it is half in, half out of the
     # colour match, leaving 1-3 px notches and spikes that show as a torn edge once recoloured.
     # Never grows into backdrop.

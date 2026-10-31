@@ -925,3 +925,15 @@ def test_a_black_zip_is_not_two_figures():
     collage[100:400, 20:150] = 1
     collage[100:400, 250:380] = 1  # two figures 100 px apart
     assert "more than one figure" in studio.garment_problem(lab, {"top": collage}, ("dark", None))
+
+
+def test_enclosed_black_fold_is_coloured_but_a_black_zip_is_not():
+    from jagimage import recolor as R
+
+    img = np.full((600, 400, 3), 230, np.uint8)
+    img[100:500, 80:320] = (30, 70, 54)        # bottle-green hoodie
+    img[100:500, 197:203] = (12, 12, 12)       # black zip from neck to hem
+    img[300:330, 120:130] = (8, 8, 8)          # a near-black fold between arm and body, inside the hoodie
+    m, _ = R.garment_mask(R.rgb_to_lab(img), "#1E4636")
+    assert m[305:325, 122:128].min() > 0.5     # the fold is recoloured with the hoodie
+    assert m[150:450, 199:201].max() < 0.5     # the zip stays out: it is never painted
