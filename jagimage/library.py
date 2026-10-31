@@ -133,10 +133,14 @@ FABRIC_TEXT = {
 FABRIC_KIND = {"HalfSleeveTee": "top", "FullSleeveTee": "top", "SleevelessTee": "top", "OversizedTee": "top", "Shorts": "bottom",
                "Trackpants": "bottom", "Hoodie": "fleece", "Sweatshirt": "fleece", "ZipHoodie": "fleece"}
 
+RIB = ("1x1 rib-knit neckband about 2 cm wide with fine vertical rib lines clearly visible, joined to the body with a neat "
+       "twin-needle stitch line")
+RIB_BANDS = "rib-knit cuffs and hem band with fine vertical rib lines clearly visible"
+
 GARMENTS = {
-    "HalfSleeveTee": "a plain {COLOUR} regular-fit crew-neck half-sleeve t-shirt, 1x1 ribbed neckband, set-in shoulder seam at the natural shoulder, sleeves ending mid-bicep, straight hem at the hip, worn untucked, no print, no logo, no pocket",
-    "FullSleeveTee": "a plain {COLOUR} regular-fit crew-neck full-sleeve t-shirt, ribbed neckband, sleeves ending at the wrist bone with a plain flat hemmed sleeve end, straight hem at the hip, worn untucked, no print, no logo, no pocket",
-    "SleevelessTee": "a plain {COLOUR} regular-fit crew-neck sleeveless vest/tank tee with neat bound armholes, straight hem, worn untucked, no print, no logo, no pocket",
+    "HalfSleeveTee": "a plain {COLOUR} regular-fit crew-neck half-sleeve t-shirt, " + RIB + ", set-in shoulder seam at the natural shoulder, sleeves ending mid-bicep, straight hem at the hip, worn untucked, no print, no logo, no pocket",
+    "FullSleeveTee": "a plain {COLOUR} regular-fit crew-neck full-sleeve t-shirt, " + RIB + ", sleeves ending at the wrist bone with a plain flat hemmed sleeve end, straight hem at the hip, worn untucked, no print, no logo, no pocket",
+    "SleevelessTee": "a plain {COLOUR} regular-fit crew-neck sleeveless vest/tank tee, " + RIB + ", neat bound armholes, straight hem, worn untucked, no print, no logo, no pocket",
     "OversizedTee": ("a plain {COLOUR} oversized relaxed-fit crew-neck t-shirt with DROP SHOULDERS: the shoulder seam sits well below the "
                      "natural shoulder, on the upper arm; wide boxy body with roomy chest, wide half sleeves ending around the elbow, "
                      "slightly longer length covering the hip, thick 1x1 ribbed neckband, straight hem, worn untucked, heavyweight "
@@ -147,10 +151,10 @@ GARMENTS = {
                   "hoodie (matching zip tape, teeth and a small matching zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
                   "pockets either side of the zip, slightly dropped shoulders, relaxed boxy fit, ribbed cuffs and ribbed hem "
                   "band, soft brushed fleece, no print, no logo"),
-    "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, ribbed cuffs and ribbed hem band, no print, no logo",
-    "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, ribbed neckband, ribbed cuffs and ribbed hem band, set-in sleeves, no print, no logo, no pocket",
+    "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, " + RIB_BANDS + ", no print, no logo",
+    "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, " + RIB + ", " + RIB_BANDS + ", set-in sleeves, no print, no logo, no pocket",
 }
-KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
+KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt, " + RIB + ", with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
 
 PAIRING = {
     ("Men", "top"): "straight-leg light-wash blue denim jeans (dark tops) or black cotton trousers (light tops), clean white low-top sneakers",
