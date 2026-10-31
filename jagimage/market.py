@@ -46,10 +46,17 @@ def on_white(img: Image.Image) -> Image.Image:
 
 
 def sharpen(img: Image.Image, scale: float) -> Image.Image:
-    """Unsharp mask matched to how much the photo was enlarged (as in the zoom test at 2x)."""
+    """Unsharp mask matched to how much the photo was enlarged (as in the zoom test at 2x), with halo control:
+    no pixel goes lighter or darker than its 3x3 neighbourhood was, so a dark garment on the light backdrop
+    gets no white outline (and skin beside it no dark one)."""
+    img = img.convert("RGB")
     if scale > 1.02:
-        return img.filter(ImageFilter.UnsharpMask(radius=min(2.0, scale), percent=60 + int(20 * min(1.0, scale - 1)), threshold=2))
-    return img.filter(ImageFilter.UnsharpMask(radius=1.0, percent=40, threshold=2))  # downsized: a light touch
+        sharp = img.filter(ImageFilter.UnsharpMask(radius=min(2.0, scale), percent=60 + int(20 * min(1.0, scale - 1)), threshold=2))
+    else:
+        sharp = img.filter(ImageFilter.UnsharpMask(radius=1.0, percent=40, threshold=2))  # downsized: a light touch
+    lo, hi = img.filter(ImageFilter.MinFilter(3)), img.filter(ImageFilter.MaxFilter(3))
+    a = np.asarray(sharp, np.int16)
+    return Image.fromarray(np.clip(a, np.asarray(lo, np.int16), np.asarray(hi, np.int16)).astype(np.uint8))
 
 
 def for_market(photo: Image.Image, market: str) -> Image.Image:

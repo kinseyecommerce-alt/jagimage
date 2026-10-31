@@ -33,7 +33,7 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 6       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 7       # bump when garment_mask changes: masks saved by older code are made again
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
@@ -42,6 +42,7 @@ KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clip
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
 BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or skin is mistaken for it
 GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
+SKIN_CREASE_CHROMA = 0.04  # a dark crease line with this much colour, of another hue than the garment, is skin
 SHADOW_HOLE = 0.006  # of the garment: an enclosed near-black hole up to this size is a deep fold, filled
 GROW_DARKER = 0.4    # shadow growth never takes pixels darker than this share of the garment's typical lightness
 
@@ -214,6 +215,11 @@ def _with_creases(m, lab, centre):
     and they'd be blended with the skin as speckle. Only thin lines count: a large dark area beside
     the garment (hair) fails the opening test and stays out."""
     dark = lab[..., 0] < centre[0] - CREASE_DROP
+    # a skin crease beside the garment (the armpit of a sleeveless vest) is dark too, but keeps skin's
+    # warm hue: it stays skin, or once recoloured it shows as a black or olive patch on the arm
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    dh = np.abs(np.angle(np.exp(1j * (np.arctan2(lab[..., 2], lab[..., 1]) - np.arctan2(centre[2], centre[1])))))
+    dark &= ~((C > SKIN_CREASE_CHROMA) & (dh > np.radians(50)))
     thin = dark & ~ndimage.binary_opening(dark, structure=np.ones((CREASE_MAX, CREASE_MAX), bool))
     add = thin & ndimage.binary_dilation(m, iterations=3)
     # Only whole runs of a line join, never single pixels: where the line is a shadow on the skin just

@@ -145,8 +145,8 @@ GARMENTS = {
                      "natural shoulder, on the upper arm; wide boxy body with roomy chest, wide half sleeves ending around the elbow, "
                      "slightly longer length covering the hip, thick 1x1 ribbed neckband, straight hem, worn untucked, heavyweight "
                      "drape, no print, no logo, no pocket"),
-    "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, covered elastic waistband with flat drawcord, two side seam pockets, straight flat hem, no logo",
-    "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, covered elastic waistband with flat drawcord, two side seam pockets, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
+    "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, plain covered elastic waistband with NO drawstring, NO pockets (clean plain side seams), straight flat hem, no logo",
+    "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, plain covered elastic waistband with NO drawstring, NO pockets (clean plain side seams), straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
     "ZipHoodie": ("a plain {COLOUR} kids full-zip hoodie: full-length front zip from hem to neck in the SAME colour as the "
                   "hoodie (matching zip tape, teeth and a small matching zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
                   "pockets either side of the zip, slightly dropped shoulders, relaxed boxy fit, ribbed cuffs and ribbed hem "
@@ -154,7 +154,7 @@ GARMENTS = {
     "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, " + RIB_BANDS + ", no print, no logo",
     "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, " + RIB + ", " + RIB_BANDS + ", set-in sleeves, no print, no logo, no pocket",
 }
-KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt, " + RIB + ", with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
+KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt, " + RIB + ", with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain covered elastic waistband (NO drawstring, NO pockets) and a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
 
 PAIRING = {
     ("Men", "top"): "straight-leg light-wash blue denim jeans (dark tops) or black cotton trousers (light tops), clean white low-top sneakers",
@@ -197,6 +197,8 @@ RULES = ("Exact garment colour {COLOUR} ({HEX}), uniform and true under neutral 
          "photorealistic e-commerce catalogue photo, no text, no logo, no watermark, no props, compliant with Amazon, Flipkart, Myntra and Meesho.")
 KIDS_RULE = " The child must clearly look 4-5 years old with toddler proportions."
 JOGGER_RULE = " Joggers end in a plain straight hem, no ribbed cuffs."
+PLAIN_BOTTOM_RULE = " The shorts or pants have a plain waistband with no drawstring and no pockets anywhere."
+NEGATIVE_PLAIN_BOTTOM = "drawstring, drawcord, waist cord, tie cord, pockets on shorts or pants, side pockets, back pockets"
 
 NEGATIVE = ("blurry face, soft face, low resolution, waxy plastic skin, over-smoothed skin, grey or discoloured ears, dark neck shadow, "
             "black shadow under chin, mismatched face and body skin tone, orange neck, twisted face, head turned opposite to body, "

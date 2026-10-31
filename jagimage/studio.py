@@ -392,6 +392,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     negative = L.build_negative(spec.category, product, pose)
     if spec.bottom == "Trackpants":
         text += L.JOGGER_RULE
+    if spec.bottom in ("Shorts", "Trackpants"):  # plain bottoms: no drawstring, no pockets
+        text += L.PLAIN_BOTTOM_RULE
+        negative += ", " + L.NEGATIVE_PLAIN_BOTTOM
     if hands:
         negative += ", " + HANDS_FREE_AVOID
     if top_only:
