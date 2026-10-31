@@ -525,3 +525,21 @@ def test_print_preview_shows_one_photo_and_the_checkers_verdict(tmp_path, monkey
         assert call(base + "/api/prints/preview", {"batch": "../etc"}, cookie=cookie)[0] in (400, 404)
     finally:
         httpd.shutdown()
+
+
+def test_assistant_account_follows_its_variable(tmp_path, monkeypatch):
+    from jagimage.cloud import Users
+
+    monkeypatch.setenv("JAGIMAGE_AGENT_PASSWORD", "x" * 20)
+    u = Users(tmp_path, "adminpass1")
+    assert u.role("claude") == "admin" and u.check("claude", "x" * 20) and u.check("admin", "adminpass1")
+    monkeypatch.setenv("JAGIMAGE_AGENT_PASSWORD", "y" * 20)
+    u = Users(tmp_path)
+    assert u.check("claude", "y" * 20) and not u.check("claude", "x" * 20)
+    monkeypatch.setenv("JAGIMAGE_AGENT_PASSWORD", "short")
+    u = Users(tmp_path)
+    assert u.role("claude") is None and u.check("admin", "adminpass1")
+    monkeypatch.delenv("JAGIMAGE_AGENT_PASSWORD")
+    u.create("claude", "handmade-pass", "user")  # made by hand: the variable never touches it
+    u = Users(tmp_path)
+    assert u.check("claude", "handmade-pass")

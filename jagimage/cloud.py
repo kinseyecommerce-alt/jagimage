@@ -5,6 +5,8 @@ Enabled by `jagimage serve --cloud` with these environment variables:
   JAGIMAGE_PASSWORD              the first password of the user "admin" (required on the first start;
                                  later changed in Settings, where the admin also adds users)
   JAGIMAGE_RESET_ADMIN           set to 1 to put the admin's password back to JAGIMAGE_PASSWORD
+  JAGIMAGE_AGENT_PASSWORD        while set (16+ characters), an admin account "claude" for an AI assistant
+                                 with this password; remove the variable and the account is removed
   JAGIMAGE_DATA                  folder for settings and the Drive sign-in (default: <out>/../jag-data)
   GOOGLE_OAUTH_CLIENT_ID/SECRET  a Google OAuth "Web application" client, for Drive (optional)
   JAGIMAGE_DRIVE_FOLDER          Drive folder the photos go into (default: kinsey models 2026)
@@ -38,6 +40,7 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 # ---------------------------------------------------------------- users and login
 USER_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 HASH_ROUNDS = 200_000
+ASSISTANT = "claude"  # the account JAGIMAGE_AGENT_PASSWORD switches on
 
 
 JPG_SIZE = re.compile(r"_\d+x\d+\.jpg$")  # the marketplace JPG (1500x1500, or a guide's size such as 1080x1440)
@@ -64,6 +67,23 @@ class Users:
                 self.users["admin"]["role"] = "admin"
             else:
                 self.create("admin", bootstrap_password, "admin")
+        self._assistant(os.environ.get("JAGIMAGE_AGENT_PASSWORD", ""))
+
+    def _assistant(self, password: str):
+        """The "claude" account follows JAGIMAGE_AGENT_PASSWORD: made (or its password updated) while the
+        variable is set, removed when it is gone. An account of that name made by hand is left alone."""
+        u = self.users.get(ASSISTANT)
+        if password and len(password) >= 16:
+            if u is None:
+                self.create(ASSISTANT, password, "admin")
+                self.users[ASSISTANT]["from_env"] = True
+                self._save()
+            elif u.get("from_env") and not self.check(ASSISTANT, password):
+                self.set_password(ASSISTANT, password)
+        elif u is not None and u.get("from_env"):
+            with self.lock:
+                del self.users[ASSISTANT]
+                self._save()
 
     def _save(self):
         self.file.parent.mkdir(parents=True, exist_ok=True)
