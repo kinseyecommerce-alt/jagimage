@@ -8,6 +8,7 @@ other pose sends image 1 = face reference, image 2 = the approved front_main.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
@@ -27,6 +28,87 @@ COLOURS = {
         "Royal Blue": "#2A4BA8", "Military Green": "#4B5320", "Pink": "#E8A0B8", "Green": "#2E7D32",
     },
 }
+
+DEFAULT_COLOURS = {f: dict(c) for f, c in COLOURS.items()}
+# The shop's own lists, edited in Settings: fabric -> category -> name -> #RRGGBB (e.g. Cotton Mix in Dark Pink for
+# Women and Girls only). COLOURS stays every fabric's colours across categories, for looking a name up.
+CATEGORY_COLOURS = {f: {c: dict(cols) for c in CATEGORIES} for f, cols in COLOURS.items()}
+COLOUR_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./&()-]{0,29}$")
+MAX_COLOURS = 80
+
+
+def colours_for(fabric: str, category: str) -> Dict[str, str]:
+    """The colours a category is made in, for one fabric."""
+    return CATEGORY_COLOURS.get(fabric, {}).get(category) or COLOURS.get(fabric, {})
+
+
+def _clean_colours(colours) -> Dict[str, str]:
+    if not isinstance(colours, dict) or not colours:
+        raise ValueError("Keep at least one colour")
+    if len(colours) > MAX_COLOURS:
+        raise ValueError(f"At most {MAX_COLOURS} colours")
+    clean = {}
+    for name, hex_ in colours.items():
+        name = " ".join(str(name).split())
+        if not COLOUR_NAME.match(name):
+            raise ValueError(f"Colour name {name!r}: 1-30 letters, digits, spaces or . / & ( ) -")
+        if not isinstance(hex_, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", hex_):
+            raise ValueError(f"{name}: the colour must be like #3A7D44")
+        if name.lower() in {n.lower() for n in clean}:
+            raise ValueError(f"{name} is listed twice")
+        clean[name] = hex_.upper()
+    return clean
+
+
+def set_colours(fabric: str, colours: dict, categories=None):
+    """Replaces one fabric's colour list (name -> #RRGGBB) for the given categories (default: all), in place,
+    so every module sees it at once. A name used by two categories must have one hex code."""
+    if fabric not in COLOURS:
+        raise ValueError(f"fabric must be one of {', '.join(COLOURS)}")
+    cats = list(categories or CATEGORIES)
+    if any(c not in CATEGORIES for c in cats):
+        raise ValueError(f"category must be one of {', '.join(CATEGORIES)}")
+    clean = _clean_colours(colours)
+    lists = {c: (clean if c in cats else CATEGORY_COLOURS[fabric][c]) for c in CATEGORIES}
+    union: Dict[str, str] = {}
+    for cols in lists.values():
+        for name, hex_ in cols.items():
+            if name in union and union[name] != hex_ and name not in clean:
+                continue  # an unchanged category keeps its own shade until it is edited too
+            union[name] = clean.get(name, hex_)
+    for c in cats:
+        CATEGORY_COLOURS[fabric][c] = dict(clean)
+    COLOURS[fabric].clear()
+    COLOURS[fabric].update(union)
+
+
+def load_colours(path):
+    """The shop's saved colour lists, if any (a broken file leaves the defaults). Files saved before lists
+    were per category hold one list per fabric, used for every category."""
+    p = Path(path)
+    if not p.exists():
+        return
+    try:
+        saved = json.loads(p.read_text())
+        for fabric, lists in saved.items():
+            if fabric not in COLOURS:
+                continue
+            if lists and all(k in CATEGORIES for k in lists):
+                for cat, cols in lists.items():
+                    set_colours(fabric, cols, [cat])
+            else:
+                set_colours(fabric, lists)
+    except (ValueError, TypeError, AttributeError):
+        pass
+
+
+def save_colours(path):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(CATEGORY_COLOURS, indent=1))
+    tmp.replace(p)
+
 
 MODELS = {
     "Men": "an Indian man aged 22-32, lean-athletic or regular build, fair even skin, short textured crop with tapered sides, neat light stubble, friendly natural expression",

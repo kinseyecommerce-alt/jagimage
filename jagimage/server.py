@@ -55,7 +55,7 @@ def drive_folders() -> list:
 def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "kids_only_tops": sorted(studio.KIDS_ONLY_TOPS), "bottoms": studio.BOTTOMS,
-        "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS,
+        "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS, "category_palettes": L.CATEGORY_COLOURS, "default_palettes": L.DEFAULT_COLOURS,
         "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
@@ -282,6 +282,7 @@ class Studio:
         self.cloud = cloud  # server version: login, Google Drive upload, agent (see cloud.py)
         self.agent_runs = {}
         self.keys_file = Path(keys_file) if keys_file else None  # desktop app: remembered API keys
+        self.colours_file = Path(out).resolve().parent / "jag-data" / "colours.json"  # the shop's own colour lists
         self.jobs = {}
         self.previews = {}
         self.facetest = {"running": False, "done": [], "errors": []}
@@ -860,6 +861,15 @@ def make_handler(app: Studio):
                         Path(out).expanduser().mkdir(parents=True, exist_ok=True)
                         app.out = str(Path(out).expanduser())
                     return self._json(options(app))
+                if parts == ["api", "colours"]:
+                    self._admin()
+                    fabric, cats = body.get("fabric"), body.get("categories") or None
+                    if cats is not None and not isinstance(cats, list):
+                        raise ValueError("categories must be a list")
+                    L.set_colours(fabric, L.DEFAULT_COLOURS.get(fabric, {}) if body.get("reset") else body.get("colours"), cats)
+                    L.save_colours(app.colours_file)
+                    return self._json({"palettes": L.COLOURS, "category_palettes": L.CATEGORY_COLOURS,
+                                       "default_palettes": L.DEFAULT_COLOURS})
                 if parts == ["api", "keys"]:
                     self._admin()
                     for p, env in KEY_ENV.items():
@@ -943,12 +953,14 @@ def serve(host="127.0.0.1", port=8765, out="output/studio", workers=4, engine=de
             default_error(request, client_address)
 
     httpd.handle_error = handle_error
+    L.load_colours(app.colours_file)
     if cloud is not None:  # a cloud.Cloud, or True to build one from the environment
         from .cloud import Cloud
 
         app.cloud = cloud if not isinstance(cloud, bool) else Cloud(
             Path(os.environ.get("JAGIMAGE_DATA") or Path(out).resolve().parent / "jag-data"), lambda: app.out)
         app.keys_file = app.keys_file or (app.cloud.data / "keys.json")  # API keys saved on the server, opt-in
+        app.colours_file = app.cloud.data / "colours.json"
         load_keys(app.keys_file)
         app.cloud.sync.start()
     return app, httpd

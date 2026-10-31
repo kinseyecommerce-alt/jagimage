@@ -238,6 +238,27 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div id="keyRows"></div>
     <p class="e" id="keysErr"></p>
   </section>
+  <section class="panel" id="coloursPanel">
+    <h2>Colours</h2>
+    <p class="hint" id="colHint" style="margin:-4px 0 10px">The colours you stock, for each fabric. Only these are shown in the Studio and used by the Agent.</p>
+    <div class="seg" id="colFabric"></div>
+    <div class="seg" id="colCat" style="margin-top:8px"></div>
+    <div class="chips" id="colList" style="margin-top:10px"></div>
+    <div id="colEdit">
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="colName" placeholder="Colour name, e.g. Bottle Green" autocomplete="off" style="flex:1;min-width:160px">
+        <input type="color" id="colPick" value="#1E4636" aria-label="Pick the colour" style="width:48px;height:36px;padding:2px">
+        <input type="text" id="colHex" placeholder="#1E4636" autocomplete="off" style="width:110px">
+        <button class="btn" id="colAdd" type="button">Add colour</button>
+      </div>
+      <div class="row" style="margin-top:10px" id="colFor"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="colSave" type="button">Save colours</button>
+        <button class="btn" id="colReset" type="button">Back to the original list</button>
+      </div>
+    </div>
+    <p class="hint" id="colMsg"></p>
+  </section>
 <section class="panel hide" id="drivePanel">
       <h2>Google Drive</h2>
       <div id="driveState" class="hint">–</div>
@@ -609,8 +630,13 @@ function seg(el, values, current, onPick, text = label) {
   el.innerHTML = values.map((v) => `<button data-v="${esc(v)}" class="${v === current ? "on" : ""}">${esc(text(v))}</button>`).join("");
   el.onclick = (e) => { const b = e.target.closest("button"); if (!b) return; [...el.children].forEach((c) => c.classList.toggle("on", c === b)); onPick(b.dataset.v); };
 }
+// the colours the chosen category is made in (Settings > Colours), for one fabric
+const palFor = (fabric) => ((S.opts.category_palettes || {})[fabric] || {})[S.category] || S.opts.palettes[fabric];
+function categoryColours() {  // a new category: drop picked colours it isn't made in
+  for (const w of ["top", "bottom"]) { const pal = palFor(S[w + "Pal"]); for (const c of [...S[w]]) if (!/^#/.test(c) && !(c in pal)) S[w].delete(c); chips(w); }
+}
 function chips(which) {
-  const pal = S.opts.palettes[S[which + "Pal"]], set = S[which];
+  const pal = palFor(S[which + "Pal"]), set = S[which];
   const names = [...Object.keys(pal), ...S.custom[which]];
   $(which + "Chips").innerHTML = names.map((n) => `<button class="chip ${set.has(n) ? "on" : ""}" data-n="${esc(n)}"><i style="background:${esc(pal[n] || n)}"></i>${esc(n)}${S.custom[which].includes(n) ? '<span class="x" title="Remove">×</span>' : ""}</button>`).join("");
   $(which + "Count").textContent = set.size ? `${set.size} selected` : "";
@@ -626,7 +652,7 @@ function wireChips(which) {
 }
 document.addEventListener("click", (e) => {
   const a = e.target.dataset.all, n = e.target.dataset.none;
-  if (a) { Object.keys(S.opts.palettes[S[a + "Pal"]]).forEach((c) => S[a].add(c)); chips(a); refreshPlan(); }
+  if (a) { Object.keys(palFor(S[a + "Pal"])).forEach((c) => S[a].add(c)); chips(a); refreshPlan(); }
   if (n) { S[n].clear(); chips(n); refreshPlan(); }
 });
 
@@ -1053,9 +1079,45 @@ function initDashboard() {
 // ---------- Settings: API keys, my password, users (admin) ----------
 const KEY_INFO = { gemini: ["Gemini", "AIza…  (aistudio.google.com/apikey)"], openai: ["OpenAI (GPT)", "sk-…  (platform.openai.com/api-keys)"], meta: ["Meta (Muse Image)", "Model API key  (dev.meta.ai)"], runpod: ["RunPod (own GPU)", "Pod token"] };
 const isAdmin = () => !S.opts.cloud || (S.me && S.me.role === "admin");
+function renderColours(admin) {
+  const fabrics = Object.keys(S.opts.palettes), cats = S.opts.categories;
+  const listOf = (f, c) => ({ ...(((S.opts.category_palettes || {})[f] || {})[c] || S.opts.palettes[f]) });
+  if (!fabrics.includes(S.colFabric)) S.colFabric = fabrics[0];
+  if (!cats.includes(S.colCat)) S.colCat = cats[0];
+  if (!S.colDraft) S.colDraft = listOf(S.colFabric, S.colCat);
+  const pick = () => { S.colDraft = listOf(S.colFabric, S.colCat); S.colFor = [S.colCat]; $("colMsg").textContent = ""; renderColours(admin); };
+  seg($("colFabric"), fabrics, S.colFabric, (f) => { S.colFabric = f; pick(); }, (f) => S.opts.fabrics[f].split(" (")[0]);
+  seg($("colCat"), cats, S.colCat, (c) => { S.colCat = c; pick(); });
+  if (!S.colFor) S.colFor = [S.colCat];
+  $("colFor").innerHTML = "<span class='hint'>Save this list for:</span> " + cats.map((c) => `<label class="check" style="margin:0 8px 0 0"><input type="checkbox" data-for="${esc(c)}" ${S.colFor.includes(c) ? "checked" : ""}> ${esc(label(c))}</label>`).join("");
+  $("colFor").onchange = (e) => { const c = e.target.dataset.for; if (!c) return; S.colFor = e.target.checked ? [...new Set([...S.colFor, c])] : S.colFor.filter((x) => x !== c); };
+  $("colList").innerHTML = Object.entries(S.colDraft).map(([n, h]) => `<span class="chip on" data-n="${esc(n)}"><i style="background:${esc(h)}"></i>${esc(n)} <span class="hint">${esc(h)}</span>${admin ? '<span class="x" title="Remove">×</span>' : ""}</span>`).join("");
+  $("colEdit").classList.toggle("hide", !admin);
+  $("colHint").textContent = `${label(S.colCat)} in ${S.opts.fabrics[S.colFabric].split(" (")[0]}: ${Object.keys(S.colDraft).length} colours. Only these are shown in the Studio for ${label(S.colCat)}, and used by the Agent.` + (admin ? "" : " Only an admin can change them.");
+}
+function wireColours() {
+  const msg = (t) => { $("colMsg").textContent = t; };
+  $("colList").onclick = (e) => { if (!e.target.classList.contains("x")) return; delete S.colDraft[e.target.closest(".chip").dataset.n]; msg("Not saved yet: press Save colours."); renderColours(true); };
+  $("colPick").oninput = () => { $("colHex").value = $("colPick").value.toUpperCase(); };
+  $("colHex").oninput = () => { if (/^#[0-9a-f]{6}$/i.test($("colHex").value.trim())) $("colPick").value = $("colHex").value.trim(); };
+  $("colAdd").onclick = () => { const n = $("colName").value.trim().replace(/\s+/g, " "), h = ($("colHex").value.trim() || $("colPick").value).toUpperCase();
+    if (!n) return msg("Type the colour's name first.");
+    if (!/^#[0-9A-F]{6}$/.test(h)) return msg("The colour must be like #3A7D44 (or pick it with the colour box).");
+    if (Object.keys(S.colDraft).some((x) => x.toLowerCase() === n.toLowerCase())) return msg(n + " is already in the list.");
+    S.colDraft[n] = h; $("colName").value = ""; $("colHex").value = ""; msg("Not saved yet: press Save colours."); renderColours(true); };
+  const saved = (r) => { S.opts.palettes = r.palettes; S.opts.category_palettes = r.category_palettes; S.colDraft = { ...r.category_palettes[S.colFabric][S.colCat] }; renderColours(true);
+    for (const w of ["top", "bottom"]) wireChips(w);
+    categoryColours(); syncBottom(); refreshPlan(); };
+  const forWho = () => (S.colFor && S.colFor.length ? S.colFor : [S.colCat]);
+  $("colSave").onclick = async () => { try { const who = forWho(); saved(await api("/api/colours", { fabric: S.colFabric, colours: S.colDraft, categories: who }));
+    msg("Saved for " + who.map(label).join(", ") + ". The Studio now shows these colours."); } catch (e) { msg(e.message); } };
+  $("colReset").onclick = async () => { const who = forWho(); if (!confirm(`Put back the original colour list for ${who.map(label).join(", ")}?`)) return;
+    try { saved(await api("/api/colours", { fabric: S.colFabric, reset: true, categories: who })); msg("The original list is back."); } catch (e) { msg(e.message); } };
+}
 async function renderSettings() {
   if (S.opts.cloud && !S.me) S.me = await api("/api/me");
   const admin = isAdmin(), have = S.opts.providers;
+  renderColours(admin);
   $("keysHint").textContent = admin ? "Saved keys are used by every batch. They stay on " + (S.opts.cloud ? "this server" : "this computer") + " and are never shown again; save a new one to replace it."
     : "Only an admin can change the API keys.";
   $("keyRows").innerHTML = Object.entries(KEY_INFO).map(([k, [name, ph]]) => `<div class="row" style="margin-top:10px" data-key="${k}">
@@ -1111,10 +1173,10 @@ function initSettings() {
 async function init() {
   S.opts = await api("/api/options");
   if (S.opts.cloud) S.me = await api("/api/me");
-  initSettings(); initDashboard(); if (tabFromHash() === "settings") renderSettings(); if (tabFromHash() === "dashboard") loadDashboard();
+  initSettings(); wireColours(); initDashboard(); if (tabFromHash() === "settings") renderSettings(); if (tabFromHash() === "dashboard") loadDashboard();
   keys(S.opts.providers);
   if (S.opts.cloud) initCloud();
-  seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; if (S.topOptions) { S.topOptions(); S.moreTopsRender && S.moreTopsRender(); autoShot(); } refreshPlan(); });
+  seg($("category"), S.opts.categories, S.category, (v) => { S.category = v; categoryColours(); if (S.topOptions) { S.topOptions(); S.moreTopsRender && S.moreTopsRender(); autoShot(); } refreshPlan(); });
   seg($("shot"), Object.keys(S.opts.shots), S.shot, (v) => { S.shot = v; S.shotPicked = true; syncBottom(); refreshPlan(); }, (v) => S.opts.shots[v].split(" (")[0]);
   const bc = () => { const pal = S.opts.palettes[S.fabric() || "PureCotton"], cur = $("bottomColour").value || "Navy";
     $("bottomColour").innerHTML = Object.keys(pal).map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join(""); };

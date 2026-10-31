@@ -421,6 +421,19 @@ class DriveSync:
 
 
 # ---------------------------------------------------------------- agent
+def agent_system() -> str:
+    """The planning instructions with the shop's colour lists as they are now (edited in Settings)."""
+    from . import library as L
+
+    parts = []
+    for fabric, lists in L.CATEGORY_COLOURS.items():
+        groups: dict = {}
+        for cat in L.CATEGORIES:  # categories with the same list are named together
+            groups.setdefault(tuple(lists[cat]), []).append(cat)
+        parts.append(f"{fabric} (colours: " + "; ".join(f"{' and '.join(cats)}: {', '.join(names)}" for names, cats in groups.items()) + ")")
+    return AGENT_SYSTEM.replace("{FABRIC_COLOURS}", " or\n  ".join(parts))
+
+
 AGENT_SYSTEM = """You plan catalogue photo batches for SPB Textile's Jag Studio. Turn the user's request
 into batches. Each batch is one category with one or more top styles; all styles reuse the same models.
 Allowed values:
@@ -428,10 +441,8 @@ Allowed values:
 - tops: HalfSleeveTee, FullSleeveTee, SleevelessTee, Hoodie, Sweatshirt, OversizedTee (oversized drop-shoulder tee:
   Men and Women only, never for kids), ZipHoodie (kids full-zip hoodie: Kids_Boys and Kids_Girls only, never adults)
 - bottom: Shorts, Trackpants, Jeans (Men/Women default Trackpants, kids default Shorts)
-- fabric: PureCotton (colours: Black, White, Light Pink, Red, Navy, Green, Lavender, Orange, Yellow) or
-  CottonMix (Black, Blue, Maroon, Melange, White, Red, Yellow, Light Pink, Dark Pink, Navy Blue, Olive,
-  Beige, Grey, Royal Blue, Military Green, Pink, Green)
-- top_colours: colour names from that fabric; default all of them
+- fabric: {FABRIC_COLOURS}
+- top_colours: colour names from that fabric for the category; default all of them
 - pairing: "match" (bottom in the same colour as the top, default) or "each" (every top with every bottom colour)
 - shot: "top" (head to above the knee, bottom not recoloured) or "outfit" (head to shoes, both recoloured).
   Leave it out unless the user asks: Half Sleeve and Oversized then get "top", other tops "outfit". "full body", "head to
@@ -668,9 +679,10 @@ class Agent:
         self.model = model or os.environ.get("JAGIMAGE_AGENT_MODEL", "gemini-flash-latest")
         self.used = None  # "gemini" or "openai": which one answered last
 
-    def _ask(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
+    def _ask(self, message: str, system: Optional[str] = None, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         """Plans with whichever AI has a key: Gemini first, OpenAI when there is no Gemini key or Gemini
         can't be used (e.g. out of credits)."""
+        system = system or agent_system()
         gemini = self.client is not None or bool(os.environ.get("GEMINI_API_KEY"))
         openai = self.openai_client is not None or bool(os.environ.get("OPENAI_API_KEY"))
         if not gemini and not openai:
@@ -687,7 +699,7 @@ class Agent:
         self.used = "openai"
         return ans
 
-    def _ask_gemini(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
+    def _ask_gemini(self, message: str, system: str, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         from google.genai import types
 
         client = self.client
@@ -701,7 +713,7 @@ class Agent:
                                                response_schema=schema, temperature=0.1))
         return json.loads(resp.text)
 
-    def _ask_openai(self, message: str, system: str = AGENT_SYSTEM, schema: dict = AGENT_SCHEMA, images=()) -> dict:
+    def _ask_openai(self, message: str, system: str, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         client = self.openai_client
         if client is None:
             from openai import OpenAI
@@ -744,7 +756,8 @@ class Agent:
                     raise ValueError(f"unknown category {category!r}")
                 tops = [t for t in tops if t in studio.tops_for(category)] or ["HalfSleeveTee"]  # adult- or kids-only styles
                 fabric = b.get("fabric") if b.get("fabric") in L.FABRICS else "PureCotton"
-                colours = [c for c in listed("top_colours") if c in L.COLOURS[fabric]] or list(L.COLOURS[fabric])
+                made = L.colours_for(fabric, category)  # the colours this category is made in
+                colours = [c for c in listed("top_colours") if c in made] or list(made)
                 bottom = b.get("bottom") if b.get("bottom") in studio.BOTTOMS else ("Shorts" if L.is_kids(category) else "Trackpants")
                 poses = [p for p in listed("poses") if p in L.POSES] or ["front_main", "back"]
                 if "front_main" not in poses:

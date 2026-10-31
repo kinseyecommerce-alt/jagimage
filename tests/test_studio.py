@@ -937,3 +937,66 @@ def test_enclosed_black_fold_is_coloured_but_a_black_zip_is_not():
     m, _ = R.garment_mask(R.rgb_to_lab(img), "#1E4636")
     assert m[305:325, 122:128].min() > 0.5     # the fold is recoloured with the hoodie
     assert m[150:450, 199:201].max() < 0.5     # the zip stays out: it is never painted
+
+
+def test_shop_colours_are_edited_saved_and_used(tmp_path):
+    from jagimage import library as L
+
+    before = {f: dict(c) for f, c in L.COLOURS.items()}
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        mine = {"Black": "#000000", "Bottle Green": "#1e4636", "Navy": "#0C2340"}
+        code, r = _post(base + "/api/colours", {"fabric": "PureCotton", "colours": mine})
+        assert code == 200 and list(r["palettes"]["PureCotton"]) == ["Black", "Bottle Green", "Navy"]
+        assert r["palettes"]["PureCotton"]["Bottle Green"] == "#1E4636"
+        assert list(json.loads(_get(base + "/api/options")[1])["palettes"]["PureCotton"]) == ["Black", "Bottle Green", "Navy"]
+        assert studio.Spec(category="Men", top_colours=["Bottle Green"], bottom="Trackpants").top_colours == ["Bottle Green"]
+        from jagimage import cloud
+        assert "Bottle Green" in cloud.agent_system() and "Lavender, Orange" not in cloud.agent_system()
+        assert _post(base + "/api/colours", {"fabric": "PureCotton", "colours": {}})[0] == 400
+        assert _post(base + "/api/colours", {"fabric": "PureCotton", "colours": {"Teal": "teal"}})[0] == 400
+        assert _post(base + "/api/colours", {"fabric": "Silk", "colours": mine})[0] == 400
+        saved = json.loads((tmp_path / "jag-data" / "colours.json").read_text())
+        assert all(list(saved["PureCotton"][c]) == ["Black", "Bottle Green", "Navy"] for c in L.CATEGORIES)
+        L.set_colours("PureCotton", before["PureCotton"])
+        L.load_colours(tmp_path / "jag-data" / "colours.json")   # a restart reads the shop's list back
+        assert list(L.COLOURS["PureCotton"]) == ["Black", "Bottle Green", "Navy"]
+        code, r = _post(base + "/api/colours", {"fabric": "PureCotton", "reset": True})
+        assert r["palettes"]["PureCotton"] == before["PureCotton"]
+    finally:
+        httpd.shutdown()
+        for f, c in before.items():
+            L.set_colours(f, c)
+
+
+def test_colours_can_differ_by_category(tmp_path):
+    from jagimage import cloud, library as L
+
+    before = {f: dict(c) for f, c in L.COLOURS.items()}
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=lambda spec: fake_generate)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    women = {"Black": "#000000", "Blue": "#006CD1", "Maroon": "#3D0202", "White": "#FFFFFF", "Red": "#CF1D1D",
+             "Yellow": "#FFAB19", "Light Pink": "#F6ADD2", "Dark Pink": "#E43F8C"}
+    men = {"Black": "#000000", "Blue": "#006CD1", "Green": "#132E13", "Maroon": "#3D0202", "Melange": "#DADDDA",
+           "White": "#FFFFFF", "Red": "#CF1D1D", "Yellow": "#FFAB19"}
+    try:
+        assert _post(base + "/api/colours", {"fabric": "CottonMix", "colours": women, "categories": ["Women", "Kids_Girls"]})[0] == 200
+        code, r = _post(base + "/api/colours", {"fabric": "CottonMix", "colours": men, "categories": ["Men", "Kids_Boys"]})
+        assert code == 200 and r["category_palettes"]["CottonMix"]["Kids_Girls"] == women and r["category_palettes"]["CottonMix"]["Men"] == men
+        assert set(r["palettes"]["CottonMix"]) == set(women) | set(men) and len(r["palettes"]["CottonMix"]) == 10
+        assert L.colours_for("CottonMix", "Kids_Boys") == men and "Dark Pink" not in L.colours_for("CottonMix", "Men")
+        text = cloud.agent_system()
+        assert "Women and Kids_Girls: Black, Blue, Maroon, White, Red, Yellow, Light Pink, Dark Pink" in text
+        assert "Men and Kids_Boys: Black, Blue, Green, Maroon, Melange, White, Red, Yellow" in text
+        saved = json.loads((tmp_path / "jag-data" / "colours.json").read_text())
+        for f, c in before.items():
+            L.set_colours(f, c)
+        L.load_colours(tmp_path / "jag-data" / "colours.json")
+        assert L.colours_for("CottonMix", "Women") == women and saved["CottonMix"]["Men"] == men
+    finally:
+        httpd.shutdown()
+        for f, c in before.items():
+            L.set_colours(f, c)
