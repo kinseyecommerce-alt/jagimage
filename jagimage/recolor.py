@@ -33,10 +33,11 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 7       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 8       # bump when garment_mask changes: masks saved by older code are made again
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
+QC_HEIGHT = 1536       # photo height the two limits above are for; they grow with taller photos
 SHADOW_LIKE = 0.12      # colour distance (OKLab) over which ring pixels stop being averaged together
 KNIT_CAP = 0.08    # knit/stitch contrast limit: real knit is far below it, clipped-black specks are not
 FOLD_CAP = 0.2  # largest lightness change a fold/shadow may make after boosting
@@ -44,6 +45,10 @@ BACKDROP_CHROMA = 0.012  # backdrop grey: colourless enough that no garment or s
 GROW_LIGHTER = 0.03  # shadow growth never takes pixels lighter than the garment's brightest lit fabric by more
 SKIN_CREASE_CHROMA = 0.04  # a dark crease line with this much colour, of another hue than the garment, is skin
 SHADOW_HOLE = 0.006  # of the garment: an enclosed near-black hole up to this size is a deep fold, filled
+SHADE_HUE_DEG = 70      # a garment's deep shadow may be this far off its base hue (cool shadow of a mint sleeve)
+SHADE_BLUE_DEG = -100   # OKLab hue of blue: deep shadows in studio light shift towards it
+SHADE_MIN_CHROMA = 0.015  # ...if it still has this much colour (backdrop shadows are greyer)
+SHADE_DARKER = 0.12     # ...and is at least this much darker than the garment's typical lightness
 GROW_DARKER = 0.4    # shadow growth never takes pixels darker than this share of the garment's typical lightness
 
 
@@ -285,6 +290,13 @@ def _hue_mask(lab, base, base_hex):
         # ...and far darker than the fabric is not its shadow either: dark hair lying over a mint shoulder
         # picks up a faint mint tint, and would otherwise be painted the new colour
         loose &= lab[..., 0] > GROW_DARKER * np.median(lab[..., 0][m])
+        # a deep shadow of a light base can turn cool (mint sleeve shadow drawn grey-blue): clearly darker than
+        # the fabric and still a little coloured, it may be further off the base hue; a grey backdrop shadow isn't
+        med = np.median(lab[..., 0][m])
+        # only towards blue: a cool shadow is the fabric's, a warm (olive, brown) one is skin shadow mixed in
+        to_blue = lambda h: np.abs(np.angle(np.exp(1j * (h - np.radians(SHADE_BLUE_DEG)))))
+        loose |= ((dh < np.radians(SHADE_HUE_DEG)) & (to_blue(H) < to_blue(hc)) & (C > max(SHADE_MIN_CHROMA, 0.15 * cc)) & ~bg
+                  & (lab[..., 0] < med - SHADE_DARKER) & (lab[..., 0] > GROW_DARKER * med))
     m = ndimage.binary_propagation(m, mask=m | loose)
     if m[0].mean() + m[:, 0].mean() + m[:, -1].mean() > 0.45:  # running along the photo's edges: a coloured backdrop
         raise MaskError(f"Couldn't find the {base_hex} garment in this photo (only a backdrop of that colour).")
@@ -545,9 +557,11 @@ def quality_check(before: Image.Image, after: Image.Image, masks: list, base_hex
             continue  # a green target on a mint base: its own hue isn't leftover base colour
         left |= (m > 0.95) & (np.abs(np.angle(np.exp(1j * (H - hb)))) < np.radians(20)) & (C > 0.04)
     out = {"bleed_px": int(bleed.sum()), "base_left_px": int(left.sum()), "problems": []}
-    if out["bleed_px"] > QC_BLEED_MAX:
+    # the limits were set on 1536 px tall photos: edges in a taller photo (Gemini 2K: 2400 px) hold more pixels
+    scale = max(1.0, b.shape[0] / QC_HEIGHT)
+    if out["bleed_px"] > QC_BLEED_MAX * scale:
         out["problems"].append(f"colour bleeds onto skin or background ({out['bleed_px']} px)")
-    if out["base_left_px"] > QC_LEFT_MAX:
+    if out["base_left_px"] > QC_LEFT_MAX * scale:
         out["problems"].append(f"base colour left in the garment ({out['base_left_px']} px)")
     out["passed"] = not out["problems"]
     out["_bleed"], out["_left"] = bleed, left
