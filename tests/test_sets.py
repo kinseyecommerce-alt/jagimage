@@ -80,8 +80,8 @@ def test_colour_pairs_go_only_on_their_models(tmp_path, shop_colours):
     counts = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
     assert counts["ai_done"] == 4 and counts["recoloured"] == 4 and counts["errors"] == 0
     made = sorted(str(f.relative_to(tmp_path / sp.name)) for f in (tmp_path / sp.name).glob("m*/*/front_main_*.jpg"))
-    assert made == ["m0001/Black__Melange/front_main_1500x1500.jpg", "m0001/Melange__Black/front_main_1500x1500.jpg",
-                    "m0002/Black__Melange/front_main_1500x1500.jpg", "m0003/Black__Melange/front_main_1500x1500.jpg"]
+    assert made == ["m0001/Black__Melange/front_main_2000x2000.jpg", "m0001/Melange__Black/front_main_2000x2000.jpg",
+                    "m0002/Black__Melange/front_main_2000x2000.jpg", "m0003/Black__Melange/front_main_2000x2000.jpg"]
 
 
 def test_the_shops_real_plan_reads_whole(shop_colours):

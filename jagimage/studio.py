@@ -13,7 +13,7 @@ How a batch works:
 - Every selected top/bottom colour pair is then recoloured from the nearest base.
 
 Layout: <out>/<job>/m0001/_base/<top base>-<bottom base>/<pose>.png (+ masks),
-        <out>/<job>/m0001/<Top colour>__<Bottom colour>/<pose>.png, <pose>_1500x1500.jpg, qc.json
+        <out>/<job>/m0001/<Top colour>__<Bottom colour>/<pose>.png, <pose>_2000x2000.jpg, qc.json
 """
 
 import json
@@ -68,7 +68,7 @@ BOTTOM_TRIM_BAND = 0.06  # of photo height: only that close above the top's hem 
 BACKDROP_MAX_CHROMA, BACKDROP_MIN_LIGHT = 0.03, 0.65  # studio backdrop at the photo's top and upper sides
 ZIP_GAP = 0.02  # of photo width: a gap this narrow inside the top (a black zip) doesn't make two figures
 MIN_BASE_STRENGTH = 0.33  # a base garment keeps at least this share of its base colour's chroma (good ones: >= 0.38)
-BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.25  # measured sizes: AI base PNG, full-size photo PNG, 1500x1500 JPG
+BASE_MB, PNG_MB, JPG_MB = 4.1, 4.3, 0.6  # measured sizes: AI base PNG, full-size photo PNG, 2000x2000 JPG
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -139,14 +139,14 @@ class Spec:
     extra: str = ""          # extra instructions added to every photo's prompt
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
-    keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 1500x1500 JPG
+    keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 2000x2000 JPG
     same_models: bool = False  # reuse models (faces) already made in this category, e.g. in another top style
     one_base: bool = False   # one light base shoot per model; dark colours are recoloured from it too (half the AI images)
     provider: str = "gemini"  # gemini, openai, meta, or runpod (your own GPU pod with an open model)
     quality: str = "medium"  # OpenAI: medium looks right for catalogue photos at about half the cost of high
     image_size: str = "2K"   # Gemini
     gemini_model: str = "flash"  # Gemini: flash (default, cheaper) or pro
-    canvas: Optional[Tuple[int, int]] = (1500, 1500)
+    canvas: Optional[Tuple[int, int]] = (2000, 2000)  # marketplace JPG: 2000x2000 keeps zoom detail (Amazon's zoom size)
     background: str = ""     # a marketplace guide's backdrop, e.g. "pure white (#FFFFFF)"; empty: the studio grey
     guide: str = ""          # the marketplace guide these settings came from (shown on the dashboard), e.g. "Myntra"
     print_place: str = "chest_large"  # where prints go on the front photos (jagimage.prints.PLACES)
@@ -1127,7 +1127,7 @@ class Batch:
 
     def results(self) -> List[dict]:
         """Every finished photo: model, top, bottom, pose, paths (relative to the batch folder; png is
-        None when only the 1500x1500 JPG was kept)."""
+        None when only the marketplace JPG was kept)."""
         rows = []
         size = re.compile(r"^(.*)_\d+x\d+$")
         for md in sorted(self.root.glob("m[0-9][0-9][0-9][0-9]")):

@@ -87,7 +87,7 @@ def test_plan_bases_and_pairs():
     s = studio.Spec(top_colours=["Yellow", "Navy", "White"], bottom_colours=["Black", "Light Pink"], pairing="each", models=300)
     assert len(s.pairs()) == 6 and s.bases()[0] in s.bases() and len(s.bases()) == 4
     assert s.plan() == {"models": 300, "bases_per_model": 4, "colour_pairs": 6, "poses": 1,
-                        "ai_images": 1200, "recoloured_images": 1800, "disk_gb": 13.1}
+                        "ai_images": 1200, "recoloured_images": 1800, "disk_gb": 13.7}
     same = studio.Spec(top_colours=["Yellow", "Navy"], models=300)  # bottom = top colour
     assert same.pairs() == [("Yellow", "Yellow"), ("Navy", "Navy")] and sorted(same.bases()) == [("dark", "dark"), ("light", "light")]
     jeans = studio.Spec(bottom="Jeans", top_colours=["Yellow", "Navy", "White"], models=2)
@@ -158,7 +158,7 @@ def test_batch_makes_bases_once_and_recolours_every_pair(tmp_path):
     assert len(rows) == 8 and all(r["jpg"] for r in rows)
     qc = json.loads((tmp_path / s.name / "m0001" / "Yellow__Light_Pink" / "qc.json").read_text())["front_main"]
     assert qc["top"]["deltaE"] < 3 and qc["bottom"]["deltaE"] < 3
-    assert Image.open(tmp_path / s.name / "m0001" / "Yellow__Light_Pink" / "front_main_1500x1500.jpg").size == (1500, 1500)
+    assert Image.open(tmp_path / s.name / "m0001" / "Yellow__Light_Pink" / "front_main_2000x2000.jpg").size == (2000, 2000)
     again = studio.Batch(s, out=tmp_path, generate=gen).run()  # resumable: nothing is made twice
     assert again["ai_done"] == 0 and again["ai_skipped"] == 8 and again["recolour_skipped"] == 8
 
@@ -192,7 +192,7 @@ def test_jpg_only_saves_disk_and_still_resumes(tmp_path):
     assert not list((tmp_path / s.name).glob("m0001/Red__Red/*.png"))
     assert studio.Batch(s, out=tmp_path, generate=fake_generate).run()["recolour_skipped"] == 2
     big = studio.Spec(top_colours=["Red", "White"], models=1000, poses=["front_main", "back"], keep_png=False).plan()
-    assert big["ai_images"] == 4000 and big["disk_gb"] == 17.4  # 4,000 bases x 4.1 MB + 4,000 JPGs x 0.25 MB
+    assert big["ai_images"] == 4000 and big["disk_gb"] == 18.8  # 4,000 bases x 4.1 MB + 4,000 JPGs x 0.6 MB
 
 
 def test_finished_photos_are_copied_to_a_drive_folder(tmp_path):
@@ -747,11 +747,11 @@ def test_prints_stage_prints_every_front_photo_of_a_batch(tmp_path):
     counts = studio.Batch(s, out=tmp_path, prints=prints).run("prints")
     assert counts["printed"] == 2 and counts["errors"] == 0 and sorted(asked) == [(s.category, s.top, "Navy"), (s.category, s.top, "White")]
     navy = tmp_path / s.name / "m0001" / "Navy__Navy"
-    assert (navy / "front_main_print_Logo_1_1500x1500.jpg").exists() and (navy / "front_main_print_237_1500x1500.jpg").exists()
+    assert (navy / "front_main_print_Logo_1_2000x2000.jpg").exists() and (navy / "front_main_print_237_2000x2000.jpg").exists()
     assert not list(navy.glob("back_print*"))  # front pose only
     rows = studio.Batch(s, out=tmp_path).results()
     plain = next(r for r in rows if r["top"] == "Navy" and r["pose"] == "front_main")
-    assert plain["jpg"].endswith("front_main_1500x1500.jpg")  # the plain photo stays itself
+    assert plain["jpg"].endswith("front_main_2000x2000.jpg")  # the plain photo stays itself
     assert any(r["pose"] == "front_main_print_237" for r in rows)
     again = studio.Batch(s, out=tmp_path, prints=prints).run("prints")
     assert again["printed"] == 0  # already printed: nothing redone

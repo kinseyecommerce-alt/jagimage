@@ -516,8 +516,8 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <section class="panel step" id="stepSave">
       <div class="stephead"><span class="num">5</span><div><h2>Save to</h2><p class='hint'>Finished photos are always kept here and shown below; you can also copy them elsewhere.</p></div></div>
       <div class="row">
-        <label class="field"><span>Photo width (px)</span><input type="number" id="photoW" min="200" max="6000" value="1500"></label>
-        <label class="field"><span>Photo height (px)</span><input type="number" id="photoH" min="200" max="6000" value="1500"></label>
+        <label class="field"><span>Photo width (px)</span><input type="number" id="photoW" min="200" max="6000" value="2000"></label>
+        <label class="field"><span>Photo height (px)</span><input type="number" id="photoH" min="200" max="6000" value="2000"></label>
         <label class="field" style="flex:2"><span>Background</span><input type="text" id="background" maxlength="200" placeholder="Studio light grey (default)"></label>
       </div>
       <p class="hint" id="guideNote"></p>
@@ -587,7 +587,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h2 style="margin:0">Photos <span class="n" id="galTotal"></span></h2>
         <span class="row">
-          <a class="btn" id="zipJpg" href="#">Square JPGs 1500 × 1500 (ZIP)</a>
+          <a class="btn" id="zipJpg" href="#">Finished JPGs (ZIP)</a>
           <a class="btn" id="zipPng" href="#">Full-size PNG (ZIP)</a>
           <span class="mkt"><select id="mktTo" aria-label="Marketplace"></select> <a class="btn" id="zipMkt" href="#">Download for marketplace (ZIP)</a></span>
         </span>
@@ -678,7 +678,7 @@ function spec() {
     provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
     batch: !["runpod", "meta"].includes(S.provider) && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
-    one_base: $("oneBase").checked, canvas: [+$("photoW").value || 1500, +$("photoH").value || 1500],
+    one_base: $("oneBase").checked, canvas: [+$("photoW").value || 2000, +$("photoH").value || 2000],
     background: $("background").value.trim(), guide: S.guide || "" };
 }
 let planTimer = null;
@@ -924,7 +924,7 @@ function applyGuide(g) {
   renderPoses(); syncBottom(); refreshPlan();
 }
 function clearGuide() {  // back to the regular studio look
-  $("photoW").value = 1500; $("photoH").value = 1500; $("background").value = ""; $("extra").value = "";
+  $("photoW").value = 2000; $("photoH").value = 2000; $("background").value = ""; $("extra").value = "";
   S.guide = ""; $("guideNote").textContent = ""; $("guideBanner").classList.add("hide"); refreshPlan();
 }
 async function guidesRefresh(pick) {
