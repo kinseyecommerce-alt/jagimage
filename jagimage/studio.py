@@ -99,6 +99,17 @@ RETOUCH_BOTTOMS = ("Edit image 1. Change only the shorts or pants: remove the dr
                    "hanging over the waistband (never tuck it in). Keep everything else exactly "
                    "the same: the child, face, hair, pose, hands, the top, all colours (the top's and the bottom's), lighting, "
                    "background, framing and image size. Return one photo.")
+BOTTOM_WORD = {"Shorts": "shorts", "Trackpants": "track pants"}
+BOTTOM_REF_LINE = (" Image {n} is a product photo of the exact {item} the model wears: copy its cut, length, plain covered "
+                   "waistband and smooth flat front and sides exactly (no drawstring, no pockets), but in the bottom colour "
+                   "stated above, not the colour in that photo, and worn by the model, not laid flat.")
+
+
+def bottom_ref_path(out: Path, bottom: str) -> Path:
+    """Where the shop's product photo of a bottom style is kept: <studio folder>/_refs/bottoms/<style>.jpg."""
+    return Path(out) / "_refs" / "bottoms" / f"{bottom}.jpg"
+
+
 UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the waistband of the bottom, which is hidden under "
                  "the top's hem; the top is never tucked in.")
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
@@ -643,7 +654,7 @@ class Batch:
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
         self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0,
-                       "qc_fixed": 0, "qc_ai_fixed": 0, "qc_held": 0, "base_rejected": 0, "printed": 0, "print_fixed": 0, "print_flagged": 0}
+                       "qc_fixed": 0, "qc_ai_fixed": 0, "retouch_skipped": 0, "qc_held": 0, "base_rejected": 0, "printed": 0, "print_fixed": 0, "print_flagged": 0}
         # prints(category, top style, colour) -> [(print name, PNG path)]: the shop's prints for that shirt
         self.prints = prints
         self.checker = checker  # checker(printed photo, artwork) -> {ok, issues, dx, dy, scale}: the AI print checker
@@ -859,14 +870,26 @@ class Batch:
             ref, refs = ("front", [str(own_front)]) if is_first else ("face+front", [str(first_front), str(own_front)])
         if any(not Path(r).exists() for r in refs):
             return None
-        return prompt(self.spec, m, base, pose, ref), refs
+        text = prompt(self.spec, m, base, pose, ref)
+        product = self.bottom_ref()
+        if product:  # a photo of the shop's own shorts or pants: the AI copies a picture better than words
+            refs = refs + [str(product)]
+            text += BOTTOM_REF_LINE.format(n=len(refs), item=BOTTOM_WORD.get(self.spec.bottom, "bottoms"))
+        return text, refs
+
+    def bottom_ref(self) -> Optional[Path]:
+        """The shop's product photo of this batch's bottom (uploaded once in Settings), for full outfit shots."""
+        if self.spec.shot != "outfit" or self.spec.bottom in FIXED_BOTTOMS:
+            return None
+        f = bottom_ref_path(self.root.parent, self.spec.bottom)
+        return f if f.exists() else None
 
     def _accept(self, path: Path, data: bytes, base, m, pose):
         """Keep an AI image only if it used the base colours (else raise, so it's asked for again)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp.png")
         tmp.write_bytes(data)
-        if pose in self.spec.retouch_poses():  # Gemini draws drawstrings and pockets anyway: edit them out
+        if pose in self.spec.retouch_poses() and self._needs_retouch(tmp):  # Gemini draws drawstrings and pockets anyway: edit them out
             try:
                 tmp.write_bytes(self.generate(RETOUCH_BOTTOMS, [str(tmp)]))
             except Exception:
@@ -913,6 +936,22 @@ class Batch:
                 time.sleep(min(60, wait) if attempt + 1 < self.retries else 0)
         self._event("errors", model=m, path=str(path), error=f"{type(last).__name__}: {last}")
         return False
+
+    def _needs_retouch(self, tmp: Path) -> bool:
+        """With the QC agent the drawstring edit (a full-price AI call) is only made when the agent sees a
+        drawstring or pocket; without it, or when it can't tell, every photo is edited as before."""
+        if not self.spec.qc_agent:
+            return True
+        from PIL import Image
+
+        from .qcagent import BOTTOMS_POINT, inspect
+
+        with Image.open(tmp) as img:
+            res = inspect(self.inspector, img, [BOTTOMS_POINT])
+        if res["ok"] is True:
+            self._event("retouch_skipped", path=str(tmp))
+            return False
+        return True
 
     def _ai_fix(self, out, problems, masks, top, thex, bottom, bhex, path: Path, pose: str):
         """The QC agent's last fix: an AI edit of the finished photo, kept only on the clothes."""

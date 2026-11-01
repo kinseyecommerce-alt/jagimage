@@ -205,3 +205,31 @@ def test_drive_upload_skips_a_photo_whose_base_went_and_sends_the_rest(tmp_path)
     DriveSync(drive, lambda: str(tmp_path)).run_once()
     assert "Girls/Red/Hoodies/m0001_front.jpg" in drive.files and "Girls/Red/Hoodies/m0001_back.jpg" not in drive.files
     assert "Girls/Red/Co-ords/Hoodies set/m0001_back.jpg" in drive.files
+
+
+def test_the_shops_bottom_photo_goes_with_every_outfit_shot_and_the_edit_runs_only_when_needed(tmp_path):
+    ref = studio.bottom_ref_path(tmp_path, "Trackpants")
+    ref.parent.mkdir(parents=True)
+    Image.new("RGB", (60, 120), (40, 40, 40)).save(ref)
+    seen, edits = [], []
+
+    def gen(prompt, refs):
+        if prompt == studio.RETOUCH_BOTTOMS:
+            edits.append(refs)
+        else:
+            seen.append((prompt, refs))
+        return fake_generate(prompt, refs)
+
+    class Strings(Eyes):  # the agent sees a drawstring on the first front only
+        def __call__(self, message, image):
+            if message.count("\n") == 1 and "drawstring" in message:
+                self.asked.append(message)
+                n = sum(1 for m in self.asked if m.count("\n") == 1)
+                return {"ok": n > 1, "problems": [] if n > 1 else ["drawstring at the waist"]}
+            return super().__call__(message, image)
+    b = studio.Batch(spec(models=2, colour_pairs=[["Red", "Red"]], retouch_bottoms=True, provider="gemini"), out=tmp_path,
+                     generate=gen, workers=1, inspector=Strings())
+    b.run()
+    assert seen and all(str(ref) == r[-1] for _, r in seen)
+    assert all(f"Image {len(r)} is a product photo of the exact track pants" in p for p, r in seen)
+    assert len(edits) == 1 and b.counts["retouch_skipped"] == 1  # two fronts: one edited, one clean

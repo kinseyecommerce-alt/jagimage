@@ -23,6 +23,7 @@ SYSTEM = ("You are the quality inspector of a kids' and adults' clothing catalog
           "check ONLY the points you are given. Be strict about the clothes and fair about the rest: tiny specks a "
           "shopper would not notice at normal size are not problems. Answer as JSON: ok (true only if every point "
           "passes) and problems (one short plain sentence per failed point, saying where it is; empty when ok).")
+BOTTOMS_POINT = "The shorts or pants have NO drawstring cords and NO pockets or pocket openings."
 VIEW_HEIGHT = 1280  # px: photos are shown to the vision check at this height
 FIX_ROUNDS = 1      # automatic fixes per recoloured photo before it is re-checked
 
@@ -57,7 +58,7 @@ def base_points(spec, pose: str) -> List[str]:
         points.append("The top is worn untucked: its hem hangs over the waistband of the shorts or pants. FAIL if the top "
                       "is tucked in or the waistband sits on top of the top's hem.")
         if spec.bottom in ("Shorts", "Trackpants"):
-            points.append("The shorts or pants have NO drawstring cords and NO pockets or pocket openings.")
+            points.append(BOTTOMS_POINT)
     if spec.top in ("Hoodie", "ZipHoodie"):
         points.append("The inside of the hood is the same colour as the hoodie. FAIL if the hood lining is white or grey.")
     if spec.category == "Kids_Girls":

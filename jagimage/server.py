@@ -913,6 +913,26 @@ def make_handler(app: Studio):
                         Path(out).expanduser().mkdir(parents=True, exist_ok=True)
                         app.out = str(Path(out).expanduser())
                     return self._json(options(app))
+                if parts == ["api", "bottom-refs"]:
+                    # the shop's product photo of its plain shorts / pants: {"bottom": "Shorts", "data": base64 photo}
+                    self._admin()
+                    import base64
+                    import io as _io
+
+                    from PIL import Image
+
+                    bottom = body.get("bottom")
+                    if bottom not in ("Shorts", "Trackpants"):
+                        raise ValueError("bottom must be Shorts or Trackpants")
+                    dest = studio.bottom_ref_path(app.out, bottom)
+                    if body.get("clear"):
+                        dest.unlink(missing_ok=True)
+                    else:
+                        img = Image.open(_io.BytesIO(base64.b64decode(body.get("data") or ""))).convert("RGB")
+                        img.thumbnail((1536, 1536))
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        img.save(dest, "JPEG", quality=92)
+                    return self._json({b: studio.bottom_ref_path(app.out, b).exists() for b in ("Shorts", "Trackpants")})
                 if parts == ["api", "colours"]:
                     self._admin()
                     fabric, cats = body.get("fabric"), body.get("categories") or None
