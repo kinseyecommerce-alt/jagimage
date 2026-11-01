@@ -459,10 +459,13 @@ class DriveSync:
         with self.lock:
             todo = self.pending()
             self.status.update(pending=len(todo), last_run=round(time.time()))
-            sent, roots = 0, set()
+            sent, roots, skipped = 0, set(), None
             for root, key, jpg, info in todo:
                 try:
                     self._send(root, key, jpg, info)
+                except FileNotFoundError as exc:  # this photo (or its base) went meanwhile: skip it, send the rest
+                    skipped = f"skipped: {type(exc).__name__}: {exc}"[:300]
+                    continue
                 except Exception as exc:  # network, quota, revoked access: try again next round
                     self.status["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
                     break
@@ -474,7 +477,7 @@ class DriveSync:
                 self.status["uploaded"] += 1
                 self.status["pending"] = len(todo) - sent
             else:
-                self.status["last_error"] = None
+                self.status["last_error"] = skipped
             for root in roots:
                 self.status["freed"] += self._free(root)
             return sent

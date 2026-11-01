@@ -54,7 +54,8 @@ def files(batch: "studio.Batch") -> List[dict]:
         sets = [cat, t, "Co-ords", f"{style} set"] if t == b else [cat, t, "Combo sets", f"{t}-{b}", f"{style} set"]
         # keys differ from the batch layout's (the bare path), so photos sent there before are filed here too
         out.append({**r, "key": r["rel"] + "#set", "parts": sets, "name": name, "crop": False})
-        if t == b or single_from.get(t) == b:
+        base_png = batch.base_path(int(r["model"][1:]), spec.base_key(t, b), r["pose"])
+        if (t == b or single_from.get(t) == b) and base_png.exists():  # the cut needs the base's size and bottom mask
             out.append({**r, "key": r["rel"] + "#single", "parts": [cat, t, style], "name": name, "crop": True})
     return out
 

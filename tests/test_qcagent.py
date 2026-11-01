@@ -182,3 +182,26 @@ def _png(img):
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+def test_rejected_bases_come_back_when_no_new_one_can_be_made(tmp_path):
+    studio.Batch(spec(qc_agent=False), out=tmp_path, generate=fake_generate, workers=1).run()
+    front = studio.Batch(spec(), out=tmp_path).base_path(1, ("light", "light"), "front_main")
+    before = front.read_bytes()
+
+    def broke(prompt, refs):
+        raise RuntimeError("402 RESOURCE_EXHAUSTED")
+    b = studio.Batch(spec(), out=tmp_path, generate=broke, workers=1, inspector=Eyes(fail=1), redo=True, retries=1)
+    b.run(stage="qc")
+    assert front.read_bytes() == before and (front.parent / "front_main_top_mask.png").exists()
+    assert not list(front.parent.glob("*.rejected"))
+
+
+def test_drive_upload_skips_a_photo_whose_base_went_and_sends_the_rest(tmp_path):
+    b = studio.Batch(spec(qc_agent=False), out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    b.base_path(1, ("light", "light"), "back").unlink()
+    drive = FakeDrive()
+    DriveSync(drive, lambda: str(tmp_path)).run_once()
+    assert "Girls/Red/Hoodies/m0001_front.jpg" in drive.files and "Girls/Red/Hoodies/m0001_back.jpg" not in drive.files
+    assert "Girls/Red/Co-ords/Hoodies set/m0001_back.jpg" in drive.files

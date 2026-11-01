@@ -685,8 +685,13 @@ class Batch:
             self.run_prints()
             return self.counts
         if stage == "qc":  # the QC agent looks at the bases already made; rejected ones are made again
+            if self.generate is None:
+                raise RuntimeError("Re-checking bases needs the image engine (its API key)")
             self.requalify()
-            stage = "all"
+            try:
+                return self.run("all")
+            finally:
+                self._restore_rejected()
         if stage != "recolor" and self.generate is None:
             raise RuntimeError("No image engine: pass generate=, or use stage='recolor'")
         if stage != "recolor" and self.spec.batch:
@@ -722,13 +727,21 @@ class Batch:
                     if res["ok"] is not False:
                         continue
                     self._event("base_rejected", model=m, path=str(path), problems=res["problems"])
-                    for p in (poses if pose == "front_main" else [pose]):
-                        for f in path.parent.glob(f"{p}.png"):
-                            f.unlink()
-                        for f in path.parent.glob(f"{p}_*mask*"):
-                            f.unlink()
+                    for p in (poses if pose == "front_main" else [pose]):  # kept aside until a new one is made
+                        for f in list(path.parent.glob(f"{p}.png")) + list(path.parent.glob(f"{p}_*mask*")):
+                            f.replace(f.with_name(f.name + ".rejected"))
                     if pose == "front_main":
                         break
+
+    def _restore_rejected(self):
+        """A rejected base whose new one couldn't be made (no credits, stopped) is put back, so nothing is lost;
+        the next qc run looks at it again. Where a new one was made, the rejected copy is deleted."""
+        for old in self.root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.rejected"):
+            new = old.with_name(old.name[:-len(".rejected")])
+            if new.exists():
+                old.unlink()
+            else:
+                old.replace(new)
 
     def _run_batched(self):
         """Batch mode: each round sends every base photo whose reference photos already exist as one
