@@ -110,11 +110,14 @@ def save_colours(path):
     tmp.replace(p)
 
 
+# the recolour can only change the outfit: a coloured lining or hair bow would stay or come out patchy
+HOOD_LINING = "the inside of the hood is the SAME colour and fabric as the outside, no white or grey lining"
+GIRLS_HAIR_TIES = "hair tied only with small plain black elastics, no bows, ribbons, clips or hair accessories"
 MODELS = {
     "Men": "an Indian man aged 22-32, lean-athletic or regular build, fair even skin, short textured crop with tapered sides, neat light stubble, friendly natural expression",
     "Women": "an Indian woman aged 21-30, regular slim build, fair even skin, natural fresh makeup, nude lip, hair in soft loose waves or a sleek low ponytail kept off the neckline, small stud earrings only",
     "Kids_Boys": "a small 4-5 year old Indian boy, toddler proportions: baby face, round chubby cheeks, soft small nose, big bright eyes, large head relative to a small short body (head about one fifth of body height), short chubby limbs, fair even skin, short neat kids haircut, cheerful innocent smile",
-    "Kids_Girls": "a small 4-5 year old Indian girl, toddler proportions: baby face, round chubby cheeks, soft small nose, big bright eyes, large head relative to a small short body (head about one fifth of body height), short chubby limbs, fair even skin, hairstyle exactly as in the reference (e.g. short bob, pigtails or ponytail) kept identical in every pose, cheerful innocent smile",
+    "Kids_Girls": "a small 4-5 year old Indian girl, toddler proportions: baby face, round chubby cheeks, soft small nose, big bright eyes, large head relative to a small short body (head about one fifth of body height), short chubby limbs, fair even skin, hairstyle exactly as in the reference (e.g. short bob, pigtails or ponytail) kept identical in every pose, " + GIRLS_HAIR_TIES + ", cheerful innocent smile",
 }
 GIRLS_HAIR_EXAMPLE = "(e.g. short bob, pigtails or ponytail)"
 
@@ -148,10 +151,10 @@ GARMENTS = {
     "Shorts": "plain {COLOUR} regular-fit knit shorts ending just above the knee, plain covered elastic waistband with NO drawstring, NO pockets, smooth flat front and sides with no seams other than the outer side seam, straight flat hem, no logo",
     "Trackpants": "plain {COLOUR} regular-fit trackpants/joggers, full length, plain covered elastic waistband with NO drawstring, NO pockets, smooth flat front and sides with no seams other than the outer side seam, straight-leg with a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering), no logo",
     "ZipHoodie": ("a plain {COLOUR} kids full-zip hoodie: full-length front zip from hem to neck in the SAME colour as the "
-                  "hoodie (matching zip tape, teeth and a small matching zip puller), zipped closed, lined hood with NO drawcords, two split kangaroo "
+                  "hoodie (matching zip tape, teeth and a small matching zip puller), zipped closed, lined hood with NO drawcords (" + HOOD_LINING + "), two split kangaroo "
                   "pockets either side of the zip, slightly dropped shoulders, relaxed boxy fit, ribbed cuffs and ribbed hem "
                   "band, soft brushed fleece, no print, no logo"),
-    "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords, front kangaroo pocket, " + RIB_BANDS + ", no print, no logo",
+    "Hoodie": "a plain {COLOUR} regular-fit pullover hoodie, lined double-layer hood with flat drawcords (" + HOOD_LINING + "), front kangaroo pocket, " + RIB_BANDS + ", no print, no logo",
     "Sweatshirt": "a plain {COLOUR} regular-fit crew-neck sweatshirt, " + RIB + ", " + RIB_BANDS + ", set-in sleeves, no print, no logo, no pocket",
 }
 KIDS_FULLSLEEVE_SET = "a plain {COLOUR} crew-neck full-sleeve t-shirt, " + RIB + ", with plain flat hemmed sleeve ends, worn with matching {COLOUR} Cotton Mix French Terry full-length joggers with a plain covered elastic waistband (NO drawstring, NO pockets, smooth flat front and sides with no seams other than the outer side seam) and a plain straight hem at the ankle (NO ribbed cuffs, no elastic gathering)"
