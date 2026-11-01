@@ -171,3 +171,32 @@ def test_finished_photos_go_to_drive_in_catalogue_folders_and_leave_the_server(t
     again = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
     assert again["recoloured"] == 0 and again["recolour_skipped"] == 6  # a resumed batch knows they are done
     assert sync.run_once() == 0  # nothing new to upload
+
+
+def test_photos_already_sent_in_the_batch_layout_are_filed_in_the_catalogue_too(tmp_path, shop_colours):
+    import json
+
+    from jagimage.cloud import DriveSync
+
+    class FakeDrive:
+        connected = True
+
+        def __init__(self):
+            self.files = []
+
+        def upload(self, local, parts, name):
+            self.files.append("/".join(parts + [name]))
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False)
+    studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
+    drive = FakeDrive()
+    assert DriveSync(drive, lambda: str(tmp_path)).run_once() == 1  # the old layout
+    assert drive.files == [f"{sp.name}/Red__Red/m0001_front_main.jpg"]
+    root = tmp_path / sp.name
+    spec = json.loads((root / "spec.json").read_text())
+    (root / "spec.json").write_text(json.dumps({**spec, "drive_layout": "catalogue", "free_after_upload": True}))
+    drive.files.clear()
+    assert DriveSync(drive, lambda: str(tmp_path)).run_once() == 2
+    assert sorted(drive.files) == ["Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Boys/Red/Half sleeve/m0001_front.jpg"]
+    assert not list(root.glob("m*/*/*.jpg"))

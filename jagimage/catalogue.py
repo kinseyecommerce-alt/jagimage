@@ -49,10 +49,11 @@ def files(batch: "studio.Batch") -> List[dict]:
         t, b = r["top"], r["bottom"]
         name = f"{r['model']}_{POSE_NAME.get(r['pose'], r['pose'])}.jpg"
         if b is None:  # a top-only shot is the single top itself
-            out.append({**r, "key": r["rel"], "parts": [cat, t, style], "name": name, "crop": False})
+            out.append({**r, "key": r["rel"] + "#set", "parts": [cat, t, style], "name": name, "crop": False})
             continue
         sets = [cat, t, "Co-ords", f"{style} set"] if t == b else [cat, t, "Combo sets", f"{t}-{b}", f"{style} set"]
-        out.append({**r, "key": r["rel"], "parts": sets, "name": name, "crop": False})
+        # keys differ from the batch layout's (the bare path), so photos sent there before are filed here too
+        out.append({**r, "key": r["rel"] + "#set", "parts": sets, "name": name, "crop": False})
         if t == b or single_from.get(t) == b:
             out.append({**r, "key": r["rel"] + "#single", "parts": [cat, t, style], "name": name, "crop": True})
     return out
