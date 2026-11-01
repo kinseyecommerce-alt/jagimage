@@ -721,7 +721,8 @@ class Batch:
         run makes it again; when a front is rejected, the other poses of that shoot go too, so they match it."""
         from PIL import Image
 
-        from .qcagent import base_points, inspect
+        from .qcagent import check_base
+        from .recolor import load_mask
 
         poses = ["front_main"] + [p for p in self.spec.poses if p != "front_main"]
         for m in self.spec.model_numbers():
@@ -732,8 +733,9 @@ class Batch:
                     path = self.base_path(m, base, pose)
                     if not path.exists():
                         continue
+                    masks = self._saved_masks(path.parent, pose, load_mask)
                     with Image.open(path) as img:
-                        res = inspect(self.inspector, img, base_points(self.spec, pose))
+                        res = check_base(self.inspector, img.convert("RGB"), self.spec, pose, masks)
                     (path.parent / f"{pose}_base_qc.json").write_text(json.dumps(res, indent=1))
                     if res["ok"] is not False:
                         continue
@@ -953,15 +955,24 @@ class Batch:
             return False
         return True
 
+    @staticmethod
+    def _saved_masks(folder: Path, pose: str, load_mask):
+        """(top, bottom) masks saved next to a base photo, or None."""
+        t, b = folder / f"{pose}_top_mask.png", folder / f"{pose}_bottom_mask.png"
+        if not t.exists():
+            return None
+        return load_mask(t), (load_mask(b) if b.exists() else None)
+
     def _qc_base(self, tmp: Path, path: Path, pose: str, m: int):
         """The QC agent looks at a new base photo; a fault recolouring can't fix sends it back to the AI."""
         from PIL import Image
 
-        from .qcagent import base_points, inspect
-        from .recolor import MaskError
+        from .qcagent import check_base
+        from .recolor import MaskError, load_mask
 
+        masks = self._saved_masks(path.parent, pose, load_mask)
         with Image.open(tmp) as img:
-            res = inspect(self.inspector, img, base_points(self.spec, pose))
+            res = check_base(self.inspector, img.convert("RGB"), self.spec, pose, masks)
         (path.parent / f"{pose}_base_qc.json").write_text(json.dumps(res, indent=1))
         if res["ok"] is False:
             self._event("base_rejected", model=m, path=str(path), problems=res["problems"])

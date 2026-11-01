@@ -904,6 +904,25 @@ def make_handler(app: Studio):
                         Path(out).expanduser().mkdir(parents=True, exist_ok=True)
                         app.out = str(Path(out).expanduser())
                     return self._json(options(app))
+                if parts == ["api", "qc", "base"]:
+                    # try the QC agent on a base photo already made: {"batch", "model", "pose", "ai_model"?}
+                    self._admin()
+                    from PIL import Image
+
+                    from . import qcagent
+                    from .recolor import load_mask
+
+                    b = app.batch_for(body.get("batch", ""))
+                    pose = body.get("pose", "front_main")
+                    m = int(body.get("model", 0))
+                    base = b.spec.bases(m)[0] if b.spec.bases(m) else None
+                    path = b.base_path(m, base, pose) if base else None
+                    if not path or not path.exists():
+                        raise ValueError("No such base photo")
+                    masks = studio.Batch._saved_masks(path.parent, pose, load_mask)
+                    with Image.open(path) as img:
+                        res = qcagent.check_base(qcagent.default_ask(body.get("ai_model")), img.convert("RGB"), b.spec, pose, masks)
+                    return self._json(res)
                 if parts == ["api", "bottom-refs"]:
                     # the shop's product photo of its plain shorts / pants: {"bottom": "Shorts", "data": base64 photo}
                     self._admin()

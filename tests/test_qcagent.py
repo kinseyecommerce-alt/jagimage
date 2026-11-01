@@ -271,3 +271,25 @@ def test_the_shops_bottom_photo_goes_with_every_outfit_shot_and_the_edit_runs_on
     assert seen and all(str(ref) == r[-1] for _, r in seen)
     assert all(f"Image {len(r)} is a product photo of the exact track pants" in p for p, r in seen)
     assert len(edits) == 1 and b.counts["retouch_skipped"] == 1  # two fronts: one edited, one clean
+
+
+def test_a_tucked_top_is_looked_for_in_a_waist_close_up(tmp_path):
+    shown = []
+
+    class WaistEyes(Eyes):  # the whole photo looks fine; only the close-up shows the waistband over the hem
+        def __call__(self, message, image):
+            shown.append((message, Image.open(__import__("io").BytesIO(image)).size))
+            if "close-up of a child's waist" in message:
+                return {"ok": False, "problems": ["the waistband sits over the top's hem"]}
+            return {"ok": True, "problems": []}
+    calls = []
+
+    def gen(prompt, refs):
+        calls.append(prompt)
+        return fake_generate(prompt, refs)
+    b = studio.Batch(spec(poses=["front_main", "back"]), out=tmp_path, generate=gen, workers=1, inspector=WaistEyes(), retries=2)
+    counts = b.run()
+    assert counts["base_rejected"] == 2 and counts["errors"] >= 1  # the front is rejected each time it is made
+    waist = [size for m, size in shown if "close-up of a child's waist" in m]
+    full = [size for m, size in shown if "close-up of a child's waist" not in m]
+    assert waist and waist[0][0] < full[0][0]  # the close-up is a crop, not the whole photo

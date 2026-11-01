@@ -38,11 +38,14 @@ def _jpeg(img: Image.Image, height: int = VIEW_HEIGHT) -> bytes:
     return buf.getvalue()
 
 
-def default_ask() -> Callable:
-    """The app's AI (Gemini first, else OpenAI), as ask(message, image_bytes) -> {ok, problems}."""
+def default_ask(model: Optional[str] = None) -> Callable:
+    """The app's AI (Gemini first, else OpenAI), as ask(message, image_bytes) -> {ok, problems}.
+    model: the Gemini model that looks (JAGIMAGE_QC_MODEL, else the planning agent's)."""
+    import os
+
     from .cloud import Agent
 
-    agent = Agent()
+    agent = Agent(model=model or os.environ.get("JAGIMAGE_QC_MODEL") or None)
 
     def ask(message: str, image: bytes) -> dict:
         return agent._ask(message, system=SYSTEM, schema=SCHEMA, images=[(image, "image/jpeg")])
@@ -70,6 +73,40 @@ def base_points(spec, pose: str) -> List[str]:
     if L.is_kids(spec.category):
         points.append("The model is a small child, not a teenager or adult.")
     return points
+
+
+WAIST_POINT = ("This is a close-up of a child's waist: the hem of the top and the waistband of the shorts or pants. "
+               "PASS only if the top's hem hangs down OVER the waistband, so the waistband is covered by the top (a "
+               "little of the waistband showing below a curved hem is fine). FAIL if the waistband of the bottom sits "
+               "on top of or in front of the top's hem, or rises above it, or the top is tucked inside the bottom.")
+
+
+def waist_crop(img: Image.Image, top_mask, bottom_mask) -> Optional[Image.Image]:
+    """The waist at full size, where the top's hem meets the bottom: the place a tucked-in top shows."""
+    t, b = np.asarray(top_mask) > 0.5, np.asarray(bottom_mask) > 0.5
+    if not t.any() or not b.any():
+        return None
+    by, bx = np.nonzero(b)
+    y = int(np.percentile(by, 1))
+    x = int(np.median(bx))
+    w = int(0.5 * (np.percentile(bx, 99) - np.percentile(bx, 1))) + int(0.04 * img.width)
+    h = int(0.11 * img.height)
+    return img.crop((max(0, x - w), max(0, y - h), min(img.width, x + w), min(img.height, y + h)))
+
+
+def check_base(ask: Callable, img: Image.Image, spec, pose: str, masks=None) -> dict:
+    """The whole base photo against its points, then (outfit fronts) the waist close-up on its own:
+    a tucked-in top is small in the whole photo, and the agent misses it there."""
+    res = inspect(ask, img, base_points(spec, pose))
+    if res["ok"] is False or spec.shot != "outfit" or pose == "back" or masks is None or masks[1] is None:
+        return res
+    crop = waist_crop(img, masks[0], masks[1])
+    if crop is None:
+        return res
+    waist = inspect(ask, crop, [WAIST_POINT])
+    if waist["ok"] is False:
+        return {"ok": False, "problems": ["waist: " + p for p in waist["problems"]]}
+    return res if res["ok"] is not None else waist
 
 
 def photo_points(top: str, bottom: Optional[str], left: bool, bleed: bool) -> List[str]:
