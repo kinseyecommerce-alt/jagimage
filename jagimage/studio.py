@@ -643,7 +643,7 @@ class Batch:
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
         self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0,
-                       "qc_fixed": 0, "qc_held": 0, "base_rejected": 0, "printed": 0, "print_fixed": 0, "print_flagged": 0}
+                       "qc_fixed": 0, "qc_ai_fixed": 0, "qc_held": 0, "base_rejected": 0, "printed": 0, "print_fixed": 0, "print_flagged": 0}
         # prints(category, top style, colour) -> [(print name, PNG path)]: the shop's prints for that shirt
         self.prints = prints
         self.checker = checker  # checker(printed photo, artwork) -> {ok, issues, dx, dy, scale}: the AI print checker
@@ -900,6 +900,23 @@ class Batch:
                 time.sleep(min(60, wait) if attempt + 1 < self.retries else 0)
         self._event("errors", model=m, path=str(path), error=f"{type(last).__name__}: {last}")
         return False
+
+    def _ai_fix(self, out, problems, masks, top, thex, bottom, bhex, path: Path, pose: str):
+        """The QC agent's last fix: an AI edit of the finished photo, kept only on the clothes."""
+        import io as _io
+
+        from PIL import Image
+
+        from .qcagent import blend_fix, fix_prompt
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{pose}_fix.{threading.get_ident()}.png")
+        out.save(tmp)
+        try:
+            data = self.generate(fix_prompt(problems, top, thex, bottom, bhex), [str(tmp)])
+        finally:
+            tmp.unlink(missing_ok=True)
+        return blend_fix(out, Image.open(_io.BytesIO(data)), masks)
 
     def _qc_base(self, tmp: Path, path: Path, pose: str, m: int):
         """The QC agent looks at a new base photo; a fault recolouring can't fix sends it back to the AI."""
@@ -1223,7 +1240,18 @@ class Batch:
                 if not problems:
                     break
             if problems:  # still counted after fixing: the agent looks whether a shopper would see it
-                agent = inspect(self.inspector, out, photo_points(top, bottom, check["base_left_px"] > 0, check["bleed_px"] > 0))
+                points = photo_points(top, bottom, check["base_left_px"] > 0, check["bleed_px"] > 0)
+                agent = inspect(self.inspector, out, points)
+                if agent["ok"] is False and self.generate is not None:
+                    # a real fault: the AI edits only those spots, kept only on the clothes, then it is checked again
+                    try:
+                        out = self._ai_fix(out, agent["problems"], [tmask] + ([bmask] if bottom else []), top, thex, bottom, bhex, path, pose)
+                        check, problems = judge(out, tmask, bmask, qc)
+                        agent = {**inspect(self.inspector, out, points), "before": agent["problems"]}
+                        fixed.append("AI retouch: " + "; ".join(agent["before"])[:300])
+                        self._event("qc_ai_fixed", model=path.parent.parent.name, path=str(path))
+                    except Exception as exc:
+                        agent = {**agent, "fix_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
                 held = agent["ok"] is not True
             if fixed:
                 self._event("qc_fixed", model=path.parent.parent.name, path=str(path))

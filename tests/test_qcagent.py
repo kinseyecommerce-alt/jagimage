@@ -135,3 +135,50 @@ def test_qc_stage_rechecks_existing_bases(tmp_path):
     counts = b.run(stage="qc")
     assert counts["base_rejected"] == 1 and counts["recoloured"] == 2
     assert len([p for p in calls if p != studio.RETOUCH_BOTTOMS]) == 2  # the rejected front and its back, made again
+
+
+def test_a_real_fault_is_fixed_by_an_ai_edit_and_then_passes(tmp_path, monkeypatch):
+    from jagimage import recolor
+
+    orig = recolor.quality_check
+
+    def always_flag(*a, **k):
+        out = orig(*a, **k)
+        out["problems"], out["passed"] = ["colour bleeds onto skin or background (500 px)"], False
+        return out
+    monkeypatch.setattr(recolor, "quality_check", always_flag)
+
+    class Twice(Eyes):  # the first look at the photo finds the fault, the look after the edit passes
+        def __call__(self, message, image):
+            if "recoloured" in message:
+                self.asked.append(message)
+                ok = sum("recoloured" in m for m in self.asked) > 1
+                return {"ok": ok, "problems": [] if ok else ["grey strip along the left sleeve"]}
+            return super().__call__(message, image)
+    edits = []
+
+    def gen(prompt, refs):
+        if prompt.startswith("Edit image 1, a clothing catalogue photo"):
+            edits.append(prompt)
+            with Image.open(refs[0]) as im:
+                w, h = im.size
+            return _png(Image.new("RGB", (w // 2, h // 2), (255, 0, 0)))  # any size: it is fitted back
+        return fake_generate(prompt, refs)
+    b = studio.Batch(spec(poses=["front_main"]), out=tmp_path, generate=gen, workers=1, inspector=Twice())
+    counts = b.run()
+    assert counts["qc_ai_fixed"] == 1 and counts["qc_held"] == 0
+    assert "grey strip along the left sleeve" in edits[0] and "the top red (#" in edits[0].lower()
+    qc_file = next(b.root.glob("m0001/Red__Red/qc.json"))
+    check = json.loads(qc_file.read_text())["front_main"]["check"]
+    assert check["passed"] and not check["held"] and any(f.startswith("AI retouch") for f in check["fixed"])
+    assert qcagent.passed(qc_file, "front_main")
+    px = np.asarray(Image.open(qc_file.parent / "front_main_2000x2000.jpg").convert("RGB"))
+    assert px[30:60, 30:60].std() < 3 and px[30:60, 30:60].mean() > 200  # the backdrop corner wasn't touched by the edit
+
+
+def _png(img):
+    import io
+
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()

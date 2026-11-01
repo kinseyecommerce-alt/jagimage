@@ -114,6 +114,26 @@ def fix_photo(before: Image.Image, after: Image.Image, check: dict, recolour: Ca
     return out
 
 
+def fix_prompt(problems: List[str], top: str, thex: str, bottom: Optional[str], bhex: Optional[str]) -> str:
+    colours = f"the top {top} ({thex})" + (f" and the bottom {bottom} ({bhex})" if bottom else "")
+    return ("Edit image 1, a clothing catalogue photo. Fix ONLY these colour faults on the clothes: " + "; ".join(problems) +
+            f". Paint those areas in the garment's own colour, {colours}, with the same natural folds, shading and knit "
+            "texture as the rest of that garment, so every part of each garment is one even colour. Do not change the "
+            "garment shapes or details, the child, face, hair, hands, shoes, background, framing or image size. Return one photo.")
+
+
+def blend_fix(out: Image.Image, edited: Image.Image, masks: list, reach: int = 6) -> Image.Image:
+    """Keeps the AI edit only on the clothes (and a few px around them, where a stray colour sat); the face,
+    hair, hands and backdrop stay exactly as they were."""
+    edited = edited.convert("RGB").resize(out.size, Image.LANCZOS)
+    g = np.zeros(out.size[::-1], bool)
+    for m in masks:
+        g |= np.asarray(m) > 0.3
+    a = ndimage.gaussian_filter(ndimage.binary_dilation(g, iterations=reach).astype(np.float32), 1.5)[..., None]
+    o, e = np.asarray(out.convert("RGB"), np.float32), np.asarray(edited, np.float32)
+    return Image.fromarray(np.clip(np.round(o * (1 - a) + e * a), 0, 255).astype(np.uint8))
+
+
 def passed(qc_file, pose: str) -> bool:
     """A finished photo may be uploaded: it passed the QC agent or a person approved it."""
     try:

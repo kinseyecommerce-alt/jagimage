@@ -127,7 +127,16 @@ class Job:
         self.log = deque(maxlen=200)
         self.batch_state = None
         self.recent = deque(maxlen=48)
-        self.batches = [studio.Batch(sp, out=out, generate=engine(sp) if stage not in ("recolor", "prints") else None,
+        def engine_for(sp):  # recolouring needs no AI, except the QC agent's edit fixes (no key: it holds instead)
+            if stage not in ("recolor", "prints"):
+                return engine(sp)
+            if stage == "recolor" and sp.qc_agent:
+                try:
+                    return engine(sp)
+                except Exception:
+                    return None
+            return None
+        self.batches = [studio.Batch(sp, out=out, generate=engine_for(sp),
                                      workers=workers, on_event=self.event, export=export, export_what=export_what, redo=redo,
                                      prints=prints, checker=checker)
                         for sp in specs]
