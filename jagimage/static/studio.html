@@ -1325,8 +1325,10 @@ async function loadJobs() {
   const running = r.jobs.find((j) => j.running);
   if (running && !S.job) { S.job = running.id; openBatch(running.name); showJob(running); poll(); }
   $("batches").innerHTML = r.folders.map((f) => `<div class="batch"><div><div class="nm">${esc(f.name)}</div><div class="meta">${esc(f.spec.models)} models from no. ${esc(f.spec.first_model)} · ${esc(f.spec.top_colours.length)} top colour(s) · ${esc(f.spec.provider)}</div></div>
-    <span class="row"><button class="btn" data-open="${esc(f.name)}">Open</button><button class="btn" data-load="${esc(f.name)}">Load settings</button></span></div>`).join("") || '<p class="hint">None yet.</p>';
-  $("batches").onclick = (e) => { const o = e.target.dataset.open, l = e.target.dataset.load; if (o) openBatch(o); if (l) loadSettings(r.folders.find((f) => f.name === l).spec); };
+    <span class="row"><button class="btn" data-open="${esc(f.name)}">Open</button><button class="btn" data-load="${esc(f.name)}">Load settings</button>${isAdmin() ? `<button class="btn" data-del="${esc(f.name)}">Delete</button>` : ""}</span></div>`).join("") || '<p class="hint">None yet.</p>';
+  $("batches").onclick = async (e) => { const o = e.target.dataset.open, l = e.target.dataset.load, d = e.target.dataset.del; if (o) openBatch(o); if (l) loadSettings(r.folders.find((f) => f.name === l).spec);
+    if (d && confirm(`Delete the batch ${d} and all its photos from the server? This can't be undone (copies on Google Drive stay).`)) {
+      try { await api(`/api/batches/${encodeURIComponent(d)}/delete`, {}); loadJobs(); } catch (err) { $("err").textContent = err.message; } } };
 }
 // Until the shot is picked by hand, it follows the top style: Half Sleeve starts as Top only.
 function autoShot() {

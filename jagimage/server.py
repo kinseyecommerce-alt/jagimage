@@ -942,6 +942,17 @@ def make_handler(app: Studio):
                     # redo: print again over earlier printed photos (e.g. after moving the print)
                     job = app.start({**spec, **want, "stage": "redo_prints" if body.get("redo") else "prints", "same_models": True})
                     return self._json(job.status())
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "delete":
+                    # removes a batch's folder (photos, bases, masks) from the server, e.g. to free disk space
+                    import shutil
+
+                    self._admin()
+                    name = unquote(parts[2])
+                    b = app.batch_for(name)
+                    if any(j.finished is None and name in [x.spec.name for x in j.batches] for j in app.jobs.values()):
+                        raise ValueError(f"{name} is running: stop it first")
+                    shutil.rmtree(b.root)
+                    return self._json({"deleted": name})
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "redo":
                     # Dashboard: recolour a whole batch again with the latest recolouring (no AI)
                     spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())

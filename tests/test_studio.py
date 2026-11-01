@@ -1051,3 +1051,22 @@ def test_gemini_bases_with_plain_bottoms_get_an_edit_pass(tmp_path):
     o = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", top_colours=["Navy"], provider="openai", retouch_bottoms=True)
     j = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Jeans", top_colours=["Navy"], provider="gemini", retouch_bottoms=True)
     assert o.retouch_poses() == [] and j.retouch_poses() == []
+
+
+def test_a_batch_can_be_deleted_to_free_space(tmp_path):
+    app, httpd = serve(port=0, out=str(tmp_path), engine=lambda spec: fake_generate)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        code, job = _post(base + "/api/jobs", {"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy"], "models": 1})
+        for _ in range(600):
+            st = json.loads(_get(f"{base}/api/jobs/{job['id']}")[1])
+            if not st["running"]:
+                break
+            time.sleep(0.1)
+        assert (tmp_path / st["name"]).is_dir()
+        assert _post(f"{base}/api/batches/{st['name']}/delete", {})[0] == 200
+        assert not (tmp_path / st["name"]).exists()
+        assert _post(f"{base}/api/batches/..%2Fetc/delete", {})[0] == 400  # only a batch folder, nothing else
+    finally:
+        httpd.shutdown()
