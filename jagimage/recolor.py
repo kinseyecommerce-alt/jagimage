@@ -33,7 +33,7 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 9       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 10       # bump when garment_mask changes: masks saved by older code are made again
 SPLIT_REACH = 0.025     # of photo height: how far from where top and bottom meet the split is redrawn along the photo's edges
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
@@ -50,6 +50,9 @@ SHADE_HUE_DEG = 70      # a garment's deep shadow may be this far off its base h
 SHADE_BLUE_DEG = -100   # OKLab hue of blue: deep shadows in studio light shift towards it
 SHADE_MIN_CHROMA = 0.015  # ...if it still has this much colour (backdrop shadows are greyer)
 SHADE_DARKER = 0.12     # ...and is at least this much darker than the garment's typical lightness
+PALE_LIGHTER = 0.03  # a pixel this much lighter than the fabric...
+PALE_CHROMA = 0.55  # ...with less than this share of its colour is a tinted white thing (a shoe), not fabric
+PALE_LOW = 0.2      # share of a bottom's height, from its hem up, where shoes can touch it
 GROW_DARKER = 0.4    # shadow growth never takes pixels darker than this share of the garment's typical lightness
 
 
@@ -97,14 +100,14 @@ def lightness(hex_: str) -> float:
     return float(hex_to_lab(hex_)[0])
 
 
-def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+def garment_mask(lab: np.ndarray, base_hex: str, tol: Optional[float] = None, shoes: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """Soft mask (0..1) of the garment drawn in `base_hex`, and the garment's mean OKLab colour.
     Picks pixels near the base colour, refines the centre from what was found, keeps the
     largest connected piece (so same-coloured hair or props stay out) and fills knit speckle."""
     w = np.array([W_L, 1, 1], np.float32)
     base = hex_to_lab(base_hex)
     if np.hypot(base[1], base[2]) >= 0.05:
-        return _hue_mask(lab, base, base_hex)
+        return _hue_mask(lab, base, base_hex, shoes)
     if tol is None:  # tighter for low-chroma bases so grey backgrounds stay out
         tol = float(np.clip(0.55 * np.hypot(base[1], base[2]) + 0.03, 0.04, 0.09))
     d = np.linalg.norm((lab - base) * w, axis=-1)
@@ -265,7 +268,7 @@ def backdrop_mask(lab):
     return ndimage.binary_propagation(seed, mask=smooth)
 
 
-def _hue_mask(lab, base, base_hex):
+def _hue_mask(lab, base, base_hex, shoes=False):
     """Coloured bases (e.g. mint or bottle green): find the garment by hue, which grey studio,
     skin, black hair and white shoes never share, even when the AI made it paler or deeper.
     The backdrop is left out first, so a tinted or coloured studio is never taken for the garment."""
@@ -283,6 +286,14 @@ def _hue_mask(lab, base, base_hex):
     m = (dh < np.radians(28)) & (C > max(0.02, 0.35 * cc)) & ~bg
     # shadows lose chroma but keep hue: grow into connected pixels with a looser chroma floor
     loose = (dh < np.radians(40)) & (C > max(0.012, 0.18 * cc)) & ~bg
+    if shoes and m.any():  # shorts or pants: a white shoe the AI tinted with the base colour at their hem is lighter
+        ys = np.nonzero(m.any(axis=1))[0]  # than the fabric and much paler; only looked for in the lowest part
+        low = np.zeros(m.shape, bool)
+        low[int(ys.max() - PALE_LOW * (ys.max() - ys.min())):] = True
+        pale = low & (lab[..., 0] > np.median(lab[..., 0][m]) + PALE_LIGHTER) & (C < PALE_CHROMA * cc)
+        pale = ndimage.binary_opening(pale, iterations=2)  # a shoe is a patch; a 1-2 px light rim is the fabric's edge
+        m &= ~pale
+        loose &= ~pale
     lbl, n = ndimage.label(m)
     if n:
         m = _pieces(lbl, n)
@@ -510,7 +521,8 @@ def split_outfit(lab: np.ndarray, top: np.ndarray, bottom: np.ndarray) -> Tuple[
     if not t.any() or not b.any():
         return top, bottom
     C = np.hypot(lab[..., 1], lab[..., 2])
-    skin = (lab[..., 1] > 0.015) & (lab[..., 2] > 0.02) & (C > 0.04)
+    # skin: warm (red-orange to pink, fingertips in shadow are nearly pink); the mint and lilac bases are not
+    skin = (lab[..., 1] > 0.015) & (lab[..., 2] > -0.015) & (C > 0.03)
     near = (ndimage.distance_transform_edt(~t) <= R) & (ndimage.distance_transform_edt(~b) <= R)
     gap = near & ~t & ~b & ~backdrop_mask(lab) & ~skin  # fabric left to neither: a reflection or shadow
     zone = near & (t | b | gap)
@@ -527,6 +539,8 @@ def split_outfit(lab: np.ndarray, top: np.ndarray, bottom: np.ndarray) -> Tuple[
     lbl = ndimage.watershed_ift(gi, markers)
     a = np.maximum(np.maximum(top, bottom), gap.astype(np.float32))
     top, bottom = top.copy(), bottom.copy()
+    walled = zone & (lbl == 3) & (t | b)  # a garment pixel reached first from skin or backdrop stays where it was
+    lbl = np.where(walled, np.where(t, 1, 2), lbl)
     top[zone] = np.where(lbl[zone] == 1, a[zone], 0)
     bottom[zone] = np.where(lbl[zone] == 2, a[zone], 0)
     return top, bottom

@@ -4,9 +4,10 @@
    fix later: a tucked-in top, drawstrings or pockets on the bottoms, a white hood lining, hair bows
    in the clothes' colour, broken hands or faces. A failing base is asked for again.
 2. Recoloured photos: the pixel check (colour bleed, base colour left). Bleed is put back to the photo's
-   own pixels and leftover base colour is painted, then the photo is checked again. Problems still
-   counted after that are shown to the vision check, which tells real faults (a grey strip on a sleeve)
-   from specks nobody can see.
+   own pixels and leftover base colour is painted; what is still counted gets the agent's own retouch on
+   the server (local_fix: missed fabric joins its garment, wrong shades take the garment's colour, bled
+   colour is replaced by clean skin or backdrop), all without an AI call. Problems still counted after
+   that are shown to the vision check, which tells real faults from specks nobody can see.
 3. Only photos that passed (or that a person approved) are uploaded; the rest are held for review."""
 
 import io
@@ -115,24 +116,61 @@ def fix_photo(before: Image.Image, after: Image.Image, check: dict, recolour: Ca
     return out
 
 
-def fix_prompt(problems: List[str], top: str, thex: str, bottom: Optional[str], bhex: Optional[str]) -> str:
-    colours = f"the top {top} ({thex})" + (f" and the bottom {bottom} ({bhex})" if bottom else "")
-    return ("Edit image 1, a clothing catalogue photo. Fix ONLY these colour faults on the clothes: " + "; ".join(problems) +
-            f". Paint those areas in the garment's own colour, {colours}, with the same natural folds, shading and knit "
-            "texture as the rest of that garment, so every part of each garment is one even colour. Do not change the "
-            "garment shapes or details, the child, face, hair, hands, shoes, background, framing or image size. Return one photo.")
+SHADE_HUE_MAX = 25      # degrees: a garment pixel further than this from the target's hue is a wrong shade
+SHADE_CHROMA_MIN = 0.5  # ...or with less than this share of a colourful target's colour strength (a grey patch)
+NEUTRAL_CHROMA = 0.035  # on black, white and grey targets: a pixel with more colour than this is a tinted patch
 
 
-def blend_fix(out: Image.Image, edited: Image.Image, masks: list, reach: int = 6) -> Image.Image:
-    """Keeps the AI edit only on the clothes (and a few px around them, where a stray colour sat); the face,
-    hair, hands and backdrop stay exactly as they were."""
-    edited = edited.convert("RGB").resize(out.size, Image.LANCZOS)
-    g = np.zeros(out.size[::-1], bool)
-    for m in masks:
-        g |= np.asarray(m) > 0.3
-    a = ndimage.gaussian_filter(ndimage.binary_dilation(g, iterations=reach).astype(np.float32), 1.5)[..., None]
-    o, e = np.asarray(out.convert("RGB"), np.float32), np.asarray(edited, np.float32)
-    return Image.fromarray(np.clip(np.round(o * (1 - a) + e * a), 0, 255).astype(np.uint8))
+def local_fix(before: Image.Image, after: Image.Image, masks: list, targets: list, recolour: Callable):
+    """The QC agent's own retouch, on the server (no AI call): for colour bleed and wrong shades only.
+    1. Where top and bottom meet, the line between them is redrawn along the photo's edges (split_outfit), so
+       fabric no mask took there (a grey strip along a sleeve) joins its garment; the photo is recoloured.
+    2. Garment pixels whose shade is off the target (another hue, a grey or tinted patch) get the target's
+       colour with their own lightness, so folds and knit stay.
+    3. Colour bled onto skin or backdrop (as they were in the photo) gets those pixels back.
+    recolour(list of masks) -> recoloured image. Returns (photo, masks)."""
+    from .recolor import backdrop_mask, lab_to_rgb, render_target, rgb_to_lab, split_outfit
+
+    lab0 = rgb_to_lab(np.asarray(before.convert("RGB")))
+    H = lab0.shape[0]
+    ms = [np.asarray(m, np.float32) for m in masks]
+    regrown = False
+    if len(ms) == 2:  # where top and bottom meet, the line follows the photo's edges (not the colour)
+        t2, b2 = split_outfit(lab0, ms[0], ms[1])
+        regrown = bool(((t2 > 0.5) != (ms[0] > 0.5)).any() or ((b2 > 0.5) != (ms[1] > 0.5)).any())
+        ms = [t2, b2]
+    if regrown:
+        after = recolour(ms)
+    lab = rgb_to_lab(np.asarray(after.convert("RGB")))
+    C, Hh = np.hypot(lab[..., 1], lab[..., 2]), np.arctan2(lab[..., 2], lab[..., 1])
+    for m, th in zip(ms, targets):  # 2: wrong shades inside each garment get its colour, keeping their lightness
+        T = render_target(th)
+        ct = float(np.hypot(T[1], T[2]))
+        inside = m > 0.9
+        if ct > 0.04:
+            off = np.abs(np.angle(np.exp(1j * (Hh - np.arctan2(T[2], T[1]))))) > np.radians(SHADE_HUE_MAX)
+            wrong = inside & (off | (C < SHADE_CHROMA_MIN * ct))
+        else:
+            wrong = inside & (C > NEUTRAL_CHROMA)
+        wrong = ndimage.binary_opening(wrong, iterations=1)  # a patch, not single noisy pixels
+        if wrong.any():
+            a = ndimage.gaussian_filter(ndimage.binary_dilation(wrong, iterations=1).astype(np.float32), 1.0) * inside
+            lab[..., 1] = lab[..., 1] * (1 - a) + T[1] * a
+            lab[..., 2] = lab[..., 2] * (1 - a) + T[2] * a
+    rgb = lab_to_rgb(lab).astype(np.float32)
+    union = np.zeros(lab0.shape[:2], bool)
+    for m in ms:
+        union |= m > 0.5
+    C0 = np.hypot(lab0[..., 1], lab0[..., 2])
+    skin0 = (lab0[..., 1] > 0.015) & (lab0[..., 2] > -0.015) & (C0 > 0.03)
+    ring = ndimage.binary_dilation(union, iterations=10) & ~ndimage.binary_dilation(union, iterations=2)
+    moved = np.linalg.norm(lab - lab0, axis=-1) > 0.04
+    bleed = ring & moved & (skin0 | backdrop_mask(lab0))  # only what was skin or backdrop in the photo
+    if bleed.any():  # 3: skin and backdrop beside the clothes get their own pixels back
+        src = np.asarray(before.convert("RGB"), np.float32)
+        a = ndimage.gaussian_filter(bleed.astype(np.float32), 0.7)[..., None]
+        rgb = rgb * (1 - a) + src * a
+    return Image.fromarray(np.clip(np.round(rgb), 0, 255).astype(np.uint8)), ms
 
 
 def passed(qc_file, pose: str) -> bool:

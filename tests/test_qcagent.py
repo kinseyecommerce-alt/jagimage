@@ -137,43 +137,81 @@ def test_qc_stage_rechecks_existing_bases(tmp_path):
     assert len([p for p in calls if p != studio.RETOUCH_BOTTOMS]) == 2  # the rejected front and its back, made again
 
 
-def test_a_real_fault_is_fixed_by_an_ai_edit_and_then_passes(tmp_path, monkeypatch):
+def test_flagged_photos_get_the_agents_own_retouch_without_any_ai_edit(tmp_path, monkeypatch):
     from jagimage import recolor
 
-    orig = recolor.quality_check
+    orig, n = recolor.quality_check, []
 
-    def always_flag(*a, **k):
+    def flag_first_two(*a, **k):  # the first checks count bleed; after the retouch it is gone
         out = orig(*a, **k)
-        out["problems"], out["passed"] = ["colour bleeds onto skin or background (500 px)"], False
+        n.append(1)
+        if len(n) <= 2:
+            out["problems"], out["passed"] = ["colour bleeds onto skin or background (500 px)"], False
         return out
-    monkeypatch.setattr(recolor, "quality_check", always_flag)
-
-    class Twice(Eyes):  # the first look at the photo finds the fault, the look after the edit passes
-        def __call__(self, message, image):
-            if "recoloured" in message:
-                self.asked.append(message)
-                ok = sum("recoloured" in m for m in self.asked) > 1
-                return {"ok": ok, "problems": [] if ok else ["grey strip along the left sleeve"]}
-            return super().__call__(message, image)
-    edits = []
+    monkeypatch.setattr(recolor, "quality_check", flag_first_two)
+    calls = []
 
     def gen(prompt, refs):
-        if prompt.startswith("Edit image 1, a clothing catalogue photo"):
-            edits.append(prompt)
-            with Image.open(refs[0]) as im:
-                w, h = im.size
-            return _png(Image.new("RGB", (w // 2, h // 2), (255, 0, 0)))  # any size: it is fitted back
+        calls.append(prompt)
         return fake_generate(prompt, refs)
-    b = studio.Batch(spec(poses=["front_main"]), out=tmp_path, generate=gen, workers=1, inspector=Twice())
+    eyes = Eyes()
+    b = studio.Batch(spec(poses=["front_main"]), out=tmp_path, generate=gen, workers=1, inspector=eyes)
     counts = b.run()
-    assert counts["qc_ai_fixed"] == 1 and counts["qc_held"] == 0
-    assert "grey strip along the left sleeve" in edits[0] and "the top red (#" in edits[0].lower()
+    assert counts["qc_retouched"] == 1 and counts["qc_held"] == 0
+    assert not any(p.startswith("Edit image 1, a clothing") for p in calls)  # no AI edit: the retouch is local
+    assert not any("recoloured" in m for m in eyes.asked)  # fixed before the vision check was needed
     qc_file = next(b.root.glob("m0001/Red__Red/qc.json"))
     check = json.loads(qc_file.read_text())["front_main"]["check"]
-    assert check["passed"] and not check["held"] and any(f.startswith("AI retouch") for f in check["fixed"])
-    assert qcagent.passed(qc_file, "front_main")
-    px = np.asarray(Image.open(qc_file.parent / "front_main_2000x2000.jpg").convert("RGB"))
-    assert px[30:60, 30:60].std() < 3 and px[30:60, 30:60].mean() > 200  # the backdrop corner wasn't touched by the edit
+    assert check["passed"] and not check["held"] and any(f.startswith("retouch") for f in check["fixed"])
+
+
+def test_local_fix_gives_a_sleeve_lit_by_the_pants_the_sleeves_colour_and_cleans_bleed():
+    from scipy import ndimage
+
+    from jagimage.recolor import garment_mask, recolor_image, rgb_to_lab
+
+    mint, lav, grey = np.array([170, 225, 205.]), np.array([205, 180, 235.]), np.array([236, 236, 238.])
+    img = np.tile(grey, (240, 200, 1))
+    img[20:200, 40:150] = lav
+    img[0:120, 50:150] = mint
+    img[0:190, 20:70] = mint * 0.9
+    xs = np.linspace(0, 1, 30)[None, :, None]
+    img[110:190, 40:70] = (mint * 0.85) * (1 - 0.8 * xs) + (lav * 0.8) * 0.8 * xs  # the sleeve, lit purple by the pants
+    img = np.pad(img, ((40, 160), (200, 200), (0, 0)), mode="edge")
+    img[:, :200] = img[:, -200:] = grey
+    img[-160:] = grey
+    before = Image.fromarray(np.clip(ndimage.gaussian_filter(img, (0.6, 0.6, 0)), 0, 255).astype(np.uint8))
+    lab = rgb_to_lab(np.asarray(before))
+    top, _ = garment_mask(lab, "#AAE1CD")
+    bottom, _ = garment_mask(lab, "#CDB4EB")  # the colour split: part of the sleeve went to the pants
+
+    def paint(ms):
+        o, _, _ = recolor_image(before, "#AAE1CD", "#FFFFFF", mask=ms[0], others=ms[1])
+        o, _, _ = recolor_image(o, "#CDB4EB", "#000000", mask=ms[1], others=ms[0])
+        return o
+    after = np.asarray(paint([top, bottom]).convert("RGB")).copy()
+    out, ms = qcagent.local_fix(before, Image.fromarray(after), [top, bottom], ["#FFFFFF", "#000000"], paint)
+    px = np.asarray(out).astype(int)
+    sleeve = px[152:228, 222:268].reshape(-1, 3)
+    assert (sleeve.mean(axis=1) > 150).mean() > 0.97      # the whole sleeve is white, no black or grey on it
+
+
+def test_local_fix_gives_bled_backdrop_its_own_pixels_back_and_evens_a_wrong_shade():
+    grey = (236, 236, 238)
+    before = Image.new("RGB", (300, 400), grey)
+    before.paste((170, 225, 205), (100, 100, 200, 300))   # the mint garment
+    after = before.copy()
+    after.paste((200, 30, 30), (100, 100, 200, 300))      # recoloured red...
+    after.paste((150, 150, 150), (130, 150, 160, 180))    # ...with a grey patch left in it
+    after.paste((150, 40, 40), (204, 150, 208, 220))      # ...and red bled onto the backdrop beside it
+    mask = np.zeros((400, 300), np.float32)
+    mask[100:300, 100:200] = 1
+    out, ms = qcagent.local_fix(before, after, [mask], ["#C81E1E"], lambda ms: after)
+    px = np.asarray(out).astype(int)
+    assert abs(px[185, 206] - np.array(grey)).max() < 12  # the backdrop is grey again
+    r, g, b = px[165, 145]
+    assert r > g + 60 and r > b + 60                      # the grey patch is red now, with its own lightness
+    assert tuple(px[250, 150]) == (200, 30, 30)           # the rest of the garment is untouched
 
 
 def _png(img):
