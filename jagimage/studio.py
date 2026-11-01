@@ -104,6 +104,29 @@ UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the wais
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
 
 
+def approve(root: Path, photos: list) -> int:
+    """A person approves photos the QC agent held (paths like m0014/Red__Red/front_main_2000x2000.jpg):
+    they are uploaded on the next Drive round."""
+    from .recolor import write_qc
+
+    root, n = Path(root).resolve(), 0
+    for rel in photos:
+        jpg = (root / str(rel)).resolve()
+        if root not in jpg.parents or not jpg.name.endswith(".jpg"):
+            continue  # only photos inside this batch
+        qc_file = jpg.parent / "qc.json"
+        pose = jpg.name.rsplit("_", 1)[0]
+        try:
+            rows = json.loads(qc_file.read_text())
+        except (OSError, ValueError):
+            continue
+        if pose in rows:
+            rows[pose].setdefault("check", {})["approved"] = True
+            write_qc(qc_file, rows)
+            n += 1
+    return n
+
+
 def is_white(name: str, fabric: str) -> bool:
     """White or an off-white (e.g. Cotton Mix #E7E7EC), not a light grey such as Melange or a pastel."""
     import numpy as np
@@ -140,6 +163,7 @@ class Spec:
     retouch_bottoms: bool = False  # Gemini: an edit pass takes drawstrings and pockets off plain shorts and pants
     drive_layout: str = "batch"    # Google Drive: "batch" folders, or the shop's "catalogue" folders (jagimage.catalogue)
     free_after_upload: bool = False  # take each finished JPG off the server once it is on Google Drive
+    qc_agent: bool = False  # the QC agent checks base photos and finished photos; only passed photos are uploaded
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -598,7 +622,8 @@ class Batch:
     def __init__(self, spec: Spec, out="output/studio", generate: Optional[Callable[[str, List[str]], bytes]] = None,
                  workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
                  export: Optional[str] = None, export_what="jpg", redo: bool = False,
-                 prints: Optional[Callable[[str, str, str], list]] = None, checker: Optional[Callable] = None):
+                 prints: Optional[Callable[[str, str, str], list]] = None, checker: Optional[Callable] = None,
+                 inspector: Optional[Callable] = None):
         """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
         photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
@@ -618,12 +643,21 @@ class Batch:
         self.lock = threading.Lock()
         self.fatal = None  # set when the AI account itself can't be used (no credits, bad key)
         self.counts = {"ai_done": 0, "ai_skipped": 0, "recoloured": 0, "recolour_skipped": 0, "errors": 0, "qc_flagged": 0,
-                       "printed": 0, "print_fixed": 0, "print_flagged": 0}
+                       "qc_fixed": 0, "qc_held": 0, "base_rejected": 0, "printed": 0, "print_fixed": 0, "print_flagged": 0}
         # prints(category, top style, colour) -> [(print name, PNG path)]: the shop's prints for that shirt
         self.prints = prints
         self.checker = checker  # checker(printed photo, artwork) -> {ok, issues, dx, dy, scale}: the AI print checker
+        self._inspector = inspector  # the QC agent's eyes: ask(message, jpeg bytes) -> {ok, problems}
         if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
             generate.set_usage_log(self.root / "_usage.jsonl")
+
+    @property
+    def inspector(self):
+        if self._inspector is None:
+            from .qcagent import default_ask
+
+            self._inspector = default_ask()
+        return self._inspector
 
     # ---- paths
     def model_dir(self, m: int) -> Path:
@@ -643,12 +677,16 @@ class Batch:
 
     # ---- run
     def run(self, stage="all"):
-        """stage: all | bases (AI only) | recolor (no AI calls) | prints (prints on the finished fronts, no AI)."""
+        """stage: all | bases (AI only) | recolor (no AI calls) | prints (prints on the finished fronts, no AI) |
+        qc (the QC agent re-checks the bases already made, then all: rejected bases are made again)."""
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "spec.json").write_text(json.dumps(asdict(self.spec), indent=2))
         if stage == "prints":
             self.run_prints()
             return self.counts
+        if stage == "qc":  # the QC agent looks at the bases already made; rejected ones are made again
+            self.requalify()
+            stage = "all"
         if stage != "recolor" and self.generate is None:
             raise RuntimeError("No image engine: pass generate=, or use stage='recolor'")
         if stage != "recolor" and self.spec.batch:
@@ -661,6 +699,36 @@ class Batch:
         with ThreadPoolExecutor(max_workers=max(1, self.workers)) as pool:
             list(pool.map(lambda m: self.run_model(m, stage), self.spec.model_numbers()))
         return self.counts
+
+    def requalify(self):
+        """The QC agent checks every base photo already made. A rejected one is deleted (with its masks) so the
+        run makes it again; when a front is rejected, the other poses of that shoot go too, so they match it."""
+        from PIL import Image
+
+        from .qcagent import base_points, inspect
+
+        poses = ["front_main"] + [p for p in self.spec.poses if p != "front_main"]
+        for m in self.spec.model_numbers():
+            for base in self.spec.bases(m):
+                for pose in poses:
+                    if self.stop.is_set():
+                        return
+                    path = self.base_path(m, base, pose)
+                    if not path.exists():
+                        continue
+                    with Image.open(path) as img:
+                        res = inspect(self.inspector, img, base_points(self.spec, pose))
+                    (path.parent / f"{pose}_base_qc.json").write_text(json.dumps(res, indent=1))
+                    if res["ok"] is not False:
+                        continue
+                    self._event("base_rejected", model=m, path=str(path), problems=res["problems"])
+                    for p in (poses if pose == "front_main" else [pose]):
+                        for f in path.parent.glob(f"{p}.png"):
+                            f.unlink()
+                        for f in path.parent.glob(f"{p}_*mask*"):
+                            f.unlink()
+                    if pose == "front_main":
+                        break
 
     def _run_batched(self):
         """Batch mode: each round sends every base photo whose reference photos already exist as one
@@ -793,6 +861,8 @@ class Batch:
                 raise
         try:
             self._check_base(tmp, base)
+            if self.spec.qc_agent:
+                self._qc_base(tmp, path, pose, m)
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
@@ -830,6 +900,20 @@ class Batch:
                 time.sleep(min(60, wait) if attempt + 1 < self.retries else 0)
         self._event("errors", model=m, path=str(path), error=f"{type(last).__name__}: {last}")
         return False
+
+    def _qc_base(self, tmp: Path, path: Path, pose: str, m: int):
+        """The QC agent looks at a new base photo; a fault recolouring can't fix sends it back to the AI."""
+        from PIL import Image
+
+        from .qcagent import base_points, inspect
+        from .recolor import MaskError
+
+        with Image.open(tmp) as img:
+            res = inspect(self.inspector, img, base_points(self.spec, pose))
+        (path.parent / f"{pose}_base_qc.json").write_text(json.dumps(res, indent=1))
+        if res["ok"] is False:
+            self._event("base_rejected", model=m, path=str(path), problems=res["problems"])
+            raise MaskError("QC agent: " + "; ".join(res["problems"])[:400])
 
     def _check_base(self, path: Path, base):
         import numpy as np
@@ -1091,22 +1175,64 @@ class Batch:
         return out
 
     def _recolour_one(self, img, tmask, bmask, base, top, bottom, path: Path, pose):
+        import numpy as np
+
         from .recolor import fit_canvas, quality_check, recolor_image, write_qc
 
         spec = self.spec
         thex = colour_hex(top, spec.fabric)
-        out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tmask, others=bmask if bottom else None)
-        qc = {"top": {"colour": top, "hex": thex, "deltaE": round(de_t, 2), "on_shade": de_t < 3}}
-        masks, bases, targets = [tmask], [TOP_BASES[base[0]][1]], [thex]
-        if bottom:
-            bhex = colour_hex(bottom, spec.fabric)
-            out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bmask, others=tmask)
-            qc["bottom"] = {"colour": bottom, "hex": bhex, "deltaE": round(de_b, 2), "on_shade": de_b < 3}
-            masks, bases, targets = masks + [bmask], bases + [BOTTOM_BASES[base[1]][1]], targets + [bhex]
+        bhex = colour_hex(bottom, spec.fabric) if bottom else None
+
+        def paint(tm, bm):
+            out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tm, others=bm if bottom else None)
+            qc = {"top": {"colour": top, "hex": thex, "deltaE": round(de_t, 2), "on_shade": de_t < 3}}
+            if bottom:
+                out, de_b, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], bhex, mask=bm, others=tm)
+                qc["bottom"] = {"colour": bottom, "hex": bhex, "deltaE": round(de_b, 2), "on_shade": de_b < 3}
+            return out, qc
+
+        def judge(out, tm, bm, qc):
+            masks = [tm] + ([bm] if bottom else [])
+            bases = [TOP_BASES[base[0]][1]] + ([BOTTOM_BASES[base[1]][1]] if bottom else [])
+            check = quality_check(img, out, masks, bases, [thex] + ([bhex] if bottom else []))
+            problems = list(check["problems"]) + [f"{k} colour off by ΔE {v['deltaE']}" for k, v in qc.items() if not v["on_shade"]]
+            return check, problems
+
+        out, qc = paint(tmask, bmask)
         # the quality check every finished photo gets: colour accuracy, bleeding, base colour left
-        check = quality_check(img, out, masks, bases, targets)
-        problems = list(check["problems"]) + [f"{k} colour off by ΔE {v['deltaE']}" for k, v in qc.items() if not v["on_shade"]]
-        qc["check"] = {"passed": not problems, "problems": problems, "bleed_px": check["bleed_px"], "base_left_px": check["base_left_px"]}
+        check, problems = judge(out, tmask, bmask, qc)
+        fixed, held, agent = [], False, None
+        if problems and spec.qc_agent:
+            from .qcagent import FIX_ROUNDS, fix_photo, inspect, photo_points
+
+            for _ in range(FIX_ROUNDS):  # the QC agent's automatic fixes, then the pixel check again
+                def grow(extra, tm=tmask, bm=bmask):
+                    # leftover base colour joins the garment it touches most (top unless it is in the bottom)
+                    nonlocal tmask, bmask, qc
+                    if bottom and bm is not None:
+                        in_b = extra & (np.asarray(bm) > 0.05)
+                        bmask = np.maximum(bm, in_b.astype(np.float32))
+                        extra = extra & ~in_b
+                    tmask = np.maximum(tm, extra.astype(np.float32))
+                    o, qc = paint(tmask, bmask)
+                    return o
+                before = (check["bleed_px"], check["base_left_px"])
+                out = fix_photo(img, out, check, grow)
+                check, problems = judge(out, tmask, bmask, qc)
+                fixed.append(f"bleed {before[0]}→{check['bleed_px']} px, base colour {before[1]}→{check['base_left_px']} px")
+                if not problems:
+                    break
+            if problems:  # still counted after fixing: the agent looks whether a shopper would see it
+                agent = inspect(self.inspector, out, photo_points(top, bottom, check["base_left_px"] > 0, check["bleed_px"] > 0))
+                held = agent["ok"] is not True
+            if fixed:
+                self._event("qc_fixed", model=path.parent.parent.name, path=str(path))
+            if held:
+                self._event("qc_held", model=path.parent.parent.name, path=str(path), problems=agent["problems"])
+        qc["check"] = {"passed": not problems or (agent or {}).get("ok") is True, "problems": problems,
+                       "bleed_px": check["bleed_px"], "base_left_px": check["base_left_px"]}
+        if spec.qc_agent:
+            qc["check"].update(held=held, fixed=fixed, agent=agent)
         path.parent.mkdir(parents=True, exist_ok=True)
         if spec.keep_png:
             out.save(path)

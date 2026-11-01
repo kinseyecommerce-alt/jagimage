@@ -383,8 +383,9 @@ class DriveSync:
         return studio.Batch(spec, out=root.parent)
 
     def pending(self) -> list:
-        """(batch folder, key, jpg, upload info) still to send; info None for the plain batch layout."""
-        from . import catalogue
+        """(batch folder, key, jpg, upload info) still to send; info None for the plain batch layout. In a batch
+        with the QC agent, only photos that passed it (or that a person approved) are sent."""
+        from . import catalogue, qcagent
 
         rows = []
         for spec in Path(self.out_dir()).glob("*/spec.json"):
@@ -394,14 +395,18 @@ class DriveSync:
                 done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
             b = self._batch(root)
             placed = set()
+            gated = b is not None and b.spec.qc_agent  # the QC agent decides what may go
+
+            def ok(jpg):
+                return not gated or qcagent.passed(jpg.parent / "qc.json", jpg.name.rsplit("_", 1)[0])
             if b is not None and b.spec.drive_layout == "catalogue":
                 for f in catalogue.files(b):
                     placed.add(f["rel"])
-                    if f["key"] not in done:
+                    if f["key"] not in done and ok(f["src"]):
                         rows.append((root, f["key"], f["src"], f))
             for jpg in sorted(root.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg")):  # <model>/<Top__Bottom>/<pose>_<w>x<h>.jpg
                 rel = jpg.relative_to(root).as_posix()
-                if rel not in placed and rel not in done and not jpg.parent.name.startswith("_") and JPG_SIZE.search(jpg.name):
+                if rel not in placed and rel not in done and not jpg.parent.name.startswith("_") and JPG_SIZE.search(jpg.name) and ok(jpg):
                     rows.append((root, rel, jpg, None))
         return rows
 

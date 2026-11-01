@@ -204,6 +204,7 @@ def specs_from(body: dict, ledger) -> list:
         body.setdefault("retouch_bottoms", True)
     body.setdefault("drive_layout", "catalogue")  # the shop's colour / set-type folders on Google Drive
     body.setdefault("free_after_upload", True)  # the server keeps base photos; finished JPGs live on Drive
+    body.setdefault("qc_agent", True)  # every base and finished photo checked; only passed photos go to Drive
     if not body.get("first_model"):
         body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
     first = studio.Spec(**body)
@@ -294,10 +295,10 @@ class Studio:
 
     def start(self, body: dict) -> Job:
         stage = body.pop("stage", "all")
-        redo = stage in ("redo", "redo_prints")  # make finished photos again (no AI)
+        redo = stage in ("redo", "redo_prints", "qc")  # make finished photos again
         stage = {"redo": "recolor", "redo_prints": "prints"}.get(stage, stage)
-        if stage not in ("all", "bases", "recolor", "prints"):
-            raise ValueError("stage must be all, bases, recolor, redo or prints")
+        if stage not in ("all", "bases", "recolor", "prints", "qc"):
+            raise ValueError("stage must be all, bases, recolor, redo, qc or prints")
         if stage == "prints" and not self.cloud:
             raise ValueError("Prints come from Google Drive print folders, in the website version")
         workers = max(1, min(16, int(body.pop("workers", self.workers) or 1)))  # parallel AI requests
@@ -307,7 +308,7 @@ class Studio:
         ledger = studio.ModelLedger(self.out)
         specs = specs_from(body, ledger)
         spec = specs[0]
-        hit = ledger.clash(spec) if stage not in ("recolor", "prints") else None  # recolouring makes no new faces
+        hit = ledger.clash(spec) if stage not in ("recolor", "prints", "qc") else None  # recolouring makes no new faces
         if hit:
             raise ValueError(f"Models {hit['first']}-{hit['last']} of {spec.category} are already in batch {hit['batch']}, "
                              f"so those faces would repeat. Start at model no. {ledger.next_free(spec.category)} "
@@ -955,6 +956,17 @@ def make_handler(app: Studio):
                         raise ValueError(f"{name} is running: stop it first")
                     shutil.rmtree(b.root)
                     return self._json({"deleted": name})
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "qc":
+                    # the QC agent re-checks a whole batch: bad bases made again, every photo recoloured and checked
+                    spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())
+                    return self._json(app.start({**spec, "qc_agent": True, "stage": "qc", "same_models": True}).status())
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "approve":
+                    # a person approves held photos: {"photos": ["m0014/Red__Red/front_main_2000x2000.jpg", ...]}
+                    b = app.batch_for(unquote(parts[2]))
+                    n = studio.approve(b.root, (self._body() or {}).get("photos") or [])
+                    if app.cloud and getattr(app.cloud, "sync", None):
+                        app.cloud.sync.wake.set()
+                    return self._json({"approved": n})
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "redo":
                     # Dashboard: recolour a whole batch again with the latest recolouring (no AI)
                     spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())
