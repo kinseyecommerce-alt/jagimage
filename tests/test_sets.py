@@ -2,6 +2,7 @@ import io
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from jagimage import library as L
 from jagimage import sheets, studio
@@ -134,3 +135,39 @@ def test_sets_plan_upload_prices_and_runs_on_the_website(tmp_path, shop_colours,
         assert list(out.glob("Kids_Girls_HalfSleeveTee_Shorts_CottonMix_Coord/m*/White__Black/back_*.jpg"))
     finally:
         httpd.shutdown()
+
+
+def test_finished_photos_go_to_drive_in_catalogue_folders_and_leave_the_server(tmp_path, shop_colours):
+    from jagimage.cloud import DriveSync
+
+    class FakeDrive:
+        connected = True
+
+        def __init__(self):
+            self.files = {}
+
+        def upload(self, local, parts, name):
+            self.files["/".join(parts + [name])] = Image.open(local).size
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"], ["Red", "Black"], ["White", "Black"]], poses=["front_main", "back"],
+                     one_base=True, keep_png=False, drive_layout="catalogue", free_after_upload=True)
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    assert b.run()["recoloured"] == 6
+    drive = FakeDrive()
+    sync = DriveSync(drive, lambda: str(tmp_path))
+    sync.run_once()
+    got = sorted(drive.files)
+    assert got == sorted([
+        "Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Boys/Red/Co-ords/Half sleeve set/m0001_back.jpg",
+        "Boys/Red/Half sleeve/m0001_front.jpg", "Boys/Red/Half sleeve/m0001_back.jpg",   # single tops, from the co-ord
+        "Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_front.jpg", "Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_back.jpg",
+        "Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg", "Boys/White/Combo sets/White-Black/Half sleeve set/m0001_back.jpg",
+        "Boys/White/Half sleeve/m0001_front.jpg", "Boys/White/Half sleeve/m0001_back.jpg",  # White: no co-ord, single from its combo
+    ])
+    assert all(size == (2000, 2000) for size in drive.files.values())
+    assert not list((tmp_path / sp.name).glob("m*/*/*.jpg"))   # every finished JPG left the server
+    assert list((tmp_path / sp.name).glob("m*/_base/*/*.png"))   # base photos stay, for recolouring again
+    again = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
+    assert again["recoloured"] == 0 and again["recolour_skipped"] == 6  # a resumed batch knows they are done
+    assert sync.run_once() == 0  # nothing new to upload

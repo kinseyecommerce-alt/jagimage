@@ -360,28 +360,93 @@ class Drive:
 
 
 class DriveSync:
-    """Every minute, uploads finished marketplace JPGs that aren't on Drive yet, as
-    <photos folder>/<batch>/<Top__Bottom>/<model>_<pose>.jpg. Survives restarts: what is uploaded is
-    listed in each batch folder's _drive.txt."""
+    """Every minute, uploads finished marketplace JPGs that aren't on Drive yet: as
+    <photos folder>/<batch>/<Top__Bottom>/<model>_<pose>.jpg, or for batches with drive_layout "catalogue" in
+    the shop's folders (jagimage.catalogue), single tops cut on the way. With free_after_upload a JPG leaves the
+    server once all its files are on Drive. Survives restarts: what is uploaded is listed in each batch folder's
+    _drive.txt, what was taken off the server in _freed.txt."""
 
     def __init__(self, drive: Drive, out_dir: Callable[[], str], every: float = 60):
         self.drive, self.out_dir, self.every = drive, out_dir, every
-        self.status = {"uploaded": 0, "pending": 0, "last_error": None, "last_run": None}
+        self.status = {"uploaded": 0, "pending": 0, "freed": 0, "last_error": None, "last_run": None}
         self.wake = threading.Event()
         self.lock = threading.Lock()
 
+    @staticmethod
+    def _batch(root: Path):
+        from . import studio
+
+        try:
+            spec = studio.Spec(**json.loads((root / "spec.json").read_text()))
+        except Exception:  # an old or broken spec: the plain batch layout
+            return None
+        return studio.Batch(spec, out=root.parent)
+
     def pending(self) -> list:
+        """(batch folder, key, jpg, upload info) still to send; info None for the plain batch layout."""
+        from . import catalogue
+
         rows = []
         for spec in Path(self.out_dir()).glob("*/spec.json"):
-            batch = spec.parent
-            done_file = batch / "_drive.txt"
+            root = spec.parent
+            done_file = root / "_drive.txt"
             with DRIVE_LIST_LOCK:
                 done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
-            for jpg in sorted(batch.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg")):  # <model>/<Top__Bottom>/<pose>_<w>x<h>.jpg
-                rel = jpg.relative_to(batch).as_posix()
-                if rel not in done and not jpg.parent.name.startswith("_") and JPG_SIZE.search(jpg.name):
-                    rows.append((batch, rel, jpg))
+            b = self._batch(root)
+            placed = set()
+            if b is not None and b.spec.drive_layout == "catalogue":
+                for f in catalogue.files(b):
+                    placed.add(f["rel"])
+                    if f["key"] not in done:
+                        rows.append((root, f["key"], f["src"], f))
+            for jpg in sorted(root.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg")):  # <model>/<Top__Bottom>/<pose>_<w>x<h>.jpg
+                rel = jpg.relative_to(root).as_posix()
+                if rel not in placed and rel not in done and not jpg.parent.name.startswith("_") and JPG_SIZE.search(jpg.name):
+                    rows.append((root, rel, jpg, None))
         return rows
+
+    def _send(self, root: Path, key: str, jpg: Path, info) -> None:
+        if info is None:
+            model, pair = jpg.parent.parent.name, jpg.parent.name
+            self.drive.upload(jpg, [root.name, pair], f"{model}_{jpg.name.rsplit('_', 1)[0]}.jpg")
+            return
+        if not info["crop"]:
+            self.drive.upload(jpg, info["parts"], info["name"])
+            return
+        import tempfile
+
+        from . import catalogue
+
+        with tempfile.TemporaryDirectory() as tmp:  # the single top is cut now, never stored on the server
+            single = Path(tmp) / info["name"]
+            single.write_bytes(catalogue.single_top(self._batch(root), info))
+            self.drive.upload(single, info["parts"], info["name"])
+
+    def _free(self, root: Path) -> int:
+        """Takes a batch's JPGs off the server once every file made from them is on Drive."""
+        b = self._batch(root)
+        if b is None or not b.spec.free_after_upload:
+            return 0
+        from . import catalogue
+
+        with DRIVE_LIST_LOCK:
+            done_file = root / "_drive.txt"
+            done = set(done_file.read_text().splitlines()) if done_file.exists() else set()
+        keys: dict = {}
+        if b.spec.drive_layout == "catalogue":
+            for f in catalogue.files(b):
+                keys.setdefault(f["rel"], []).append(f["key"])
+        for jpg in root.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg"):
+            rel = jpg.relative_to(root).as_posix()
+            keys.setdefault(rel, [rel])
+        gone = [rel for rel, ks in keys.items() if all(k in done for k in ks) and (root / rel).exists()]
+        if gone:
+            with DRIVE_LIST_LOCK:
+                with open(root / "_freed.txt", "a") as fh:
+                    fh.writelines(f"{rel}\n" for rel in gone)
+            for rel in gone:
+                (root / rel).unlink(missing_ok=True)
+        return len(gone)
 
     def run_once(self) -> int:
         if not self.drive.connected:
@@ -389,23 +454,24 @@ class DriveSync:
         with self.lock:
             todo = self.pending()
             self.status.update(pending=len(todo), last_run=round(time.time()))
-            sent = 0
-            for batch, rel, jpg in todo:
-                model, pair = jpg.parent.parent.name, jpg.parent.name
-                pose = jpg.name.rsplit("_", 1)[0]
+            sent, roots = 0, set()
+            for root, key, jpg, info in todo:
                 try:
-                    self.drive.upload(jpg, [batch.name, pair], f"{model}_{pose}.jpg")
+                    self._send(root, key, jpg, info)
                 except Exception as exc:  # network, quota, revoked access: try again next round
                     self.status["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
                     break
                 with DRIVE_LIST_LOCK:
-                    with open(batch / "_drive.txt", "a") as f:
-                        f.write(rel + "\n")
+                    with open(root / "_drive.txt", "a") as f:
+                        f.write(key + "\n")
                 sent += 1
+                roots.add(root)
                 self.status["uploaded"] += 1
                 self.status["pending"] = len(todo) - sent
             else:
                 self.status["last_error"] = None
+            for root in roots:
+                self.status["freed"] += self._free(root)
             return sent
 
     def start(self):

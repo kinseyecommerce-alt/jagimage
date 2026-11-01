@@ -202,6 +202,8 @@ def specs_from(body: dict, ledger) -> list:
         tops = tops[:1] + [t for t in tops[1:] if t in studio.tops_for(body["category"])]
     if body.get("provider", "gemini") == "gemini":  # Gemini draws drawstrings and pockets: on unless turned off
         body.setdefault("retouch_bottoms", True)
+    body.setdefault("drive_layout", "catalogue")  # the shop's colour / set-type folders on Google Drive
+    body.setdefault("free_after_upload", True)  # the server keeps base photos; finished JPGs live on Drive
     if not body.get("first_model"):
         body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
     first = studio.Spec(**body)

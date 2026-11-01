@@ -135,6 +135,8 @@ class Spec:
     colour_pairs: List[List] = field(default_factory=list)
     set_type: str = ""       # coord (same colour top and bottom), combo (contrast colours), or empty
     retouch_bottoms: bool = False  # Gemini: an edit pass takes drawstrings and pockets off plain shorts and pants
+    drive_layout: str = "batch"    # Google Drive: "batch" folders, or the shop's "catalogue" folders (jagimage.catalogue)
+    free_after_upload: bool = False  # take each finished JPG off the server once it is on Google Drive
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -180,6 +182,8 @@ class Spec:
             self._check_pairs()
         if self.pairing not in ("match", "each", "pairs"):
             raise ValueError("pairing must be match, each or pairs")
+        if self.drive_layout not in ("batch", "catalogue"):
+            raise ValueError("drive_layout must be batch or catalogue")
         if self.set_type not in ("", "coord", "combo"):
             raise ValueError("set_type must be coord or combo")
         if self.provider not in ("gemini", "openai", "meta", "runpod"):
@@ -942,8 +946,13 @@ class Batch:
         rel = path.with_name(f"{pose}_{c[0]}x{c[1]}.jpg").relative_to(self.root).as_posix()
         with DRIVE_LIST_LOCK:
             lines = done.read_text().splitlines()
-            if rel in lines:
-                done.write_text("".join(f"{x}\n" for x in lines if x != rel))
+            keep = [x for x in lines if x != rel and not x.startswith(rel + "#")]  # its single top too
+            if len(keep) != len(lines):
+                done.write_text("".join(f"{x}\n" for x in keep))
+            freed = self.root / "_freed.txt"  # remade: it is on the server again until it is uploaded
+            if freed.exists():
+                left = [x for x in freed.read_text().splitlines() if x != rel]
+                freed.write_text("".join(f"{x}\n" for x in left))
 
     def run_prints(self):
         """Every print the shop has for this category, top style and colour, on every finished front photo
@@ -1141,9 +1150,20 @@ class Batch:
 
     # ---- results
     def made(self, path: Path, pose: str) -> bool:
-        """A recoloured photo exists: its PNG, or only its marketplace JPG when PNGs aren't kept."""
+        """A recoloured photo exists: its PNG, or only its marketplace JPG when PNGs aren't kept, or that JPG
+        went to Google Drive and was taken off the server."""
         c = self.spec.canvas
-        return path.exists() or bool(c and path.with_name(f"{pose}_{c[0]}x{c[1]}.jpg").exists())
+        if path.exists():
+            return True
+        if not c:
+            return False
+        jpg = path.with_name(f"{pose}_{c[0]}x{c[1]}.jpg")
+        if jpg.exists():
+            return True
+        if not hasattr(self, "_freed"):
+            from .catalogue import freed
+            self._freed = freed(self.root)
+        return jpg.relative_to(self.root).as_posix() in self._freed
 
     def results(self) -> List[dict]:
         """Every finished photo: model, top, bottom, pose, paths (relative to the batch folder; png is
