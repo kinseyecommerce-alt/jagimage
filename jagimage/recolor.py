@@ -33,7 +33,8 @@ SHADOW_RING = 2         # px just outside the garment whose noisy AI shadow is s
 SHADOW_SMOOTH = 1.2     # px blur for that ring
 PIECE_NEAR = 0.08       # of photo height: a smaller piece this close to the garment is part of it (seen past an arm)
 PIECE_MIN = 0.003       # of the garment's size: smaller specks are noise, not fabric
-MASK_VERSION = 8       # bump when garment_mask changes: masks saved by older code are made again
+MASK_VERSION = 9       # bump when garment_mask changes: masks saved by older code are made again
+SPLIT_REACH = 0.025     # of photo height: how far from where top and bottom meet the split is redrawn along the photo's edges
 QC_RING = 10           # px beside the garment checked for colour bleeding (beyond its 2 px blended edge)
 QC_BLEED_MAX = 60      # more bled pixels than this flags a photo
 QC_LEFT_MAX = 40       # more pixels still in the base colour than this flags a photo
@@ -496,6 +497,39 @@ def _composite(rgb, new, mask, gain=1.0, inside=2, outside=3, garment=None, back
             out[ry, rx] = num / np.maximum(den, 1e-6)[:, None]
     return np.round(np.clip(out, 0, 255)).astype(np.uint8)
 
+
+
+def split_outfit(lab: np.ndarray, top: np.ndarray, bottom: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Where top and bottom meet, redraw the line between them along the photo's own edge (like a quick
+    selection), not by colour: the AI lights a sleeve hanging beside the pants with their colour, so a
+    colour split gives part of the sleeve to the pants and leaves a strip to neither. Sure parts of each
+    garment are the seeds; the pixels between them go to whichever garment floods them first across the
+    weakest edges. Backdrop and skin are walls."""
+    R = max(8, int(SPLIT_REACH * lab.shape[0]))
+    t, b = top > 0.5, bottom > 0.5
+    if not t.any() or not b.any():
+        return top, bottom
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    skin = (lab[..., 1] > 0.015) & (lab[..., 2] > 0.02) & (C > 0.04)
+    near = (ndimage.distance_transform_edt(~t) <= R) & (ndimage.distance_transform_edt(~b) <= R)
+    gap = near & ~t & ~b & ~backdrop_mask(lab) & ~skin  # fabric left to neither: a reflection or shadow
+    zone = near & (t | b | gap)
+    if not zone.any():
+        return top, bottom
+    g = np.zeros(lab.shape[:2], np.float32)
+    for k, w in ((0, 1.0), (1, 2.0), (2, 2.0)):  # colour edges count as much as lightness edges
+        c = ndimage.gaussian_filter(lab[..., k].astype(np.float32), 1.0)
+        g += w * np.hypot(ndimage.sobel(c, 0), ndimage.sobel(c, 1))
+    gi = np.clip(g / max(float(np.percentile(g[zone], 99)), 1e-6) * 65535, 0, 65535).astype(np.uint16)
+    markers = np.zeros(lab.shape[:2], np.int16)
+    markers[t & ~zone], markers[b & ~zone] = 1, 2
+    markers[~(t | b | gap)] = 3
+    lbl = ndimage.watershed_ift(gi, markers)
+    a = np.maximum(np.maximum(top, bottom), gap.astype(np.float32))
+    top, bottom = top.copy(), bottom.copy()
+    top[zone] = np.where(lbl[zone] == 1, a[zone], 0)
+    bottom[zone] = np.where(lbl[zone] == 2, a[zone], 0)
+    return top, bottom
 
 def fit_canvas(img: Image.Image, width: int = 1500, height: int = 1500) -> Image.Image:
     """Marketplace canvas (e.g. 1500x1500): scale the photo to fit, then extend the studio

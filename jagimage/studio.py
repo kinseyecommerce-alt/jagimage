@@ -95,9 +95,12 @@ def _base_hued(lab, base):
 
 RETOUCH_BOTTOMS = ("Edit image 1. Change only the shorts or pants: remove the drawstring cords, their ends and eyelets, and remove "
                    "every pocket and pocket opening, so the waistband is a clean flat band covered in the same fabric and the "
-                   "front and sides are completely plain and smooth, with only the outer side seam. Keep everything else exactly "
+                   "front and sides are completely plain and smooth, with only the outer side seam. The top stays untucked, its hem "
+                   "hanging over the waistband (never tuck it in). Keep everything else exactly "
                    "the same: the child, face, hair, pose, hands, the top, all colours (the top's and the bottom's), lighting, "
                    "background, framing and image size. Return one photo.")
+UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the waistband of the bottom, which is hidden under "
+                 "the top's hem; the top is never tucked in.")
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
 
 
@@ -410,6 +413,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
         text += L.KIDS_RULE
     product = "Trackpants" if spec.bottom == "Trackpants" else spec.top
     negative = L.build_negative(spec.category, product, pose)
+    if not top_only:  # the top's hem over the waistband in every pose, as the shop sells them
+        text += UNTUCKED_RULE
+        negative += ", top tucked into the pants or shorts, waistband over the top"
     if spec.bottom == "Trackpants":
         text += L.JOGGER_RULE
     if positive:
@@ -829,7 +835,7 @@ class Batch:
         import numpy as np
         from PIL import Image
 
-        from .recolor import MASK_VERSION, MaskError, garment_mask, rgb_to_lab, save_mask
+        from .recolor import MASK_VERSION, MaskError, garment_mask, rgb_to_lab, save_mask, split_outfit
 
         lab = rgb_to_lab(np.asarray(Image.open(path).convert("RGB")))
         why = backdrop_problem(lab)
@@ -845,6 +851,7 @@ class Batch:
             # pixel is left to neither (the waistband shadow keeping the base colour)
             bottom = np.where(bottom > top, bottom, np.minimum(bottom, 1 - top))
             top = np.where(top >= bottom, top, np.minimum(top, 1 - bottom))
+            top, bottom = split_outfit(lab, top, bottom)  # a sleeve lit by the pants' colour stays sleeve
             masks["top"] = top
             if (bottom > 0.95).sum() < 0.002 * bottom.size:
                 raise MaskError("the bottom isn't in its base colour")
