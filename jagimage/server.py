@@ -205,6 +205,8 @@ def specs_from(body: dict, ledger) -> list:
     body.setdefault("drive_layout", "catalogue")  # the shop's colour / set-type folders on Google Drive
     body.setdefault("free_after_upload", True)  # the server keeps base photos; finished JPGs live on Drive
     body.setdefault("qc_agent", True)  # every base and finished photo checked; only passed photos go to Drive
+    # one shoot, every fabric's colours: the same models are recoloured into the other fabric's list too
+    body.setdefault("also_fabrics", [f for f in L.FABRICS if f != body.get("fabric", "PureCotton")])
     if not body.get("first_model"):
         body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
     first = studio.Spec(**body)

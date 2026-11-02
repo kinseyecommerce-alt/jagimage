@@ -115,6 +115,27 @@ UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the wais
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
 
 
+def fabric_twin(spec: "Spec", fabric: str) -> "Spec":
+    """The batch that recolours `spec`'s models into `fabric`'s colours from its base photos: a co-ord in every
+    colour of that fabric's list (white with the black bottom), plus the batch's own combos where both colours
+    are made in that fabric too."""
+    names = list(L.colours_for(fabric, spec.category))
+    body = {k: v for k, v in asdict(spec).items() if k not in ("name", "also_fabrics", "base_from")}
+    body.update(fabric=fabric, base_from=spec.name, also_fabrics=[])
+    if spec.shot != "outfit":
+        body.update(top_colours=names, colour_pairs=[], pairing="match")
+        return Spec(**body)
+    n = max(1, spec.models)
+    pairs = [[c, WHITE_TOP_BOTTOM if is_white(c, fabric) else c, n] for c in names]
+    seen = {(t, b) for t, b, _ in pairs}
+    for t, b in spec.pairs():
+        if b and t != b and t in names and b in names and (t, b) not in seen:
+            pairs.append([t, b, n])
+            seen.add((t, b))
+    body.update(colour_pairs=pairs, pairing="pairs", top_colours=[p[0] for p in pairs], bottom_colours=[])
+    return Spec(**body)
+
+
 def approve(root: Path, photos: list) -> int:
     """A person approves photos the QC agent held (paths like m0014/Red__Red/front_main_2000x2000.jpg):
     they are uploaded on the next Drive round."""
@@ -175,6 +196,10 @@ class Spec:
     drive_layout: str = "batch"    # Google Drive: "batch" folders, or the shop's "catalogue" folders (jagimage.catalogue)
     free_after_upload: bool = False  # take each finished JPG off the server once it is on Google Drive
     qc_agent: bool = False  # the QC agent checks base photos and finished photos; only passed photos are uploaded
+    # the same models recoloured into these fabrics' colours too (no new AI photos): each becomes a twin batch
+    # <..._PureCotton...> that reads this batch's base photos and goes to its own fabric folder on Drive
+    also_fabrics: List[str] = field(default_factory=list)
+    base_from: str = ""      # a twin batch: the batch whose base photos it recolours (it never makes its own)
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -284,6 +309,11 @@ class Spec:
                 raise ValueError("canvas must be width and height between 200 and 6000 px")
         else:
             self.keep_png = True  # without a marketplace JPG the PNG is the only copy
+        self.also_fabrics = [f for f in dict.fromkeys(self.also_fabrics or []) if f != self.fabric]
+        if any(f not in L.FABRICS for f in self.also_fabrics):
+            raise ValueError(f"also_fabrics: each must be one of {', '.join(L.FABRICS)}")
+        if self.base_from and (not SAFE_NAME.match(self.base_from) or ".." in self.base_from):
+            raise ValueError("base_from: a batch name")
         if not self.name:
             self.name = slug(f"{self.category}_{self.top}_{self.bottom}_{self.fabric}" + ("_top_only" if self.shot == "top" else "")
                              + (f"_{self.set_type.capitalize()}" if self.set_type else "")
@@ -675,6 +705,8 @@ class Batch:
         return self.root / f"m{m:04d}"
 
     def base_path(self, m: int, base, pose: str) -> Path:
+        if self.spec.base_from:  # a twin batch reads the base photos of the batch it was made from
+            return self.root.parent / self.spec.base_from / f"m{m:04d}" / "_base" / base_dir(base) / f"{pose}.png"
         return self.model_dir(m) / "_base" / base_dir(base) / f"{pose}.png"
 
     def out_path(self, m: int, top: str, bottom: Optional[str], pose: str) -> Path:
@@ -695,6 +727,8 @@ class Batch:
         if stage == "prints":
             self.run_prints()
             return self.counts
+        if self.spec.base_from:  # a twin only recolours the base photos of its source batch
+            stage = "recolor"
         if stage == "qc":  # the QC agent looks at the bases already made; rejected ones are made again
             if self.generate is None:
                 raise RuntimeError("Re-checking bases needs the image engine (its API key)")
@@ -714,7 +748,20 @@ class Batch:
             stage = "recolor"  # every base is made (or has failed): recolour them all
         with ThreadPoolExecutor(max_workers=max(1, self.workers)) as pool:
             list(pool.map(lambda m: self.run_model(m, stage), self.spec.model_numbers()))
+        if stage != "bases" and not self.stop.is_set():
+            self._run_twins()
         return self.counts
+
+    def _run_twins(self):
+        """The same models recoloured into each of also_fabrics' colours, in a twin batch per fabric."""
+        for fabric in self.spec.also_fabrics:
+            if self.stop.is_set():
+                return
+            twin = Batch(fabric_twin(self.spec, fabric), out=self.root.parent, generate=None, workers=self.workers,
+                         retries=self.retries, on_event=lambda e: self._event(e.pop("kind"), **e), redo=self.redo,
+                         inspector=self._inspector)  # its photos count in this batch's totals
+            twin.stop = self.stop
+            twin.run("recolor")
 
     def requalify(self):
         """The QC agent checks every base photo already made. A rejected one is deleted (with its masks) so the

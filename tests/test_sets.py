@@ -211,3 +211,40 @@ def test_each_fabric_has_its_own_drive_folder(tmp_path):
     b.run()
     parts = sorted("/".join(f["parts"]) for f in catalogue.files(b))
     assert parts == ["Pure Cotton/Girls/Red/Co-ords/Half sleeve set", "Pure Cotton/Girls/Red/Half sleeve"]
+
+
+def test_one_shoot_is_recoloured_into_both_fabrics_and_each_goes_to_its_own_folder(tmp_path, shop_colours):
+    from jagimage import catalogue
+    from jagimage.cloud import DriveSync
+
+    calls = []
+
+    def gen(prompt, refs):
+        calls.append(prompt)
+        return fake_generate(prompt, refs)
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=2,
+                     colour_pairs=[["Red", "Red", 2], ["Black", "Melange", 2], ["White", "Black", 2]], poses=["front_main"],
+                     one_base=True, keep_png=False, drive_layout="catalogue", also_fabrics=["PureCotton", "CottonMix"])
+    assert sp.also_fabrics == ["PureCotton"]  # its own fabric is never a twin
+    counts = studio.Batch(sp, out=tmp_path, generate=gen, workers=1).run()
+    shoots = [p for p in calls if p != studio.RETOUCH_BOTTOMS]
+    assert len(shoots) == 2  # one shoot per model, nothing more for the second fabric
+    twin = studio.fabric_twin(sp, "PureCotton")
+    pure = list(L.colours_for("PureCotton", "Kids_Boys"))
+    assert twin.name == "Kids_Boys_HalfSleeveTee_Shorts_PureCotton" and twin.base_from == sp.name
+    assert [p[0] for p in twin.colour_pairs] == pure and ["White", "Black", 2] in twin.colour_pairs
+    assert not any(p[:2] == ["Black", "Melange"] for p in twin.colour_pairs)  # no Melange in Pure Cotton
+    assert counts["recoloured"] == 2 * 3 + 2 * len(pure) and counts["errors"] == 0
+    assert not (tmp_path / twin.name / "m0001" / "_base").exists()  # the twin reads the Cotton Mix shoot
+    drive_files = []
+
+    class FakeDrive:
+        connected = True
+
+        def upload(self, local, parts, name):
+            drive_files.append("/".join(parts + [name]))
+    DriveSync(FakeDrive(), lambda: str(tmp_path)).run_once()
+    assert "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
+    assert "Pure Cotton/Boys/Navy/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
+    assert "Pure Cotton/Boys/Navy/Half sleeve/m0002_front.jpg" in drive_files  # single top cut from the shared base
+    assert "Pure Cotton/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg" in drive_files
