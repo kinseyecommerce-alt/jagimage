@@ -293,3 +293,12 @@ def test_a_tucked_top_is_looked_for_in_a_waist_close_up(tmp_path):
     waist = [size for m, size in shown if "close-up of a child's waist" in m]
     full = [size for m, size in shown if "close-up of a child's waist" not in m]
     assert waist and waist[0][0] < full[0][0]  # the close-up is a crop, not the whole photo
+
+
+def test_the_kids_bottom_photo_is_not_used_for_adults(tmp_path):
+    ref = studio.bottom_ref_path(tmp_path, "Trackpants")
+    ref.parent.mkdir(parents=True)
+    Image.new("RGB", (60, 120), (40, 40, 40)).save(ref)
+    b = studio.Batch(spec(category="Men", top="HalfSleeveTee", colour_pairs=[["Red", "Black"]]), out=tmp_path)
+    assert b.bottom_ref() is None
+    assert studio.Batch(spec(), out=tmp_path).bottom_ref() == ref

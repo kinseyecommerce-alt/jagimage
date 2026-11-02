@@ -881,8 +881,8 @@ class Batch:
 
     def bottom_ref(self) -> Optional[Path]:
         """The shop's product photo of this batch's bottom (uploaded once in Settings), for full outfit shots."""
-        if self.spec.shot != "outfit" or self.spec.bottom in FIXED_BOTTOMS:
-            return None
+        if self.spec.shot != "outfit" or self.spec.bottom in FIXED_BOTTOMS or not L.is_kids(self.spec.category):
+            return None  # the shop's photos are of its kids' shorts and pants
         f = bottom_ref_path(self.root.parent, self.spec.bottom)
         return f if f.exists() else None
 
