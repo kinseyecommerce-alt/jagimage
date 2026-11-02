@@ -1,4 +1,5 @@
-"""The shop's catalogue folders on Google Drive: every finished photo of a batch filed by colour and set type,
+"""The shop's catalogue folders on Google Drive: every finished photo of a batch filed by fabric, colour and set type,
+under <fabric>/ (Cotton Mix or Pure Cotton):
 <category>/<colour>/<style>/                                   single tops (cropped just above the knee)
 <category>/<colour>/Co-ords/<style> set/                       top and bottom in the same colour
 <category>/<colour>/Combo sets/<top>-<bottom>/<style> set/     contrast top and bottom
@@ -15,6 +16,7 @@ from PIL import Image
 
 from . import studio
 
+FABRIC_FOLDER = {"CottonMix": "Cotton Mix", "PureCotton": "Pure Cotton"}  # each fabric has its own top folder
 CATEGORY_FOLDER = {"Kids_Boys": "Boys", "Kids_Girls": "Girls", "Men": "Men", "Women": "Women"}
 STYLE_FOLDER = {"HalfSleeveTee": "Half sleeve", "SleevelessTee": "Sleeveless", "FullSleeveTee": "Full sleeve",
                 "Hoodie": "Hoodies", "Sweatshirt": "Sweatshirt", "OversizedTee": "Oversized", "ZipHoodie": "Zip hoodies"}
@@ -29,6 +31,7 @@ def files(batch: "studio.Batch") -> List[dict]:
     spec = batch.spec
     names = {studio.slug(c): c for c in spec.top_colours + spec.bottom_colours + [b for _, b, _ in spec.colour_pairs]}
     names.update({studio.slug(studio.WHITE_TOP_BOTTOM): studio.WHITE_TOP_BOTTOM})
+    fab = FABRIC_FOLDER.get(spec.fabric, spec.fabric)
     cat, style = CATEGORY_FOLDER.get(spec.category, spec.category), STYLE_FOLDER.get(spec.top, spec.top)
     rows = []
     for jpg in sorted(batch.root.glob("m[0-9][0-9][0-9][0-9]/*/*.jpg")):
@@ -49,14 +52,14 @@ def files(batch: "studio.Batch") -> List[dict]:
         t, b = r["top"], r["bottom"]
         name = f"{r['model']}_{POSE_NAME.get(r['pose'], r['pose'])}.jpg"
         if b is None:  # a top-only shot is the single top itself
-            out.append({**r, "key": r["rel"] + "#set", "parts": [cat, t, style], "name": name, "crop": False})
+            out.append({**r, "key": r["rel"] + "#set", "parts": [fab, cat, t, style], "name": name, "crop": False})
             continue
-        sets = [cat, t, "Co-ords", f"{style} set"] if t == b else [cat, t, "Combo sets", f"{t}-{b}", f"{style} set"]
+        sets = [fab, cat, t, "Co-ords", f"{style} set"] if t == b else [fab, cat, t, "Combo sets", f"{t}-{b}", f"{style} set"]
         # keys differ from the batch layout's (the bare path), so photos sent there before are filed here too
         out.append({**r, "key": r["rel"] + "#set", "parts": sets, "name": name, "crop": False})
         base_png = batch.base_path(int(r["model"][1:]), spec.base_key(t, b), r["pose"])
         if (t == b or single_from.get(t) == b) and base_png.exists():  # the cut needs the base's size and bottom mask
-            out.append({**r, "key": r["rel"] + "#single", "parts": [cat, t, style], "name": name, "crop": True})
+            out.append({**r, "key": r["rel"] + "#single", "parts": [fab, cat, t, style], "name": name, "crop": True})
     return out
 
 

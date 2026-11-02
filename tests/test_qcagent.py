@@ -80,7 +80,7 @@ def test_only_passed_photos_go_to_drive_and_a_person_can_approve_the_rest(tmp_pa
     assert studio.approve(b.root, ["m0001/Red__Red/back_2000x2000.jpg", "../../etc/passwd.jpg"]) == 1
     drive.files.clear()
     sync.run_once()
-    assert sorted(drive.files) == ["Girls/Red/Co-ords/Hoodies set/m0001_back.jpg", "Girls/Red/Hoodies/m0001_back.jpg"]
+    assert sorted(drive.files) == ["Cotton Mix/Girls/Red/Co-ords/Hoodies set/m0001_back.jpg", "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg"]
 
 
 def test_bleed_is_put_back_and_leftover_base_colour_painted():
@@ -241,8 +241,8 @@ def test_drive_upload_skips_a_photo_whose_base_went_and_sends_the_rest(tmp_path)
     b.base_path(1, ("light", "light"), "back").unlink()
     drive = FakeDrive()
     DriveSync(drive, lambda: str(tmp_path)).run_once()
-    assert "Girls/Red/Hoodies/m0001_front.jpg" in drive.files and "Girls/Red/Hoodies/m0001_back.jpg" not in drive.files
-    assert "Girls/Red/Co-ords/Hoodies set/m0001_back.jpg" in drive.files
+    assert "Cotton Mix/Girls/Red/Hoodies/m0001_front.jpg" in drive.files and "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg" not in drive.files
+    assert "Cotton Mix/Girls/Red/Co-ords/Hoodies set/m0001_back.jpg" in drive.files
 
 
 def test_the_shops_bottom_photo_goes_with_every_outfit_shot_and_the_edit_runs_only_when_needed(tmp_path):

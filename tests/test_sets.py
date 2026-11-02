@@ -159,11 +159,11 @@ def test_finished_photos_go_to_drive_in_catalogue_folders_and_leave_the_server(t
     sync.run_once()
     got = sorted(drive.files)
     assert got == sorted([
-        "Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Boys/Red/Co-ords/Half sleeve set/m0001_back.jpg",
-        "Boys/Red/Half sleeve/m0001_front.jpg", "Boys/Red/Half sleeve/m0001_back.jpg",   # single tops, from the co-ord
-        "Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_front.jpg", "Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_back.jpg",
-        "Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg", "Boys/White/Combo sets/White-Black/Half sleeve set/m0001_back.jpg",
-        "Boys/White/Half sleeve/m0001_front.jpg", "Boys/White/Half sleeve/m0001_back.jpg",  # White: no co-ord, single from its combo
+        "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_back.jpg",
+        "Cotton Mix/Boys/Red/Half sleeve/m0001_front.jpg", "Cotton Mix/Boys/Red/Half sleeve/m0001_back.jpg",   # single tops, from the co-ord
+        "Cotton Mix/Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_back.jpg",
+        "Cotton Mix/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_back.jpg",
+        "Cotton Mix/Boys/White/Half sleeve/m0001_front.jpg", "Cotton Mix/Boys/White/Half sleeve/m0001_back.jpg",  # White: no co-ord, single from its combo
     ])
     assert all(size == (2000, 2000) for size in drive.files.values())
     assert not list((tmp_path / sp.name).glob("m*/*/*.jpg"))   # every finished JPG left the server
@@ -198,5 +198,16 @@ def test_photos_already_sent_in_the_batch_layout_are_filed_in_the_catalogue_too(
     (root / "spec.json").write_text(json.dumps({**spec, "drive_layout": "catalogue", "free_after_upload": True}))
     drive.files.clear()
     assert DriveSync(drive, lambda: str(tmp_path)).run_once() == 2
-    assert sorted(drive.files) == ["Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Boys/Red/Half sleeve/m0001_front.jpg"]
+    assert sorted(drive.files) == ["Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/Red/Half sleeve/m0001_front.jpg"]
     assert not list(root.glob("m*/*/*.jpg"))
+
+
+def test_each_fabric_has_its_own_drive_folder(tmp_path):
+    from jagimage import catalogue
+
+    sp = studio.Spec(category="Kids_Girls", top="HalfSleeveTee", bottom="Shorts", fabric="PureCotton", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False, drive_layout="catalogue")
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    parts = sorted("/".join(f["parts"]) for f in catalogue.files(b))
+    assert parts == ["Pure Cotton/Girls/Red/Co-ords/Half sleeve set", "Pure Cotton/Girls/Red/Half sleeve"]
