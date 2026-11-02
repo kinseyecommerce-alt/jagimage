@@ -317,7 +317,7 @@ def test_studio_server_runs_a_batch(tmp_path):
         assert code == 200 and b"Jag Studio" in page
         opts = json.loads(_get(base + "/api/options")[1])
         assert "Kids_Girls" in opts["categories"] and "Navy" in opts["palettes"]["PureCotton"]
-        body = {"category": "Kids_Girls", "top": "HalfSleeveTee", "bottom": "Shorts", "top_colours": ["Red", "White"],
+        body = {"category": "Kids_Girls", "top": "HalfSleeveTee", "bottom": "Shorts", "top_colours": ["Red", "White"], "also_fabrics": [],
                 "bottom_colours": [], "pairing": "match", "models": 3}
         code, plan = _post(base + "/api/plan", body)
         assert code == 200 and plan["ai_images"] == 12 and plan["recoloured_images"] == 6  # 6 photos + Gemini's 6 edits
@@ -595,7 +595,7 @@ def test_server_runs_the_same_models_in_several_styles(tmp_path):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     try:
-        body = {"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy", "White"],
+        body = {"category": "Men", "top": "HalfSleeveTee", "bottom": "Trackpants", "top_colours": ["Navy", "White"], "also_fabrics": [],
                 "models": 2, "tops": ["FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]}
         code, plan = _post(base + "/api/plan", dict(body))
         one = _post(base + "/api/plan", {k: v for k, v in body.items() if k != "tops"})[1]

@@ -276,7 +276,12 @@ def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path, monke
             time.sleep(0.1)
         assert runs[0]["done"] == 1 and runs[0]["error"] is None
         jobs = json.loads(call(base + "/api/jobs", cookie=cookie)[2])["jobs"]
-        assert jobs[0]["counts"]["recoloured"] == 24 and jobs[0]["counts"]["errors"] == 0
+        assert jobs[0]["counts"]["errors"] == 0
+        out = tmp_path / "out"
+        main = [p for p in out.glob("*PureCotton*/m*/*/*.png") if "_base" not in p.parts]
+        assert len(main) == 24  # the planned photos (Pure Cotton); the same models in Cotton Mix colours come on top
+        twin = [p for p in out.glob("*CottonMix*/m*/*/*.png")]
+        assert twin and jobs[0]["counts"]["recoloured"] == 24 + len(twin)
         assert jobs[0]["name"].endswith("_top_only")  # Half Sleeve starts as Top only unless asked for full body
         assert call(base + "/api/agent/start", {"plan_id": plan["plan_id"]}, cookie=cookie)[0] == 400  # used once
     finally:

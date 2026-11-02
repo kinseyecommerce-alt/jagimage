@@ -138,7 +138,8 @@ class Job:
     def event(self, e: dict):
         e = {**e, "t": round(time.time() - self.started, 1), "style": self.batch.spec.top}
         if e["kind"] == "recoloured" and self.batch is self.batches[0]:
-            self.recent.appendleft(str(Path(e["path"]).relative_to(self.batch.root)))
+            p = Path(e["path"])  # a twin fabric's photos are in their own batch folder, beside this one
+            self.recent.appendleft(str(p.relative_to(self.batch.root) if self.batch.root in p.parents else p.relative_to(self.batch.root.parent)))
         if e["kind"] in ("ai_done", "recoloured", "errors", "batch"):
             self.log.appendleft(e)
         if e["kind"] == "batch":
