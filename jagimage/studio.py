@@ -130,9 +130,10 @@ def archived(path: Path) -> bool:
 
 
 def fabric_twin(spec: "Spec", fabric: str) -> "Spec":
-    """The batch that recolours `spec`'s models into `fabric`'s colours from its base photos: a co-ord in every
-    colour of that fabric's list (white with the black bottom), plus the batch's own combos where both colours
-    are made in that fabric too."""
+    """The batch that recolours `spec`'s models into `fabric`'s top colours from its base photos. The bottoms are
+    the same range as the source batch's (bottom_fabric): each top colour with the bottom of the same name when
+    that bottom is made (a co-ord, in the bottom fabric's shade), else with the black bottom; plus the batch's own
+    combos whose top is in this fabric's list."""
     names = list(L.colours_for(fabric, spec.category))
     body = {k: v for k, v in asdict(spec).items() if k not in ("name", "also_fabrics", "base_from")}
     body.update(fabric=fabric, base_from=spec.name, also_fabrics=[])
@@ -140,10 +141,14 @@ def fabric_twin(spec: "Spec", fabric: str) -> "Spec":
         body.update(top_colours=names, colour_pairs=[], pairing="match")
         return Spec(**body)
     n = max(1, spec.models)
-    pairs = [[c, WHITE_TOP_BOTTOM if is_white(c, fabric) else c, n] for c in names]
+    # the bottoms stay the source batch's (one bottom range for every top fabric): a top colour gets the bottom of
+    # the same name when that bottom is made (a co-ord), else the black one; plus the batch's combos that fit
+    bottoms = [c for c in L.colours_for(spec.bfab, spec.category) if not is_white(c, spec.bfab)]
+    body["bottom_fabric"] = spec.bfab
+    pairs = [[c, c if (c in bottoms and not is_white(c, fabric)) else WHITE_TOP_BOTTOM, n] for c in names]
     seen = {(t, b) for t, b, _ in pairs}
     for t, b in spec.pairs():
-        if b and t != b and t in names and b in names and (t, b) not in seen:
+        if b and t != b and t in names and b in bottoms and (t, b) not in seen:
             pairs.append([t, b, n])
             seen.add((t, b))
     body.update(colour_pairs=pairs, pairing="pairs", top_colours=[p[0] for p in pairs], bottom_colours=[])
@@ -214,6 +219,7 @@ class Spec:
     # <..._PureCotton...> that reads this batch's base photos and goes to its own fabric folder on Drive
     also_fabrics: List[str] = field(default_factory=list)
     base_from: str = ""      # a twin batch: the batch whose base photos it recolours (it never makes its own)
+    bottom_fabric: str = ""  # the bottoms' fabric when it isn't the top's (Pure Cotton tops, Cotton Mix bottoms): its colours
     shot: str = "outfit"     # outfit: full body, top and bottom recoloured; top: above the knee, only the top
     bottom_colour: str = "Navy"  # top-only shots: the bottom in this colour as the AI makes it (not recoloured)
     models: int = 1
@@ -309,9 +315,13 @@ class Spec:
         self.first_model = int(self.first_model)
         if self.first_model < 1 or self.first_model + int(self.models) - 1 > faces.capacity(self.category):
             raise ValueError(f"model numbers go from 1 to {faces.capacity(self.category)} for {self.category}")
-        for c in self.top_colours + self.bottom_colours:
+        if self.bottom_fabric and self.bottom_fabric not in L.FABRICS:
+            raise ValueError(f"bottom_fabric must be one of {', '.join(L.FABRICS)}")
+        for c in self.top_colours:
             colour_hex(c, self.fabric)
-        whites = [c for c in self.bottom_colours if is_white(c, self.fabric)]
+        for c in self.bottom_colours:
+            colour_hex(c, self.bfab)
+        whites = [c for c in self.bottom_colours if is_white(c, self.bfab)]
         if whites:
             raise ValueError(f"Bottoms aren't made in white: take {', '.join(whites)} out of the bottom colours")
         if self.canvas:
@@ -335,6 +345,11 @@ class Spec:
         if not SAFE_NAME.match(self.name) or ".." in self.name:  # a folder inside the photos folder, nothing else
             raise ValueError("batch name: letters, digits, dot, dash and underscore only")
 
+    @property
+    def bfab(self) -> str:
+        """The fabric whose colour list the bottoms' colours come from."""
+        return self.bottom_fabric or self.fabric
+
     def pose_texts(self) -> Dict[str, str]:
         return {**L.POSES, **self.custom_poses}
 
@@ -348,8 +363,8 @@ class Spec:
             n = int(p[2]) if len(p) == 3 else int(self.models)
             if not 1 <= n <= int(self.models):
                 raise ValueError(f"{t}/{b}: models must be between 1 and {self.models}")
-            colour_hex(t, self.fabric), colour_hex(b, self.fabric)
-            if is_white(b, self.fabric):
+            colour_hex(t, self.fabric), colour_hex(b, self.bfab)
+            if is_white(b, self.bfab):
                 raise ValueError(f"Bottoms aren't made in white: {t}/{b}")
             if [t, b] in [r[:2] for r in rows]:
                 raise ValueError(f"{t}/{b} is listed twice")
@@ -378,7 +393,7 @@ class Spec:
         tb = base_of(colour_hex(top, self.fabric))
         if bottom == WHITE_TOP_BOTTOM and is_white(top, self.fabric):
             return (tb, tb)  # a white top's black bottom comes from the same light shoot: no extra AI photo
-        return (tb, base_of(colour_hex(bottom, self.fabric)) if bottom else None)
+        return (tb, base_of(colour_hex(bottom, self.bfab)) if bottom else None)
 
     def bases(self, m: Optional[int] = None) -> List[Tuple[str, Optional[str]]]:
         """The base shoots each model (or model m) needs, the most used first (that one is made from the text)."""
@@ -1297,7 +1312,7 @@ class Batch:
         spec = self.spec
         out, _, _ = recolor_image(img, TOP_BASES[base[0]][1], colour_hex(top, spec.fabric), mask=tmask, others=bmask if bottom else None)
         if bottom:
-            out, _, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], colour_hex(bottom, spec.fabric), mask=bmask, others=tmask)
+            out, _, _ = recolor_image(out, BOTTOM_BASES[base[1]][1], colour_hex(bottom, spec.bfab), mask=bmask, others=tmask)
         return out
 
     def _recolour_one(self, img, tmask, bmask, base, top, bottom, path: Path, pose):
@@ -1307,7 +1322,7 @@ class Batch:
 
         spec = self.spec
         thex = colour_hex(top, spec.fabric)
-        bhex = colour_hex(bottom, spec.fabric) if bottom else None
+        bhex = colour_hex(bottom, spec.bfab) if bottom else None
 
         def paint(tm, bm):
             out, de_t, _ = recolor_image(img, TOP_BASES[base[0]][1], thex, mask=tm, others=bm if bottom else None)

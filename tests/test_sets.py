@@ -244,9 +244,13 @@ def test_one_shoot_is_recoloured_into_both_fabrics_and_each_goes_to_its_own_fold
     twin = studio.fabric_twin(sp, "PureCotton")
     pure = list(L.colours_for("PureCotton", "Kids_Boys"))
     assert twin.name == "Kids_Boys_HalfSleeveTee_Shorts_PureCotton" and twin.base_from == sp.name
-    assert [p[0] for p in twin.colour_pairs] == pure and ["White", "Black", 2] in twin.colour_pairs
-    assert not any(p[:2] == ["Black", "Melange"] for p in twin.colour_pairs)  # no Melange in Pure Cotton
-    assert counts["recoloured"] == 2 * 3 + 2 * len(pure) and counts["errors"] == 0
+    bottoms = [c for c in L.colours_for("CottonMix", "Kids_Boys") if c != "White"]
+    # one bottom range for both fabrics: a Pure Cotton top with the Cotton Mix bottom of its name, else black
+    want = [[c, c if c in bottoms else "Black", 2] for c in pure if c != "White"] + [["White", "Black", 2]]
+    assert sorted(twin.colour_pairs[:len(pure)]) == sorted(want) and twin.bottom_fabric == "CottonMix"
+    assert ["Black", "Melange", 2] in twin.colour_pairs  # the batch's combo fits: Black top, Melange (Cotton Mix) bottom
+    assert studio.colour_hex("Green", twin.bfab) == L.COLOURS["CottonMix"]["Green"] != L.COLOURS["PureCotton"]["Green"]
+    assert counts["recoloured"] == 2 * 3 + 2 * len(twin.colour_pairs) and counts["errors"] == 0
     assert not (tmp_path / twin.name / "m0001" / "_base").exists()  # the twin reads the Cotton Mix shoot
     drive_files = []
 
@@ -257,6 +261,7 @@ def test_one_shoot_is_recoloured_into_both_fabrics_and_each_goes_to_its_own_fold
             drive_files.append("/".join(parts + [name]))
     DriveSync(FakeDrive(), lambda: str(tmp_path)).run_once()
     assert "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
-    assert "Pure Cotton/Boys/Navy/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
+    assert "Pure Cotton/Boys/Navy/Combo sets/Navy-Black/Half sleeve set/m0001_front.jpg" in drive_files  # no navy bottom
+    assert "Pure Cotton/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
     assert "Pure Cotton/Boys/Navy/Half sleeve/m0002_front.jpg" in drive_files  # single top cut from the shared base
     assert "Pure Cotton/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg" in drive_files
