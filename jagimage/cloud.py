@@ -314,8 +314,16 @@ class Drive:
     def _call(self, method: str, url: str, body: Optional[bytes] = None, ctype: str = "application/json") -> dict:
         req = urllib.request.Request(url, data=body, method=method,
                                      headers={"Authorization": f"Bearer {self._token()}", "Content-Type": ctype})
-        with self.opener(req, timeout=120) as r:
-            return json.loads(r.read() or b"{}")
+        try:
+            with self.opener(req, timeout=120) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as exc:  # keep Google's own explanation: "Bad Request" alone says nothing
+            try:
+                why = json.loads(exc.read() or b"{}").get("error", {}).get("message", "")
+            except Exception:
+                why = ""
+            exc.msg = f"{exc.msg}: {why} [{method} {url.split('?')[0][-80:]}]" if why else exc.msg
+            raise
 
     def folder_id(self, parts: list) -> str:
         """The Drive folder for a path such as [batch, "Navy__Navy"] under the photos folder, made
@@ -506,7 +514,7 @@ class DriveSync:
                     skipped = f"skipped: {type(exc).__name__}: {exc}"[:300]
                     continue
                 except Exception as exc:  # network, quota, revoked access: try again next round
-                    self.status["last_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                    self.status["last_error"] = f"{root.name}/{key}: {type(exc).__name__}: {exc}"[:400]
                     break
                 with DRIVE_LIST_LOCK:
                     with open(root / "_drive.txt", "a") as f:
@@ -543,7 +551,7 @@ class DriveSync:
                 try:
                     self.drive.upload(png, ["_bases", root.name, png.parent.parent.parent.name, png.parent.name], png.name)
                 except Exception as exc:  # try again next round
-                    self.status["last_error"] = f"bases: {type(exc).__name__}: {exc}"[:300]
+                    self.status["bases_error"] = f"{png.relative_to(root.parent)}: {type(exc).__name__}: {exc}"[:400]
                     return
                 Path(str(png) + studio.ARCHIVED).write_text(json.dumps({"time": round(time.time())}))
                 png.unlink()
