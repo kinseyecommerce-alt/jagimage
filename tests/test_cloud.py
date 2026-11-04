@@ -572,3 +572,56 @@ def test_old_drive_folders_go_to_the_trash_but_never_the_fabric_folders(tmp_path
     assert len(patched) == 2 and all(b == b'{"trashed": true}' for m, u, b in calls if m == "PATCH")
     assert "photos/Boys" not in d.state["folders"] and "photos/Boys/Red" not in d.state["folders"]
     assert d.state["folders"]["photos/Cotton Mix"] == "CM"
+
+
+def test_a_bulk_run_goes_on_with_openai_when_gemini_runs_out_of_credits(tmp_path, monkeypatch):
+    import json
+    import threading
+    import time
+
+    from jagimage.server import serve
+    from test_studio import fake_generate
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+    shots = {"gemini": 0, "openai": 0}
+
+    def engine(spec):
+        def gen(prompt, refs):
+            from jagimage import studio as st
+            if spec.provider == "gemini":
+                shots["gemini"] += 1  # calls: a photo, or its drawstring edit
+                if shots["gemini"] > 2:  # one photo and its edit, then the money runs out
+                    raise RuntimeError("402 RESOURCE_EXHAUSTED: Your prepayment credits are depleted.")
+            elif prompt != st.RETOUCH_BOTTOMS:
+                shots["openai"] += 1
+            return fake_generate(prompt, refs)
+        return gen
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"),
+                  agent=Agent(client=None, model="gemini-test"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), engine=engine, cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    body = {"category": "Kids_Boys", "top": "HalfSleeveTee", "tops": ["Hoodie"], "fabric": "CottonMix", "models": 2,
+            "colour_pairs": [["Red", "Red", 2]], "poses": ["front_main", "back"], "one_base": True, "provider": "gemini",
+            "batch": False, "qc_agent": False, "also_fabrics": [], "workers": 1}
+    try:
+        code, _, r = call(base + "/api/runs/start", {"bodies": [body], "label": "bulk",
+                                                    "fallback": {"provider": "openai", "quality": "medium"}}, cookie=cookie)
+        assert code == 200, r
+        for _ in range(900):
+            runs = json.loads(call(base + "/api/agent/runs", cookie=cookie)[2])["runs"]
+            if not runs[0]["running"]:
+                break
+            time.sleep(0.1)
+        run = runs[0]
+        assert run["done"] == 1 and run["engine"] == "openai" and "switched to openai" in run["error"]
+        out = tmp_path / "out"
+        made = sorted(p.relative_to(out).as_posix() for p in out.glob("*/m*/Red__Red/*_2000x2000.jpg"))
+        assert len(made) == 2 * 2 * 2  # both styles, both models, front and back
+        specs = [json.loads((p / "spec.json").read_text()) for p in out.glob("Kids_Boys_*")]
+        assert len({s["first_model"] for s in specs}) == 1  # the same models (faces) all through
+        assert shots["gemini"] == 3 and shots["openai"] == 2 * 2 * 2 - 1  # the photo Gemini made is not made again
+    finally:
+        httpd.shutdown()

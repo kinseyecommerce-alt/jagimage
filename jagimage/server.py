@@ -12,6 +12,7 @@ import uuid
 import zipfile
 from collections import deque
 from dataclasses import asdict
+from typing import Optional
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -258,9 +259,12 @@ class Preview:
 class AgentRun:
     """Runs an agent plan's batches one after another (the Studio runs one batch at a time)."""
 
-    def __init__(self, app, bodies: list, label: str):
+    def __init__(self, app, bodies: list, label: str, fallback: Optional[dict] = None):
         self.id, self.app, self.bodies, self.label = uuid.uuid4().hex[:8], app, bodies, label
         self.done, self.job_ids, self.error, self.stopped = 0, [], None, False
+        # fallback: engine settings (e.g. {"provider": "openai", "quality": "medium"}) the rest of the plan moves to
+        # when the engine runs out of credits; the stopped batch is started again on it with the same models
+        self.fallback, self.switched = fallback, None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self):
@@ -269,13 +273,24 @@ class AgentRun:
                 break
             while any(j.finished is None for j in self.app.jobs.values()):  # wait for a batch already running
                 time.sleep(5)
-            try:
-                job = self.app.start(dict(body))
-            except Exception as exc:
-                self.error = str(exc)
+            while True:
+                if self.switched:
+                    body = {**{k: v for k, v in body.items() if k not in ("gemini_model", "image_size")}, **self.switched}
+                try:
+                    job = self.app.start(dict(body))
+                except Exception as exc:
+                    self.error = str(exc)
+                    return
+                self.job_ids.append(job.id)
+                job.thread.join()
+                fatal = next((b.fatal for b in job.batches if b.fatal), None)
+                if fatal and self.fallback and not self.switched and not self.stopped:
+                    # out of credits: the same models (same faces) go on with the fallback engine; made photos are kept
+                    self.switched = dict(self.fallback)
+                    body = {**body, "first_model": job.batches[0].spec.first_model, "same_models": True}
+                    self.error = f"switched to {self.fallback.get('provider')}: {fatal}"[:300]
+                    continue
                 break
-            self.job_ids.append(job.id)
-            job.thread.join()
             if job.error or any(b.fatal for b in job.batches):
                 self.error = job.error or next(b.fatal for b in job.batches if b.fatal)
                 break
@@ -283,7 +298,8 @@ class AgentRun:
 
     def status(self) -> dict:
         return {"id": self.id, "label": self.label, "batches": len(self.bodies), "done": self.done, "jobs": self.job_ids,
-                "error": self.error, "running": self.thread.is_alive(), "stopped": self.stopped}
+                "error": self.error, "running": self.thread.is_alive(), "stopped": self.stopped,
+                "engine": (self.switched or {}).get("provider") or (self.bodies[0].get("provider") if self.bodies else None)}
 
 
 class Studio:
@@ -770,6 +786,20 @@ def make_handler(app: Studio):
                 reply = (f"{len(kept)} batches, {sets:,} model image sets in {fabric}. The same models wear every colour of a style; "
                          "colours are recoloured for free, so only the base photos cost money.")
                 return self._json({"reply": reply, "batches": rows, "total": total, "problems": problems, "plan_id": plan_id})
+            if parts == ["api", "runs", "start"]:
+                # admin: run a list of batch requests on the server, one after another (a bulk run that needs no
+                # browser open); {"bodies": [...], "label": "...", "fallback": {"provider": "openai", ...}}
+                self._admin()
+                bodies = [b for b in body.get("bodies") or [] if isinstance(b, dict)]
+                if not bodies:
+                    raise ValueError("Give the batches to run")
+                if any(r.thread.is_alive() for r in app.agent_runs.values()):
+                    raise ValueError("A plan is already running. Stop it or wait for it to finish.")
+                fallback = body.get("fallback") if isinstance(body.get("fallback"), dict) else None
+                run = AgentRun(app, bodies, str(body.get("label") or "Bulk run")[:120], fallback)
+                app.agent_runs[run.id] = run
+                run.thread.start()
+                return self._json(run.status())
             if parts == ["api", "agent", "start"]:
                 plan = c.plans.pop(str(body.get("plan_id", "")), None)
                 if not plan or not plan["bodies"]:
