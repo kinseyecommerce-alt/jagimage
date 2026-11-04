@@ -707,7 +707,8 @@ def make_handler(app: Studio):
                 from .catalogue import FABRIC_FOLDER
 
                 names = [str(n) for n in body.get("names") or [] if isinstance(n, str)]
-                return self._json({"trashed": c.drive.trash(names, keep=set(FABRIC_FOLDER.values()))})
+                done = c.drive.trash(names, keep=set(FABRIC_FOLDER.values()))
+                return self._json({"trashed": done, "refused": getattr(c.drive, "trash_refused", {})})
             if parts == ["api", "drive", "sync"]:
                 c.sync.wake.set()
                 return self._json(c.drive_status())

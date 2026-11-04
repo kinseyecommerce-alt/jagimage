@@ -357,11 +357,19 @@ class Drive:
     def trash(self, names: list, keep=()) -> list:
         """Moves the named items of the photos folder to Drive's trash (restorable there for 30 days); never the
         ones in `keep`. Returns the names trashed."""
-        done = []
+        done, self.trash_refused = [], {}
         for item in self.top_items():
             if item["name"] in names and item["name"] not in keep:
-                self._call("PATCH", f"https://www.googleapis.com/drive/v3/files/{item['id']}?fields=id",
-                           json.dumps({"trashed": True}).encode())
+                try:
+                    self._call("PATCH", f"https://www.googleapis.com/drive/v3/files/{item['id']}?fields=id",
+                               json.dumps({"trashed": True}).encode())
+                except urllib.error.HTTPError as exc:  # e.g. only the folder's owner may trash it: say why, go on
+                    try:
+                        why = json.loads(exc.read() or b"{}").get("error", {}).get("message", "")
+                    except Exception:
+                        why = ""
+                    self.trash_refused[item["name"]] = f"{exc.code} {why}".strip()
+                    continue
                 done.append(item["name"])
         with self.lock:  # folders inside a trashed one are made again if something is uploaded there later
             known = self.state.setdefault("folders", {})
