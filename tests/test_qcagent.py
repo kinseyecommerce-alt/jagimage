@@ -80,7 +80,9 @@ def test_only_passed_photos_go_to_drive_and_a_person_can_approve_the_rest(tmp_pa
     assert studio.approve(b.root, ["m0001/Red__Red/back_2000x2000.jpg", "../../etc/passwd.jpg"]) == 1
     drive.files.clear()
     sync.run_once()
-    assert sorted(drive.files) == ["Cotton Mix/Girls/Red/Co-ords/Hoodies set/m0001_back.jpg", "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg"]
+    assert sorted(f for f in drive.files if not f.startswith("_bases/")) == [
+        "Cotton Mix/Girls/Red/Co-ords/Hoodies set/m0001_back.jpg", "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg"]
+    assert any(f.startswith("_bases/") for f in drive.files)  # nothing waits now: the bases went to Drive after it
 
 
 def test_bleed_is_put_back_and_leftover_base_colour_painted():

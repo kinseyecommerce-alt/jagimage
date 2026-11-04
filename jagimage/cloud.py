@@ -519,7 +519,35 @@ class DriveSync:
                 self.status["last_error"] = skipped
             for root in roots:
                 self.status["freed"] += self._free(root)
+            self._archive_bases(todo)
             return sent
+
+    def _archive_bases(self, todo=None):
+        """A finished batch's base photos go to Drive (<photos folder>/_bases/<batch>/...) and leave the server once
+        every photo made from them, its fabric twins' too, is on Drive: the disk holds only batches in progress."""
+        from . import studio
+
+        def waiting(r: Path) -> bool:  # a finished photo still on the server: not uploaded yet, or held for review
+            return any(r.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg"))
+        roots = {spec.parent for spec in Path(self.out_dir()).glob("*/spec.json")}
+        for root in sorted(roots):
+            b = self._batch(root)
+            if b is None or b.spec.base_from or not b.spec.free_after_upload or not (root / "_complete").exists():
+                continue
+            twins = [studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
+            if waiting(root) or any(waiting(root.parent / t) or not (root.parent / t / "_complete").exists() for t in twins):
+                continue
+            for png in sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png")):
+                if "_mask" in png.name or studio.archived(png):
+                    continue
+                try:
+                    self.drive.upload(png, ["_bases", root.name, png.parent.parent.parent.name, png.parent.name], png.name)
+                except Exception as exc:  # try again next round
+                    self.status["last_error"] = f"bases: {type(exc).__name__}: {exc}"[:300]
+                    return
+                Path(str(png) + studio.ARCHIVED).write_text(json.dumps({"time": round(time.time())}))
+                png.unlink()
+                self.status["bases_archived"] = self.status.get("bases_archived", 0) + 1
 
     def start(self):
         def loop():

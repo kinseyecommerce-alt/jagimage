@@ -121,6 +121,14 @@ UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the wais
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
 
 
+ARCHIVED = ".archived"  # next to a base photo moved to Google Drive (kinseymodels2026/_bases/...) to free the disk
+
+
+def archived(path: Path) -> bool:
+    """The base photo is kept on Google Drive, not on the server: it is never made (or paid for) again."""
+    return Path(str(path) + ARCHIVED).exists()
+
+
 def fabric_twin(spec: "Spec", fabric: str) -> "Spec":
     """The batch that recolours `spec`'s models into `fabric`'s colours from its base photos: a co-ord in every
     colour of that fabric's list (white with the black bottom), plus the batch's own combos where both colours
@@ -756,6 +764,8 @@ class Batch:
             list(pool.map(lambda m: self.run_model(m, stage), self.spec.model_numbers()))
         if stage != "bases" and not self.stop.is_set():
             self._run_twins()
+            if not self.stop.is_set() and not self.fatal:  # every photo made: its base photos may go to Drive
+                (self.root / "_complete").write_text(json.dumps({"time": round(time.time()), "counts": self.counts}))
         return self.counts
 
     def _run_twins(self):
@@ -826,7 +836,7 @@ class Batch:
                     for pose in poses:
                         path = self.base_path(m, base, pose)
                         key = f"m{m:04d}|{base_dir(base)}|{pose}"
-                        if path.exists():
+                        if path.exists() or archived(path):  # archived: on Drive, never paid for twice
                             if key not in seen and key not in tries:
                                 self._event("ai_skipped", model=m, path=str(path))
                             seen.add(key)
@@ -964,7 +974,7 @@ class Batch:
 
     def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:
         """Make one base photo if missing. False if it couldn't be made."""
-        if path.exists():
+        if path.exists() or archived(path):
             self._event("ai_skipped", model=m, path=str(path))
             return True
         req = self._request(m, base, pose, path, first_front)

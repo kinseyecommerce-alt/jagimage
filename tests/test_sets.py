@@ -157,7 +157,7 @@ def test_finished_photos_go_to_drive_in_catalogue_folders_and_leave_the_server(t
     drive = FakeDrive()
     sync = DriveSync(drive, lambda: str(tmp_path))
     sync.run_once()
-    got = sorted(drive.files)
+    got = sorted(f for f in drive.files if not f.startswith("_bases/"))
     assert got == sorted([
         "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/Red/Co-ords/Half sleeve set/m0001_back.jpg",
         "Cotton Mix/Boys/Red/Half sleeve/m0001_front.jpg", "Cotton Mix/Boys/Red/Half sleeve/m0001_back.jpg",   # single tops, from the co-ord
@@ -165,11 +165,22 @@ def test_finished_photos_go_to_drive_in_catalogue_folders_and_leave_the_server(t
         "Cotton Mix/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg", "Cotton Mix/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_back.jpg",
         "Cotton Mix/Boys/White/Half sleeve/m0001_front.jpg", "Cotton Mix/Boys/White/Half sleeve/m0001_back.jpg",  # White: no co-ord, single from its combo
     ])
-    assert all(size == (2000, 2000) for size in drive.files.values())
+    assert all(size == (2000, 2000) for f, size in drive.files.items() if not f.startswith("_bases/"))
     assert not list((tmp_path / sp.name).glob("m*/*/*.jpg"))   # every finished JPG left the server
-    assert list((tmp_path / sp.name).glob("m*/_base/*/*.png"))   # base photos stay, for recolouring again
-    again = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
-    assert again["recoloured"] == 0 and again["recolour_skipped"] == 6  # a resumed batch knows they are done
+    # every photo is on Drive: the base photos follow (a backup), and leave the server to free the disk
+    bases = [f for f in drive.files if f.startswith("_bases/")]
+    assert sorted(bases) == [f"_bases/{sp.name}/m0001/light-light/back.png", f"_bases/{sp.name}/m0001/light-light/front_main.png"]
+    left = [p for p in (tmp_path / sp.name).glob("m*/_base/*/*.png") if "_mask" not in p.name]
+    assert not left and len(list((tmp_path / sp.name).glob("m*/_base/*/*.png.archived"))) == 2
+    assert list((tmp_path / sp.name).glob("m*/_base/*/*_mask.png"))  # the masks stay (small)
+    calls = []
+
+    def counting(prompt, refs):
+        calls.append(prompt)
+        return fake_generate(prompt, refs)
+    again = studio.Batch(sp, out=tmp_path, generate=counting, workers=1).run()
+    assert not calls and again["ai_done"] == 0  # the archived shoot is never made (or paid for) again
+    assert again["recoloured"] == 0  # and nothing is made again from it
     assert sync.run_once() == 0  # nothing new to upload
 
 
@@ -185,7 +196,8 @@ def test_photos_already_sent_in_the_batch_layout_are_filed_in_the_catalogue_too(
             self.files = []
 
         def upload(self, local, parts, name):
-            self.files.append("/".join(parts + [name]))
+            if parts[0] != "_bases":
+                self.files.append("/".join(parts + [name]))
 
     sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
                      colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False)
