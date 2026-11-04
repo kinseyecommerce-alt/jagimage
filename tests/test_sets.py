@@ -265,3 +265,39 @@ def test_one_shoot_is_recoloured_into_both_fabrics_and_each_goes_to_its_own_fold
     assert "Pure Cotton/Boys/Red/Co-ords/Half sleeve set/m0001_front.jpg" in drive_files
     assert "Pure Cotton/Boys/Navy/Half sleeve/m0002_front.jpg" in drive_files  # single top cut from the shared base
     assert "Pure Cotton/Boys/White/Combo sets/White-Black/Half sleeve set/m0001_front.jpg" in drive_files
+
+
+def test_a_combo_added_later_brings_the_base_back_from_drive(tmp_path, shop_colours):
+    from jagimage.cloud import DriveSync
+
+    store = {}
+
+    class FakeDrive:
+        connected = True
+
+        def upload(self, local, parts, name):
+            store["/".join(parts + [name])] = Path(local).read_bytes()
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False,
+                     drive_layout="catalogue", free_after_upload=True)
+    studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
+    sync = DriveSync(FakeDrive(), lambda: str(tmp_path))
+    sync.run_once()
+    front = tmp_path / sp.name / "m0001" / "_base" / "light-light" / "front_main.png"
+    assert not front.exists() and studio.archived(front) and f"_bases/{sp.name}/m0001/light-light/front_main.png" in store
+
+    def restore(path):  # what Cloud.restore_base does with the real Drive
+        p = Path(path)
+        return store["/".join(["_bases", p.parent.parent.parent.parent.name, p.parent.parent.parent.name, p.parent.name, p.name])]
+    calls = []
+
+    def gen(prompt, refs):
+        calls.append(prompt)
+        return fake_generate(prompt, refs)
+    sp2 = studio.Spec(**{**sp.__dict__, "colour_pairs": [["Red", "Red"], ["Red", "Black"]]})
+    counts = studio.Batch(sp2, out=tmp_path, generate=gen, workers=1, restore=restore).run()
+    assert not calls and counts["recoloured"] == 1 and counts["recolour_skipped"] == 1  # only the new combo, no AI
+    assert front.exists() and not studio.archived(front)
+    sync.run_once()  # uploaded, then the base goes back to Drive
+    assert "Cotton Mix/Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_front.jpg" in store
+    assert not front.exists() and studio.archived(front)

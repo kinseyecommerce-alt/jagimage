@@ -119,7 +119,7 @@ class Job:
     """One or more batches run one after another, e.g. the same models in several top styles."""
 
     def __init__(self, specs, out: str, engine, workers: int, stage: str, export=None, export_what="jpg", redo=False, prints=None,
-                 checker=None):
+                 checker=None, restore=None):
         specs = specs if isinstance(specs, list) else [specs]
         self.id = uuid.uuid4().hex[:8]
         self.specs, self.spec, self.stage = specs, specs[0], stage
@@ -130,7 +130,7 @@ class Job:
         self.recent = deque(maxlen=48)
         self.batches = [studio.Batch(sp, out=out, generate=engine(sp) if stage not in ("recolor", "prints") else None,
                                      workers=workers, on_event=self.event, export=export, export_what=export_what, redo=redo,
-                                     prints=prints, checker=checker)
+                                     prints=prints, checker=checker, restore=restore)
                         for sp in specs]
         self.batch = self.batches[0]
         self.export = str(self.batch.export) if self.batch.export else None
@@ -345,7 +345,8 @@ class Studio:
                     raise ValueError("The print checker needs a Gemini or OpenAI key (Settings → API keys), or turn it off")
                 checker = self.cloud.agent.check_print
             job = Job(specs, self.out, self.engine, workers, stage, export, export_what, redo=redo,
-                      prints=self.cloud.print_files if self.cloud and stage == "prints" else None, checker=checker)
+                      prints=self.cloud.print_files if self.cloud and stage == "prints" else None, checker=checker,
+                      restore=self.cloud.restore_base if self.cloud else None)
             for sp in specs:
                 ledger.reserve(sp)
             self.jobs[job.id] = job

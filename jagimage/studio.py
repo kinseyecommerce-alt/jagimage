@@ -693,7 +693,7 @@ class Batch:
                  workers=4, retries=3, on_event: Optional[Callable[[dict], None]] = None,
                  export: Optional[str] = None, export_what="jpg", redo: bool = False,
                  prints: Optional[Callable[[str, str, str], list]] = None, checker: Optional[Callable] = None,
-                 inspector: Optional[Callable] = None):
+                 inspector: Optional[Callable] = None, restore: Optional[Callable[[Path], bytes]] = None):
         """export: a second folder (e.g. your Google Drive folder) that gets a copy of each finished
         photo as <batch>/<Top>__<Bottom>/<model>_<pose>.jpg; export_what: jpg | png | both."""
         self.spec = spec
@@ -718,6 +718,7 @@ class Batch:
         self.prints = prints
         self.checker = checker  # checker(printed photo, artwork) -> {ok, issues, dx, dy, scale}: the AI print checker
         self._inspector = inspector  # the QC agent's eyes: ask(message, jpeg bytes) -> {ok, problems}
+        self.restore = restore  # restore(base photo path) -> its bytes from Google Drive, for an archived base
         if hasattr(generate, "set_usage_log"):  # Google's billed token counts land next to the batch
             generate.set_usage_log(self.root / "_usage.jsonl")
 
@@ -790,7 +791,7 @@ class Batch:
                 return
             twin = Batch(fabric_twin(self.spec, fabric), out=self.root.parent, generate=None, workers=self.workers,
                          retries=self.retries, on_event=lambda e: self._event(e.pop("kind"), **e), redo=self.redo,
-                         inspector=self._inspector)  # its photos count in this batch's totals
+                         inspector=self._inspector, restore=self.restore)  # its photos count in this batch's totals
             twin.stop = self.stop
             twin.run("recolor")
 
@@ -906,8 +907,28 @@ class Batch:
                 path = self.base_path(m, base, pose)
                 if stage != "recolor" and not self._shoot(m, base, pose, path, first_front):
                     continue
-                if stage != "bases" and path.exists():
+                if stage != "bases" and (path.exists() or self._restore(m, base, pose, path)):
                     self._recolour_base(m, base, pose)
+
+    def _restore(self, m, base, pose, path: Path) -> bool:
+        """A base photo moved to Google Drive comes back when a photo made from it is missing (a colour or combo
+        added later, or a redo); the Drive sync moves it out again once everything is uploaded."""
+        if not archived(path) or self.restore is None:
+            return False
+        if not self.redo and all(self.made(self.out_path(m, t, b, pose), pose)
+                                 for t, b in self.spec.pairs(m) if self.spec.base_key(t, b) == base):
+            return False
+        try:
+            data = self.restore(path)
+        except Exception as exc:
+            self._event("errors", model=m, path=str(path), error=f"base on Drive: {type(exc).__name__}: {exc}"[:300])
+            return False
+        tmp = path.with_suffix(".restore.png")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        Path(str(path) + ARCHIVED).unlink(missing_ok=True)
+        (self.root.parent / path.relative_to(self.root.parent).parts[0] / "_complete").unlink(missing_ok=True)
+        return True
 
     def face_file(self, m: int) -> Path:
         """Model m's face for the whole category: the first front ever made for this model in any

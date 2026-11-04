@@ -349,6 +349,16 @@ class Drive:
             self._save()
             return parent
 
+    def fetch(self, parts: list, name: str) -> bytes:
+        """A file this app uploaded to <photos folder>/<parts>/<name>."""
+        parent = self.folder_id(parts)
+        q = f"name = '{name.replace(chr(39), chr(92) + chr(39))}' and '{parent}' in parents and trashed = false"
+        found = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(
+            {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files") or []
+        if not found:
+            raise FileNotFoundError(f"{'/'.join(parts)}/{name} is not on Drive")
+        return self.download(found[0]["id"])
+
     def top_items(self) -> list:
         """What is directly inside the photos folder: [{id, name, folder}]."""
         root = self.folder_id([])
@@ -1012,6 +1022,12 @@ class Cloud:
         self.agent = agent or Agent()
         self.oauth_states = {}
         self.plans = {}  # plan id -> agent plan, until Start
+
+    def restore_base(self, path: Path) -> bytes:
+        """A base photo the Drive sync moved to <photos folder>/_bases/<batch>/<model>/<shoot>/: its bytes."""
+        path = Path(path)
+        parts = ["_bases", path.parent.parent.parent.parent.name, path.parent.parent.parent.name, path.parent.name]
+        return self.drive.fetch(parts, path.name)
 
     def drive_status(self) -> dict:
         return {"configured": self.drive.configured, "connected": self.drive.connected, "can_read": self.drive.can_read,
