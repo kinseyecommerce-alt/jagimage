@@ -56,7 +56,7 @@ def options(app=None) -> dict:
     return {
         "categories": L.CATEGORIES, "tops": studio.TOPS, "adult_only_tops": sorted(studio.ADULT_ONLY_TOPS), "kids_only_tops": sorted(studio.KIDS_ONLY_TOPS), "bottoms": studio.BOTTOMS,
         "fixed_bottoms": list(studio.FIXED_BOTTOMS), "fabrics": L.FABRICS, "palettes": L.COLOURS, "category_palettes": L.CATEGORY_COLOURS, "white_top_bottom": studio.WHITE_TOP_BOTTOM, "default_palettes": L.DEFAULT_COLOURS,
-        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
+        "poses": list(L.POSES), "pose_texts": L.POSES, "shots": studio.SHOTS, "shot_defaults": studio.SHOT_DEFAULTS, "bottom_defaults": studio.BOTTOM_DEFAULTS, "markets": market_options(), "providers": ready(), "runpod_url": os.environ.get(RUNPOD_URL_ENV, ""),
         "gemini_sizes": ["1K", "2K", "4K"], "openai_qualities": ["medium", "high", "xhigh", "max"],
         "bases": {"top": studio.TOP_BASES, "bottom": studio.BOTTOM_BASES},
         "out": str(Path(app.out).resolve()) if app else None, "can_remember": bool(app and app.keys_file),
@@ -197,6 +197,7 @@ def sum_plans(plans):
 def specs_from(body: dict, ledger) -> list:
     """The batches one request makes: its top style plus any extra styles (body["tops"]), all with the
     same models. Model numbers are automatic (faces never used before) unless given."""
+    auto_bottom = body.pop("auto_bottom", False)  # the bottom wasn't picked: each style gets its own default
     tops = [t for t in (body.pop("tops", None) or []) if t]
     tops = [body.get("top", "HalfSleeveTee")] + [t for t in tops if t != body.get("top", "HalfSleeveTee")]
     if body.get("category") in L.CATEGORIES:  # "all styles" leaves out styles not made for the category
@@ -211,7 +212,8 @@ def specs_from(body: dict, ledger) -> list:
     if not body.get("first_model"):
         body["first_model"] = ledger.next_free(body.get("category", "Kids_Boys"))
     first = studio.Spec(**body)
-    return [first] + [studio.Spec(**{**body, "top": t, "name": "", "same_models": True}) for t in tops[1:]]
+    return [first] + [studio.Spec(**{**body, "top": t, "name": "", "same_models": True,
+                                     **({"bottom": studio.default_bottom(t)} if auto_bottom else {})}) for t in tops[1:]]
 
 
 class Preview:

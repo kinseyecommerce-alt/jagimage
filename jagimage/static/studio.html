@@ -1244,7 +1244,7 @@ async function init() {
   // start on an engine that has a key (e.g. OpenAI when no Gemini key is saved)
   if (!S.opts.providers[S.provider]) S.provider = ["openai", "gemini", "meta", "runpod"].find((k) => S.opts.providers[k]) || S.provider;
   seg($("provider"), ["gemini", "openai", "meta", "runpod"], S.provider, (v) => { S.provider = v; engineFields(); refreshPlan(); }, engineName);
-  for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
+  for (const id of ["top", "bottom", "fabric", "models", "firstModel", "imageSize", "geminiModel", "quality"]) $(id).addEventListener("input", () => { if (id === "bottom") S.bottomPicked = true; if (id === "fabric") { S.topPal = S.bottomPal = S.fabric(); wireChips("top"); wireChips("bottom"); chips("top"); chips("bottom"); } syncBottom(); refreshPlan(); });
   for (const id of ["geminiModel", "imageSize", "quality", "batchMode"]) $(id).addEventListener("change", engineSummary);
   setTimeout(engineSummary);  // once the size and quality lists are filled
   setupSave();
@@ -1330,16 +1330,17 @@ async function loadJobs() {
     if (d && confirm(`Delete the batch ${d} and all its photos from the server? This can't be undone (copies on Google Drive stay).`)) {
       try { await api(`/api/batches/${encodeURIComponent(d)}/delete`, {}); loadJobs(); } catch (err) { $("err").textContent = err.message; } } };
 }
-// Until the shot is picked by hand, it follows the top style: Half Sleeve starts as Top only.
+// Until picked by hand, the shot and the bottom follow the top style (shorts with half sleeve and sleeveless).
 function autoShot() {
-  if (S.shotPicked) return;
+  if (!S.bottomPicked) $("bottom").value = (S.opts.bottom_defaults || {})[$("top").value] || "Trackpants";
+  if (S.shotPicked) { syncBottom(); return; }
   S.shot = (S.opts.shot_defaults || {})[$("top").value] || "outfit";
   [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));
   syncBottom();
 }
 function loadSettings(s) {
   S.category = s.category; [...$("category").children].forEach((b) => b.classList.toggle("on", b.dataset.v === s.category));
-  $("top").value = s.top; $("bottom").value = s.bottom; $("fabric").value = s.fabric; S.topPal = S.bottomPal = s.fabric;
+  $("top").value = s.top; $("bottom").value = s.bottom; S.bottomPicked = true; $("fabric").value = s.fabric; S.topPal = S.bottomPal = s.fabric;
   S.top = new Set(s.top_colours); S.bottom = new Set(s.bottom_colours);
   for (const w of ["top", "bottom"]) S.custom[w] = [...S[w]].filter((c) => /^#/.test(c));
   S.shot = s.shot || "outfit"; S.shotPicked = true; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot));

@@ -282,7 +282,8 @@ def test_agent_plans_batches_with_cost_and_runs_them_after_start(tmp_path, monke
         assert len(main) == 24  # the planned photos (Pure Cotton); the same models in Cotton Mix colours come on top
         twin = [p for p in out.glob("*CottonMix*/m*/*/*.png")]
         assert twin and jobs[0]["counts"]["recoloured"] == 24 + len(twin)
-        assert jobs[0]["name"].endswith("_top_only")  # Half Sleeve starts as Top only unless asked for full body
+        assert jobs[0]["name"].startswith("Men_HalfSleeveTee_Shorts_")  # a full outfit, with shorts
+        assert [n.split("_PureCotton")[0] for n in jobs[0]["names"]] == ["Men_HalfSleeveTee_Shorts", "Men_Hoodie_Trackpants"]
         assert call(base + "/api/agent/start", {"plan_id": plan["plan_id"]}, cookie=cookie)[0] == 400  # used once
     finally:
         httpd.shutdown()

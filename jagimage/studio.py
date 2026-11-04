@@ -50,11 +50,17 @@ ONE_IMAGE = "Output exactly one image: a single photograph of this one model, no
 NO_HANDS_FREE = {"handpocket"}  # poses that need the hands on the clothes
 NOT_MANNEQUIN = "mannequin, dummy, doll, ghost mannequin, faceless figure, plastic or wax figure, CGI character"
 SHOTS = {"outfit": "Top and bottom (full body, both recoloured)", "top": "Top only (head to just above the knee)"}
-SHOT_DEFAULTS = {"HalfSleeveTee": "top", "OversizedTee": "top"}  # the shot a top style starts with; others start as "outfit"
+SHOT_DEFAULTS: Dict[str, str] = {}  # the shot a top style starts with when it isn't "outfit" (every style is a full outfit now)
+# the bottom each top style is worn with unless one is picked: shorts with short sleeves and sleeveless, else track pants
+BOTTOM_DEFAULTS = {"HalfSleeveTee": "Shorts", "SleevelessTee": "Shorts", "OversizedTee": "Shorts"}
 
 
 def default_shot(top: str) -> str:
     return SHOT_DEFAULTS.get(top, "outfit")
+
+
+def default_bottom(top: str) -> str:
+    return BOTTOM_DEFAULTS.get(top, "Trackpants")
 
 TOP_ONLY_FRAMING = ("Three-quarter shot framed from the top of the head to just above the knees: knees, shins and feet are "
                     "out of frame, small margin above the head, the whole top fully visible, model fills about 90% of frame height")

@@ -832,7 +832,8 @@ class Agent:
                 fabric = b.get("fabric") if b.get("fabric") in L.FABRICS else "PureCotton"
                 made = L.colours_for(fabric, category)  # the colours this category is made in
                 colours = [c for c in listed("top_colours") if c in made] or list(made)
-                bottom = b.get("bottom") if b.get("bottom") in studio.BOTTOMS else ("Shorts" if L.is_kids(category) else "Trackpants")
+                auto_bottom = b.get("bottom") not in studio.BOTTOMS  # not asked for: each style its usual bottom
+                bottom = studio.default_bottom(tops[0]) if auto_bottom else b["bottom"]
                 poses = [p for p in listed("poses") if p in L.POSES] or ["front_main", "back"]
                 if "front_main" not in poses:
                     poses = ["front_main"] + poses
@@ -842,7 +843,7 @@ class Agent:
                 body = {**engine, "category": category, "top": tops[0], "tops": tops[1:], "bottom": bottom, "fabric": fabric,
                         "top_colours": colours, "pairing": b.get("pairing") if b.get("pairing") in ("match", "each") else "match",
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
-                        "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses}
+                        "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses, "auto_bottom": auto_bottom}
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]
                 cost = pricing.sum_estimates([pricing.estimate(sp) for sp in specs], sum(p["recoloured_images"] for p in plans))

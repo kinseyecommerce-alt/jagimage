@@ -696,9 +696,12 @@ def test_openai_gets_plain_childrens_wording_gemini_unchanged():
     assert not studio.prompt(men, 1, men.bases()[0], "front_main", "none").startswith("Wholesome")
 
 
-def test_half_sleeve_starts_as_top_only():
-    from jagimage.studio import default_shot
-    assert default_shot("HalfSleeveTee") == "top" and default_shot("Hoodie") == "outfit"
+def test_every_style_is_a_full_outfit_with_its_usual_bottom():
+    from jagimage.studio import default_bottom, default_shot
+    for top in studio.TOPS:
+        assert default_shot(top) == "outfit"
+    assert [default_bottom(t) for t in ("HalfSleeveTee", "SleevelessTee", "OversizedTee")] == ["Shorts"] * 3
+    assert [default_bottom(t) for t in ("FullSleeveTee", "Hoodie", "Sweatshirt", "ZipHoodie")] == ["Trackpants"] * 4
 
 
 def test_close_up_pose_from_a_guide_is_not_framed_head_to_toe():
@@ -836,7 +839,7 @@ def test_firm_rules_catch_a_print_on_the_collar_even_when_the_ai_says_ok(tmp_pat
 def test_oversized_drop_shoulder_tee_is_for_men_and_women_only(tmp_path):
     from jagimage.server import specs_from
     men = studio.Spec(category="Men", top="OversizedTee", bottom="Trackpants", top_colours=["Black"])
-    assert studio.default_shot("OversizedTee") == "top"
+    assert studio.default_shot("OversizedTee") == "outfit" and studio.default_bottom("OversizedTee") == "Shorts"
     text = studio.prompt(men, 1, men.bases()[0], "front_main", "none")
     assert "DROP SHOULDERS" in text and "oversized" in text and "set-in shoulder seam at the natural shoulder" not in text
     studio.Spec(category="Women", top="OversizedTee", bottom="Trackpants", top_colours=["Black"])
