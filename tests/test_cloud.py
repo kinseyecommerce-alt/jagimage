@@ -220,8 +220,8 @@ def test_drive_connect_then_photos_upload_once_into_the_right_folders(tmp_path):
     studio.Batch(spec, out=tmp_path / "out", generate=fake_generate, workers=1).run()
     sync = DriveSync(drive, lambda: str(tmp_path / "out"))
     assert len(sync.pending()) == 4  # 2 colours x front and back
-    assert sync.run_once() == 0 and "network down" in sync.status["last_error"]  # retried next round
-    assert sync.run_once() == 4 and sync.status["last_error"] is None
+    assert sync.run_once() == 3 and "network down" in sync.status["last_error"]  # the others go; it is retried next round
+    assert sync.run_once() == 1 and sync.status["last_error"] is None
     assert sync.run_once() == 0  # nothing twice, also after a restart:
     assert DriveSync(Drive("cid", "secret", tmp_path / "data", "kinsey models 2026", opener=g), lambda: str(tmp_path / "out")).run_once() == 0
     names = sorted((path_of(g, parent), name) for name, parent, _ in g.files)

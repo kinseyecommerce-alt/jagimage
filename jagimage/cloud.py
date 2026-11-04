@@ -413,8 +413,9 @@ class DriveSync:
     server once all its files are on Drive. Survives restarts: what is uploaded is listed in each batch folder's
     _drive.txt, what was taken off the server in _freed.txt."""
 
-    def __init__(self, drive: Drive, out_dir: Callable[[], str], every: float = 60):
+    def __init__(self, drive: Drive, out_dir: Callable[[], str], every: float = 60, workers: int = 8, chunk: int = 96):
         self.drive, self.out_dir, self.every = drive, out_dir, every
+        self.workers, self.chunk = workers, chunk  # uploads at once; photos sent between frees of the server
         self.status = {"uploaded": 0, "pending": 0, "freed": 0, "last_error": None, "last_run": None}
         self.wake = threading.Event()
         self.lock = threading.Lock()
@@ -506,27 +507,38 @@ class DriveSync:
         with self.lock:
             todo = self.pending()
             self.status.update(pending=len(todo), last_run=round(time.time()))
-            sent, roots, skipped = 0, set(), None
-            for root, key, jpg, info in todo:
+            sent, skipped, failed = 0, None, None
+            from concurrent.futures import ThreadPoolExecutor
+
+            def one(row):
+                root, key, jpg, info = row
                 try:
                     self._send(root, key, jpg, info)
+                    return row, None
                 except FileNotFoundError as exc:  # this photo (or its base) went meanwhile: skip it, send the rest
-                    skipped = f"skipped: {type(exc).__name__}: {exc}"[:300]
-                    continue
+                    return row, ("skip", f"skipped: {type(exc).__name__}: {exc}"[:300])
                 except Exception as exc:  # network, quota, revoked access: try again next round
-                    self.status["last_error"] = f"{root.name}/{key}: {type(exc).__name__}: {exc}"[:400]
-                    break
-                with DRIVE_LIST_LOCK:
-                    with open(root / "_drive.txt", "a") as f:
-                        f.write(key + "\n")
-                sent += 1
-                roots.add(root)
-                self.status["uploaded"] += 1
-                self.status["pending"] = len(todo) - sent
-            else:
-                self.status["last_error"] = skipped
-            for root in roots:
-                self.status["freed"] += self._free(root)
+                    return row, ("fail", f"{root.name}/{key}: {type(exc).__name__}: {exc}"[:400])
+            # several uploads at once, and finished photos leave the server every chunk (not only after hours)
+            with ThreadPoolExecutor(max_workers=self.workers) as pool:
+                for i in range(0, len(todo), self.chunk):
+                    roots = set()
+                    for (root, key, jpg, info), err in pool.map(one, todo[i:i + self.chunk]):
+                        if err:
+                            skipped, failed = (err[1], failed) if err[0] == "skip" else (skipped, err[1])
+                            continue
+                        with DRIVE_LIST_LOCK:
+                            with open(root / "_drive.txt", "a") as f:
+                                f.write(key + "\n")
+                        sent += 1
+                        roots.add(root)
+                        self.status["uploaded"] += 1
+                        self.status["pending"] = len(todo) - sent
+                    for root in roots:
+                        self.status["freed"] += self._free(root)
+                    if failed:
+                        break
+            self.status["last_error"] = failed or skipped
             self._archive_bases(todo)
             return sent
 
