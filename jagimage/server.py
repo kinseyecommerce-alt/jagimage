@@ -561,6 +561,26 @@ def make_handler(app: Studio):
                 return self._redirect("/login", {"Set-Cookie": "jag_session=; Path=/; Max-Age=0"})
             if parts == ["api", "drive"]:
                 return self._json(c.drive_status())
+            if parts == ["api", "drive", "probe"]:  # admin: a tiny upload, step by step, with Google's raw replies
+                self._admin()
+                import tempfile
+                import urllib.error as ue
+
+                steps = {}
+                try:
+                    steps["root"] = c.drive.folder_id([])
+                    steps["sub"] = c.drive.folder_id(["_probe"])
+                    with tempfile.TemporaryDirectory() as tmp:
+                        f = Path(tmp) / "probe.jpg"
+                        from PIL import Image as _I
+                        _I.new("RGB", (8, 8), "white").save(f)
+                        steps["upload"] = c.drive.upload(f, ["_probe"], "probe.jpg")
+                except ue.HTTPError as exc:
+                    steps["error"] = {"code": exc.code, "msg": str(exc.msg), "headers": dict(exc.headers or {}), "url": exc.url}
+                except Exception as exc:
+                    steps["error"] = f"{type(exc).__name__}: {exc}"
+                steps["cache"] = {k: v for k, v in c.drive.state.get("folders", {}).items() if k.startswith(c.drive.folder)}
+                return self._json(steps)
             if parts == ["api", "drive", "top"]:  # what is directly in the photos folder (admin: to tidy it)
                 self._admin()
                 return self._json({"items": c.drive.top_items()})
