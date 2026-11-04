@@ -341,6 +341,37 @@ class Drive:
             self._save()
             return parent
 
+    def top_items(self) -> list:
+        """What is directly inside the photos folder: [{id, name, folder}]."""
+        root = self.folder_id([])
+        items, token = [], None
+        while True:
+            q = {"q": f"'{root}' in parents and trashed = false", "fields": "nextPageToken, files(id, name, mimeType)",
+                 "pageSize": 1000, "spaces": "drive", **({"pageToken": token} if token else {})}
+            r = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(q))
+            items += [{"id": f["id"], "name": f["name"], "folder": f["mimeType"] == FOLDER_MIME} for f in r.get("files") or []]
+            token = r.get("nextPageToken")
+            if not token:
+                return sorted(items, key=lambda f: f["name"])
+
+    def trash(self, names: list, keep=()) -> list:
+        """Moves the named items of the photos folder to Drive's trash (restorable there for 30 days); never the
+        ones in `keep`. Returns the names trashed."""
+        done = []
+        for item in self.top_items():
+            if item["name"] in names and item["name"] not in keep:
+                self._call("PATCH", f"https://www.googleapis.com/drive/v3/files/{item['id']}?fields=id",
+                           json.dumps({"trashed": True}).encode())
+                done.append(item["name"])
+        with self.lock:  # folders inside a trashed one are made again if something is uploaded there later
+            known = self.state.setdefault("folders", {})
+            for name in done:
+                prefix = f"{self.folder}/{name}"
+                for key in [k for k in known if k == prefix or k.startswith(prefix + "/")]:
+                    del known[key]
+            self._save()
+        return done
+
     def upload(self, local: Path, parts: list, name: str) -> str:
         """Upload a photo into its folder; a photo of the same name there (an earlier recolour) is replaced."""
         parent = self.folder_id(parts)

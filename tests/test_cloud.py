@@ -550,3 +550,25 @@ def test_assistant_account_follows_its_variable(tmp_path, monkeypatch):
     u.create("claude", "handmade-pass", "user")  # made by hand: the variable never touches it
     u = Users(tmp_path)
     assert u.check("claude", "handmade-pass")
+
+
+def test_old_drive_folders_go_to_the_trash_but_never_the_fabric_folders(tmp_path):
+    d = Drive("id", "secret", tmp_path)
+    d.folder = "photos"
+    d.state["folders"] = {"photos": "P", "photos/Boys": "B", "photos/Boys/Red": "BR", "photos/Cotton Mix": "CM"}
+    listing = [{"id": "B", "name": "Boys", "mimeType": "application/vnd.google-apps.folder"},
+               {"id": "CM", "name": "Cotton Mix", "mimeType": "application/vnd.google-apps.folder"},
+               {"id": "X", "name": "Kids_Boys_HalfSleeveTee_Shorts_CottonMix_pilot", "mimeType": "application/vnd.google-apps.folder"}]
+    calls = []
+
+    def fake_call(method, url, body=None, ctype="application/json"):
+        calls.append((method, url, body))
+        return {"files": listing} if method == "GET" else {"id": url.split("/files/")[1].split("?")[0]}
+    d._call = fake_call
+    assert [i["name"] for i in d.top_items()] == ["Boys", "Cotton Mix", "Kids_Boys_HalfSleeveTee_Shorts_CottonMix_pilot"]
+    done = d.trash(["Boys", "Cotton Mix", "Kids_Boys_HalfSleeveTee_Shorts_CottonMix_pilot"], keep={"Cotton Mix", "Pure Cotton"})
+    assert done == ["Boys", "Kids_Boys_HalfSleeveTee_Shorts_CottonMix_pilot"]
+    patched = [u for m, u, b in calls if m == "PATCH"]
+    assert len(patched) == 2 and all(b == b'{"trashed": true}' for m, u, b in calls if m == "PATCH")
+    assert "photos/Boys" not in d.state["folders"] and "photos/Boys/Red" not in d.state["folders"]
+    assert d.state["folders"]["photos/Cotton Mix"] == "CM"

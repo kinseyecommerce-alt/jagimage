@@ -545,6 +545,9 @@ def make_handler(app: Studio):
                 return self._redirect("/login", {"Set-Cookie": "jag_session=; Path=/; Max-Age=0"})
             if parts == ["api", "drive"]:
                 return self._json(c.drive_status())
+            if parts == ["api", "drive", "top"]:  # what is directly in the photos folder (admin: to tidy it)
+                self._admin()
+                return self._json({"items": c.drive.top_items()})
             if parts == ["api", "me"]:
                 return self._json({"user": self.user, "role": c.users.role(self.user)})
             if parts == ["api", "users"]:
@@ -698,6 +701,13 @@ def make_handler(app: Studio):
                 self._admin()
                 c.drive.disconnect()
                 return self._json(c.drive_status())
+            if parts == ["api", "drive", "trash"]:
+                # old folders out of the photos folder, into Drive's trash (restorable for 30 days): {"names": [...]}
+                self._admin()
+                from .catalogue import FABRIC_FOLDER
+
+                names = [str(n) for n in body.get("names") or [] if isinstance(n, str)]
+                return self._json({"trashed": c.drive.trash(names, keep=set(FABRIC_FOLDER.values()))})
             if parts == ["api", "drive", "sync"]:
                 c.sync.wake.set()
                 return self._json(c.drive_status())
