@@ -376,7 +376,18 @@ class Drive:
         """Moves the named items of the photos folder to Drive's trash (restorable there for 30 days); never the
         ones in `keep`. Returns the names trashed."""
         done, self.trash_refused = [], {}
-        for item in self.top_items():
+        items = self.top_items()
+        for path in [n for n in names if "/" in n]:  # a deeper folder: "Pure Cotton/Men/Navy/Co-ords"
+            *parents, last = [p for p in path.split("/") if p]
+            key = "/".join([self.folder] + parents)
+            parent = self.state.get("folders", {}).get(key)
+            if not parent:
+                continue  # never made by this app here
+            q = f"name = '{last.replace(chr(39), chr(92) + chr(39))}' and '{parent}' in parents and trashed = false"
+            for f in self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(
+                    {"q": q, "fields": "files(id, name, mimeType)", "spaces": "drive"})).get("files") or []:
+                items.append({"id": f["id"], "name": path, "folder": f["mimeType"] == FOLDER_MIME})
+        for item in items:
             if item["name"] in names and item["name"] not in keep:
                 try:
                     self._call("PATCH", f"https://www.googleapis.com/drive/v3/files/{item['id']}?fields=id",
