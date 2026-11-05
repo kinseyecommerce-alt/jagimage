@@ -75,14 +75,15 @@ def test_only_passed_photos_go_to_drive_and_a_person_can_approve_the_rest(tmp_pa
     drive = FakeDrive()
     sync = DriveSync(drive, lambda: str(tmp_path))
     sync.run_once()
-    assert drive.files and all("back" not in f for f in drive.files)
+    photos = [f for f in drive.files if not f.startswith("_bases/")]
+    assert photos and all("back" not in f for f in photos)
+    assert any(f.startswith("_bases/") for f in drive.files)  # a held photo doesn't keep the bases on the server
     assert (qc_file.parent / "back_2000x2000.jpg").exists()  # held: stays on the server, not uploaded
     assert studio.approve(b.root, ["m0001/Red__Red/back_2000x2000.jpg", "../../etc/passwd.jpg"]) == 1
     drive.files.clear()
     sync.run_once()
     assert sorted(f for f in drive.files if not f.startswith("_bases/")) == [
         "Cotton Mix/Girls/Red/Co-ords/Hoodies set/m0001_back.jpg", "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg"]
-    assert any(f.startswith("_bases/") for f in drive.files)  # nothing waits now: the bases went to Drive after it
 
 
 def test_bleed_is_put_back_and_leftover_base_colour_painted():
@@ -240,7 +241,10 @@ def test_rejected_bases_come_back_when_no_new_one_can_be_made(tmp_path):
 def test_drive_upload_skips_a_photo_whose_base_went_and_sends_the_rest(tmp_path):
     b = studio.Batch(spec(qc_agent=False), out=tmp_path, generate=fake_generate, workers=1)
     b.run()
-    b.base_path(1, ("light", "light"), "back").unlink()
+    back = b.base_path(1, ("light", "light"), "back")
+    back.unlink()  # the base and its masks went (a base archived to Drive keeps its masks: then the cut still works)
+    for m in back.parent.glob("back_*mask.png"):
+        m.unlink()
     drive = FakeDrive()
     DriveSync(drive, lambda: str(tmp_path)).run_once()
     assert "Cotton Mix/Girls/Red/Hoodies/m0001_front.jpg" in drive.files and "Cotton Mix/Girls/Red/Hoodies/m0001_back.jpg" not in drive.files

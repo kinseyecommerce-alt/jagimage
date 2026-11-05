@@ -61,7 +61,9 @@ def files(batch: "studio.Batch") -> List[dict]:
         # keys differ from the batch layout's (the bare path), so photos sent there before are filed here too
         out.append({**r, "key": r["rel"] + "#set", "parts": sets, "name": name, "crop": False})
         base_png = batch.base_path(int(r["model"][1:]), spec.base_key(t, b), r["pose"])
-        if (t == b or single_from.get(t) == b) and base_png.exists():  # the cut needs the base's size and bottom mask
+        mask_png = base_png.with_name(f"{r['pose']}_bottom_mask.png")
+        # the cut needs the base's size and bottom mask (the mask alone will do once the base is archived to Drive)
+        if (t == b or single_from.get(t) == b) and (base_png.exists() or mask_png.exists()):
             out.append({**r, "key": r["rel"] + "#single", "parts": [fab, cat, t, style], "name": name, "crop": True})
     return out
 
@@ -78,7 +80,8 @@ def single_top(batch: "studio.Batch", f: dict) -> bytes:
     mask_file = batch.base_path(model, base, f["pose"]).with_name(f"{f['pose']}_bottom_mask.png")
     jpg = Image.open(f["src"]).convert("RGB")
     W, H = jpg.size
-    with Image.open(batch.base_path(model, base, f["pose"])) as bimg:
+    base_png = batch.base_path(model, base, f["pose"])
+    with Image.open(base_png if base_png.exists() else mask_file) as bimg:  # the mask is the base's size
         bw, bh = bimg.size
     s = min(W / bw, H / bh)
     x0, y0 = (W - round(bw * s)) // 2, (H - round(bh * s)) // 2

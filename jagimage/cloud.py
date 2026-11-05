@@ -566,10 +566,14 @@ class DriveSync:
     def _archive_bases(self, todo=None):
         """A finished batch's base photos go to Drive (<photos folder>/_bases/<batch>/...) and leave the server once
         every photo made from them, its fabric twins' too, is on Drive: the disk holds only batches in progress."""
-        from . import studio
+        from . import qcagent, studio
 
-        def waiting(r: Path) -> bool:  # a finished photo still on the server: not uploaded yet, or held for review
-            return any(r.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg"))
+        def waiting(r: Path) -> bool:
+            """A finished photo still to be uploaded. Photos held for review don't count: they keep their JPG on the
+            server, and a base that is needed again (to recolour them afresh) comes back from Drive."""
+            gated = (b := self._batch(r)) is not None and b.spec.qc_agent
+            return any(not gated or qcagent.passed(j.parent / "qc.json", j.name.rsplit("_", 1)[0])
+                       for j in r.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg"))
         roots = {spec.parent for spec in Path(self.out_dir()).glob("*/spec.json")}
         for root in sorted(roots):
             b = self._batch(root)

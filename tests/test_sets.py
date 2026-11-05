@@ -312,3 +312,37 @@ def test_pure_cotton_men_go_to_the_cottonmens_folder(tmp_path):
     b.run()
     assert sorted("/".join(f["parts"]) for f in catalogue.files(b)) == [
         "Pure Cotton/cottonmens/Red/Co-ords/Half sleeve set", "Pure Cotton/cottonmens/Red/Half sleeve"]
+
+
+def test_photos_held_for_review_do_not_keep_the_bases_on_the_server(tmp_path, shop_colours):
+    import json
+
+    from jagimage.cloud import DriveSync
+
+    class FakeDrive:
+        connected = True
+
+        def __init__(self):
+            self.files = {}
+
+        def upload(self, local, parts, name):
+            self.files["/".join(parts + [name])] = 1
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main", "back"], also_fabrics=[],
+                     one_base=True, keep_png=False, drive_layout="catalogue", free_after_upload=True)
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    root = tmp_path / sp.name
+    spec = json.loads((root / "spec.json").read_text())
+    (root / "spec.json").write_text(json.dumps({**spec, "qc_agent": True}))
+    for qc in root.glob("m*/*/qc.json"):  # the QC agent passed the front and held the back
+        rows = json.loads(qc.read_text())
+        rows["front_main"]["check"] = {"passed": True, "problems": []}
+        rows["back"]["check"] = {"passed": False, "held": True, "problems": ["bleed"]}
+        qc.write_text(json.dumps(rows))
+    drive = FakeDrive()
+    DriveSync(drive, lambda: str(tmp_path)).run_once()
+    assert list(root.glob("m*/*/back_*.jpg")) and not list(root.glob("m*/*/front_main_*.jpg"))  # held stays, passed went
+    assert not [p for p in root.glob("m*/_base/*/*.png") if "_mask" not in p.name]  # the bases went to Drive anyway
+    assert any(f.startswith(f"_bases/{sp.name}/") for f in drive.files)
