@@ -361,6 +361,30 @@ class Studio:
                          "updated": spec_file.stat().st_mtime})
         return sorted(rows, key=lambda r: -r["updated"])
 
+    def disk(self) -> dict:
+        """The disk's free space and, per batch, the MB its files take by kind (bases, masks, photos, other)."""
+        import shutil
+
+        total, used, free = shutil.disk_usage(self.out)
+        rows = []
+        for d in Path(self.out).iterdir():
+            if not d.is_dir():
+                continue
+            mb = {"bases": 0.0, "masks": 0.0, "jpg": 0.0, "other": 0.0}
+            for f in d.rglob("*"):
+                try:
+                    if not f.is_file():
+                        continue
+                    n = f.stat().st_size / 1e6
+                except OSError:
+                    continue
+                kind = ("masks" if "mask" in f.name else "bases" if f.suffix == ".png" else
+                        "jpg" if f.suffix in (".jpg", ".jpeg") else "other")
+                mb[kind] += n
+            rows.append({"name": d.name, **{k: round(v) for k, v in mb.items()}, "total": round(sum(mb.values()))})
+        return {"total_gb": round(total / 1e9, 2), "used_gb": round(used / 1e9, 2), "free_gb": round(free / 1e9, 2),
+                "batches": sorted(rows, key=lambda r: -r["total"])}
+
     def dashboard(self) -> dict:
         """Everything the Dashboard tab shows: totals, one row per batch with its quality-check results,
         the photos that need attention, and what is running now."""
@@ -582,6 +606,9 @@ def make_handler(app: Studio):
                     steps["error"] = f"{type(exc).__name__}: {exc}"
                 steps["cache"] = {k: v for k, v in c.drive.state.get("folders", {}).items() if k.startswith(c.drive.folder)}
                 return self._json(steps)
+            if parts == ["api", "disk"]:  # admin: what fills the server's disk, per batch and kind of file
+                self._admin()
+                return self._json(app.disk())
             if parts == ["api", "drive", "top"]:  # what is directly in the photos folder (admin: to tidy it)
                 self._admin()
                 return self._json({"items": c.drive.top_items()})
