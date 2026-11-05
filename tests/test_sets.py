@@ -301,3 +301,14 @@ def test_a_combo_added_later_brings_the_base_back_from_drive(tmp_path, shop_colo
     sync.run_once()  # uploaded, then the base goes back to Drive
     assert "Cotton Mix/Boys/Red/Combo sets/Red-Black/Half sleeve set/m0001_front.jpg" in store
     assert not front.exists() and studio.archived(front)
+
+
+def test_pure_cotton_men_go_to_the_cottonmens_folder(tmp_path):
+    from jagimage import catalogue
+
+    sp = studio.Spec(category="Men", top="HalfSleeveTee", bottom="Shorts", fabric="PureCotton", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False, drive_layout="catalogue")
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    assert sorted("/".join(f["parts"]) for f in catalogue.files(b)) == [
+        "Pure Cotton/cottonmens/Red/Co-ords/Half sleeve set", "Pure Cotton/cottonmens/Red/Half sleeve"]

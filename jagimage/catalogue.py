@@ -17,6 +17,8 @@ from PIL import Image
 from . import studio
 
 FABRIC_FOLDER = {"CottonMix": "Cotton Mix", "PureCotton": "Pure Cotton"}  # each fabric has its own top folder
+# a category's folder in one fabric when it differs (Pure Cotton men go to a fresh folder, beside an older "Men")
+CATEGORY_FOLDER_BY_FABRIC = {("PureCotton", "Men"): "cottonmens"}
 CATEGORY_FOLDER = {"Kids_Boys": "Boys", "Kids_Girls": "Girls", "Men": "Men", "Women": "Women"}
 STYLE_FOLDER = {"HalfSleeveTee": "Half sleeve", "SleevelessTee": "Sleeveless", "FullSleeveTee": "Full sleeve",
                 "Hoodie": "Hoodies", "Sweatshirt": "Sweatshirt", "OversizedTee": "Oversized", "ZipHoodie": "Zip hoodies"}
@@ -32,7 +34,8 @@ def files(batch: "studio.Batch") -> List[dict]:
     names = {studio.slug(c): c for c in spec.top_colours + spec.bottom_colours + [b for _, b, _ in spec.colour_pairs]}
     names.update({studio.slug(studio.WHITE_TOP_BOTTOM): studio.WHITE_TOP_BOTTOM})
     fab = FABRIC_FOLDER.get(spec.fabric, spec.fabric)
-    cat, style = CATEGORY_FOLDER.get(spec.category, spec.category), STYLE_FOLDER.get(spec.top, spec.top)
+    cat = CATEGORY_FOLDER_BY_FABRIC.get((spec.fabric, spec.category)) or CATEGORY_FOLDER.get(spec.category, spec.category)
+    style = STYLE_FOLDER.get(spec.top, spec.top)
     rows = []
     for jpg in sorted(batch.root.glob("m[0-9][0-9][0-9][0-9]/*/*.jpg")):
         m = JPG.match(jpg.name)
