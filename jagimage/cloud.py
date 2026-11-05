@@ -526,6 +526,10 @@ class DriveSync:
         if not self.drive.connected:
             return 0
         with self.lock:
+            try:  # bases of finished batches leave first: a full disk would stop everything below
+                self._archive_bases()
+            except OSError as exc:
+                self.status["bases_error"] = f"{type(exc).__name__}: {exc}"[:400]
             todo = self.pending()
             self.status.update(pending=len(todo), last_run=round(time.time()))
             sent, skipped, failed = 0, None, None
@@ -590,8 +594,13 @@ class DriveSync:
                 except Exception as exc:  # try again next round
                     self.status["bases_error"] = f"{png.relative_to(root.parent)}: {type(exc).__name__}: {exc}"[:400]
                     return
-                Path(str(png) + studio.ARCHIVED).write_text(json.dumps({"time": round(time.time())}))
-                png.unlink()
+                marker = Path(str(png) + studio.ARCHIVED)
+                try:
+                    marker.write_text(json.dumps({"time": round(time.time())}))
+                except OSError:  # a full disk: the base is safe on Drive, so free its space and write the marker then
+                    png.unlink()
+                    marker.write_text(json.dumps({"time": round(time.time())}))
+                png.unlink(missing_ok=True)
                 self.status["bases_archived"] = self.status.get("bases_archived", 0) + 1
 
     def start(self):
