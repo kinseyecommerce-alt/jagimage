@@ -1397,9 +1397,12 @@ class Batch:
                     o, qc = paint(tmask, bmask)
                     return o
                 before = (check["bleed_px"], check["base_left_px"])
+                kept = (out, tmask, bmask, qc, check, problems)
                 out, ms = local_fix(img, out, [tmask] + ([bmask] if bottom else []), [thex] + ([bhex] if bottom else []), repaint)
                 tmask, bmask = ms[0], (ms[1] if bottom else bmask)
                 check, problems = judge(out, tmask, bmask, qc)
+                if check["bleed_px"] + check["base_left_px"] > sum(before):  # the retouch made it worse: keep the fix
+                    out, tmask, bmask, qc, check, problems = kept
                 fixed.append(f"retouch: bleed {before[0]}→{check['bleed_px']} px, base colour {before[1]}→{check['base_left_px']} px")
                 self._event("qc_retouched", model=path.parent.parent.name, path=str(path))
             if problems:  # still counted after fixing: the agent looks whether a shopper would see it

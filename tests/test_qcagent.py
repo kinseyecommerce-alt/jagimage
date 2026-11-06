@@ -364,3 +364,23 @@ def test_the_held_stage_makes_only_held_photos_again(tmp_path):
     counts = again.run(stage="recolor")
     assert counts["recoloured"] == 1 and counts["ai_done"] == 0
     assert not json.loads(qc_file.read_text())["back"]["check"].get("held")
+
+
+def test_local_fix_paints_a_thin_strip_of_base_colour_along_a_seam():
+    import numpy as np
+    from PIL import Image
+
+    from jagimage.qcagent import local_fix
+    from jagimage.recolor import hex_to_lab, lab_to_rgb
+
+    h, w = 60, 60
+    lav = lab_to_rgb(hex_to_lab("#C7B2DE")[None, None, :]).reshape(3)
+    before = np.full((h, w, 3), 220, np.uint8)
+    after = before.copy()
+    after[10:50, 15:45] = lav
+    after[12:48, 29:31] = (143, 211, 168)  # a 2 px mint line down a side seam
+    m = np.zeros((h, w), np.float32)
+    m[10:50, 15:45] = 1
+    out, _ = local_fix(Image.fromarray(before), Image.fromarray(after), [m], ["#C7B2DE"], lambda ms: Image.fromarray(after))
+    o = np.asarray(out).astype(int)
+    assert abs(o[30, 29] - lav.astype(int)).max() < 25  # the seam line took the lavender

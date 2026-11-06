@@ -178,6 +178,9 @@ SHADE_CHROMA_MIN = 0.5  # ...or with less than this share of a colourful target'
 NEUTRAL_CHROMA = 0.035  # on black, white and grey targets: a pixel with more colour than this is a tinted patch
 
 
+SHADE_MIN_PX = 6  # the smallest off-shade spot local_fix paints (fewer pixels are noise)
+
+
 def local_fix(before: Image.Image, after: Image.Image, masks: list, targets: list, recolour: Callable):
     """The QC agent's own retouch, on the server (no AI call): for colour bleed and wrong shades only.
     1. Where top and bottom meet, the line between them is redrawn along the photo's edges (split_outfit), so
@@ -209,7 +212,11 @@ def local_fix(before: Image.Image, after: Image.Image, masks: list, targets: lis
             wrong = inside & (off | (C < SHADE_CHROMA_MIN * ct))
         else:
             wrong = inside & (C > NEUTRAL_CHROMA)
-        wrong = ndimage.binary_opening(wrong, iterations=1)  # a patch, not single noisy pixels
+        # a patch or a thin strip (a seam line), not single noisy pixels: an opening would wipe 1-2 px lines
+        lab_ids, n = ndimage.label(wrong, structure=np.ones((3, 3)))
+        if n:
+            sizes = ndimage.sum(wrong, lab_ids, index=np.arange(1, n + 1))
+            wrong = np.isin(lab_ids, np.flatnonzero(sizes >= SHADE_MIN_PX) + 1)
         if wrong.any():
             a = ndimage.gaussian_filter(ndimage.binary_dilation(wrong, iterations=1).astype(np.float32), 1.0) * inside
             lab[..., 1] = lab[..., 1] * (1 - a) + T[1] * a
