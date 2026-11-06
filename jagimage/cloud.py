@@ -587,10 +587,12 @@ class DriveSync:
             if waiting(root) or any(waiting(root.parent / t) or not (root.parent / t / "_complete").exists() for t in twins):
                 continue
             for png in sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png")):
-                if "_mask" in png.name or studio.archived(png):
-                    continue
+                if "_mask" in png.name or ".tmp." in png.name or studio.archived(png):
+                    continue  # masks stay; a .tmp file is still being written
                 try:
                     self.drive.upload(png, ["_bases", root.name, png.parent.parent.parent.name, png.parent.name], png.name)
+                except FileNotFoundError:  # it went meanwhile (e.g. made again): nothing to keep
+                    continue
                 except Exception as exc:  # try again next round
                     self.status["bases_error"] = f"{png.relative_to(root.parent)}: {type(exc).__name__}: {exc}"[:400]
                     return

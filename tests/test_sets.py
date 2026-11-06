@@ -346,3 +346,30 @@ def test_photos_held_for_review_do_not_keep_the_bases_on_the_server(tmp_path, sh
     assert list(root.glob("m*/*/back_*.jpg")) and not list(root.glob("m*/*/front_main_*.jpg"))  # held stays, passed went
     assert not [p for p in root.glob("m*/_base/*/*.png") if "_mask" not in p.name]  # the bases went to Drive anyway
     assert any(f.startswith(f"_bases/{sp.name}/") for f in drive.files)
+
+
+def test_base_archiving_skips_files_still_being_written(tmp_path, shop_colours):
+    from jagimage.cloud import DriveSync
+
+    class FakeDrive:
+        connected = True
+
+        def __init__(self):
+            self.files = {}
+
+        def upload(self, local, parts, name):
+            self.files["/".join(parts + [name])] = 1
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main", "back"], also_fabrics=[],
+                     one_base=True, keep_png=False, drive_layout="catalogue", free_after_upload=True)
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    front = b.base_path(1, ("light", "light"), "front_main")
+    (front.parent / "back.tmp.png").write_bytes(front.read_bytes())  # a new shot half written
+    drive = FakeDrive()
+    sync = DriveSync(drive, lambda: str(tmp_path))
+    sync.run_once()
+    assert not sync.status.get("bases_error")
+    assert sorted(f for f in drive.files if f.startswith("_bases/")) == [
+        f"_bases/{sp.name}/m0001/light-light/back.png", f"_bases/{sp.name}/m0001/light-light/front_main.png"]
