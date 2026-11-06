@@ -625,3 +625,31 @@ def test_a_bulk_run_goes_on_with_openai_when_gemini_runs_out_of_credits(tmp_path
         assert shots["gemini"] == 3 and shots["openai"] == 2 * 2 * 2 - 1  # the photo Gemini made is not made again
     finally:
         httpd.shutdown()
+
+
+def test_a_bulk_run_switches_engine_when_the_job_itself_ends_on_no_credits():
+    # in batch mode the "out of credits" reply can end the whole job (while sending a batch), not a single photo
+    import threading
+    from types import SimpleNamespace
+
+    from jagimage.server import AgentRun
+
+    started = []
+
+    class App:
+        jobs = {}
+
+        def start(self, body):
+            started.append(body)
+            gem = body["provider"] == "gemini"
+            t = threading.Thread(target=lambda: None)
+            t.start()
+            return SimpleNamespace(id=str(len(started)), thread=t, finished=1, batches=[
+                SimpleNamespace(fatal=None, spec=SimpleNamespace(first_model=21))],
+                error="ClientError: 402 RESOURCE_EXHAUSTED. Your prepayment credits are depleted." if gem else None)
+    run = AgentRun(App(), [{"provider": "gemini", "image_size": "2K"}, {"provider": "gemini"}], "bulk",
+                   fallback={"provider": "openai", "quality": "medium"})
+    run._run()
+    assert [b["provider"] for b in started] == ["gemini", "openai", "openai"]
+    assert started[1]["first_model"] == 21 and "image_size" not in started[1]
+    assert run.done == 2 and run.status()["engine"] == "openai"

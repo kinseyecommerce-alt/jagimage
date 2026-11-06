@@ -284,6 +284,8 @@ class AgentRun:
                 self.job_ids.append(job.id)
                 job.thread.join()
                 fatal = next((b.fatal for b in job.batches if b.fatal), None)
+                if not fatal and job.error:  # an account problem can also end the job itself (e.g. sending a batch)
+                    fatal = studio.account_problem(RuntimeError(job.error), body.get("provider", "gemini"))
                 if fatal and self.fallback and not self.switched and not self.stopped:
                     # out of credits: the same models (same faces) go on with the fallback engine; made photos are kept
                     self.switched = dict(self.fallback)
