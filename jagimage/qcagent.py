@@ -109,12 +109,32 @@ def check_base(ask: Callable, img: Image.Image, spec, pose: str, masks=None) -> 
     return res if res["ok"] is not None else waist
 
 
-def photo_points(top: str, bottom: Optional[str], left: bool, bleed: bool) -> List[str]:
+BASE_NAMES = {"mint green": "#8FD3A8", "lilac": "#C4A3EE"}  # the colours the AI photo was shot in
+
+
+def photo_points(top: str, bottom: Optional[str], left: bool, bleed: bool, hexes: Optional[List[str]] = None) -> List[str]:
+    """hexes: the clothes' target colours. A base colour in their family (lilac for a lavender or purple top) is
+    not named as a fault: the eye can't tell it from the garment's own colour, and naming it fails good photos."""
+    import numpy as np
+
+    from .recolor import hex_to_lab
+
     clothes = f"the {top} top" + (f" and the {bottom} bottom" if bottom else "")
+    faults = ["grey", "white", "black"]
+    for name, bh in BASE_NAMES.items():
+        B = hex_to_lab(bh)
+        near = False
+        for th in hexes or []:
+            T = hex_to_lab(th)
+            if np.hypot(T[1], T[2]) > 0.03 and abs(np.angle(np.exp(1j * (np.arctan2(B[2], B[1]) - np.arctan2(T[2], T[1]))))) < np.radians(35):
+                near = True
+        if not near:
+            faults.append(name)
     points = [f"The clothes were recoloured to {clothes}. Every part of each garment is that colour, with its natural "
               "folds and shading. FAIL for any visible patch, strip or edge of a different colour on the clothes "
-              "(grey, white, black, mint green, lilac, or the other garment's colour), for example along the inside "
-              "of a sleeve, at the waistband, the cuffs or the hood."]
+              f"({', '.join(faults)}, or the other garment's colour), for example along the inside "
+              "of a sleeve, at the waistband, the cuffs or the hood. Slight shading differences in the same colour "
+              "family are fine."]
     if bleed:
         points.append("The clothes' colour has not spilled onto the skin, hair, shoes or the background. FAIL for a "
                       "visible coloured fringe or blotch beside the clothes.")

@@ -598,12 +598,19 @@ def quality_check(before: Image.Image, after: Image.Image, masks: list, base_hex
     C = np.hypot(a[..., 1], a[..., 2])
     H = np.arctan2(a[..., 2], a[..., 1])
     left = np.zeros_like(g)
-    for m, bh, th in zip(masks, base_hexes, target_hexes):
+    for i, (m, bh, th) in enumerate(zip(masks, base_hexes, target_hexes)):
         B, T = hex_to_lab(bh), hex_to_lab(th)
         hb, ht = np.arctan2(B[2], B[1]), np.arctan2(T[2], T[1])
         if np.hypot(T[1], T[2]) > 0.04 and abs(np.angle(np.exp(1j * (hb - ht)))) < np.radians(35):
             continue  # a green target on a mint base: its own hue isn't leftover base colour
-        left |= (m > 0.95) & (np.abs(np.angle(np.exp(1j * (H - hb)))) < np.radians(20)) & (C > 0.04)
+        here = (m > 0.95) & (np.abs(np.angle(np.exp(1j * (H - hb)))) < np.radians(20)) & (C > 0.04)
+        for j, oh in enumerate(target_hexes):  # the other garment's own colour where they meet (a lavender
+            if j == i:                          # top's hem over the lilac-based shorts) isn't leftover base
+                continue
+            O = hex_to_lab(oh)
+            if np.hypot(O[1], O[2]) > 0.03 and abs(np.angle(np.exp(1j * (hb - np.arctan2(O[2], O[1]))))) < np.radians(35):
+                here &= np.linalg.norm(a - O, axis=-1) > 0.12
+        left |= here
     out = {"bleed_px": int(bleed.sum()), "base_left_px": int(left.sum()), "problems": []}
     # the limits were set on 1536 px tall photos: edges in a taller photo (Gemini 2K: 2400 px) hold more pixels
     scale = max(1.0, b.shape[0] / QC_HEIGHT)

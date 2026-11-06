@@ -308,3 +308,59 @@ def test_the_kids_bottom_photo_is_not_used_for_adults(tmp_path):
     b = studio.Batch(spec(category="Men", top="HalfSleeveTee", colour_pairs=[["Red", "Black"]]), out=tmp_path)
     assert b.bottom_ref() is None
     assert studio.Batch(spec(), out=tmp_path).bottom_ref() == ref
+
+
+def test_a_lavender_top_over_lilac_based_shorts_is_not_counted_as_lilac_left():
+    import numpy as np
+    from PIL import Image
+
+    from jagimage.recolor import quality_check
+
+    h, w = 120, 80
+    before = np.full((h, w, 3), 200, np.uint8)
+    before[60:, :] = (196, 163, 238)  # the shorts, shot in lilac
+    top = np.zeros((h, w), np.float32)
+    top[:70] = 1
+    bottom = np.zeros((h, w), np.float32)
+    bottom[60:] = 1  # the top's hem lies over the waistband: rows 60-70 are in both
+    after = before.copy()
+    after[60:] = (21, 21, 21)
+
+    def run(top_hex, hem):
+        a = after.copy()
+        a[:70] = hem
+        return quality_check(Image.fromarray(before), Image.fromarray(a), [top, bottom], ["#8FD3A8", "#C4A3EE"],
+                             [top_hex, "#151515"])
+    assert run("#C7B2DE", (199, 178, 222))["base_left_px"] == 0  # lavender: its own colour, not leftover
+    # a red top: lilac really left at the waistband still counts
+    a = after.copy()
+    a[:60] = (207, 11, 21)
+    a[60:70] = (196, 163, 238)
+    res = quality_check(Image.fromarray(before), Image.fromarray(a), [top, bottom], ["#8FD3A8", "#C4A3EE"],
+                        ["#CF0B15", "#151515"])
+    assert res["base_left_px"] > 0
+
+
+def test_the_vision_check_does_not_call_lilac_a_fault_on_a_lavender_or_purple_garment():
+    from jagimage.qcagent import photo_points
+
+    assert "lilac" not in photo_points("Lavender", "Black", True, False, ["#C7B2DE", "#151515"])[0]
+    assert "lilac" not in photo_points("Purple", "Black", True, False, ["#7F35B2", "#151515"])[0]
+    red = photo_points("Red", "Black", True, False, ["#CF0B15", "#151515"])[0]
+    assert "lilac" in red and "mint green" in red
+    assert "mint green" not in photo_points("Green", "Black", True, False, ["#2E7D32", "#151515"])[0]
+
+
+def test_the_held_stage_makes_only_held_photos_again(tmp_path):
+    b = studio.Batch(spec(qc_agent=False), out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    qc_file = next(b.root.glob("m0001/Red__Red/qc.json"))
+    rows = json.loads(qc_file.read_text())
+    rows["back"]["check"].update(passed=False, held=True, problems=["base colour left"])
+    qc_file.write_text(json.dumps(rows))
+    again = studio.Batch(spec(qc_agent=False), out=tmp_path, generate=fake_generate, workers=1, redo="held")
+    front, back = (again.out_path(1, "Red", "Red", p) for p in ("front_main", "back"))
+    assert again._done(front, "front_main") and not again._done(back, "back")
+    counts = again.run(stage="recolor")
+    assert counts["recoloured"] == 1 and counts["ai_done"] == 0
+    assert not json.loads(qc_file.read_text())["back"]["check"].get("held")

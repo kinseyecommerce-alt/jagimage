@@ -919,8 +919,8 @@ class Batch:
         added later, or a redo); the Drive sync moves it out again once everything is uploaded."""
         if not archived(path) or self.restore is None:
             return False
-        if not self.redo and all(self.made(self.out_path(m, t, b, pose), pose)
-                                 for t, b in self.spec.pairs(m) if self.spec.base_key(t, b) == base):
+        if all(self._done(self.out_path(m, t, b, pose), pose)
+               for t, b in self.spec.pairs(m) if self.spec.base_key(t, b) == base):
             return False
         try:
             data = self.restore(path)
@@ -1183,7 +1183,7 @@ class Batch:
             if self.stop.is_set():
                 return
             path = self.out_path(m, t, b, pose)
-            if self.made(path, pose) and not self.redo:
+            if self._done(path, pose):
                 self._event("recolour_skipped", model=m, path=str(path))
                 continue
             try:
@@ -1403,7 +1403,8 @@ class Batch:
                 fixed.append(f"retouch: bleed {before[0]}→{check['bleed_px']} px, base colour {before[1]}→{check['base_left_px']} px")
                 self._event("qc_retouched", model=path.parent.parent.name, path=str(path))
             if problems:  # still counted after fixing: the agent looks whether a shopper would see it
-                agent = inspect(self.inspector, out, photo_points(top, bottom, check["base_left_px"] > 0, check["bleed_px"] > 0))
+                agent = inspect(self.inspector, out, photo_points(top, bottom, check["base_left_px"] > 0, check["bleed_px"] > 0,
+                                                                [thex] + ([bhex] if bottom else [])))
                 held = agent["ok"] is not True
             if fixed:
                 self._event("qc_fixed", model=path.parent.parent.name, path=str(path))
@@ -1462,6 +1463,24 @@ class Batch:
                 shutil.copy2(f, dest / f"{model}_{pose}{f.suffix}")
 
     # ---- results
+    def _done(self, path: Path, pose: str) -> bool:
+        """Nothing to make for this photo. redo True: everything is made again; redo "held": only the photos the
+        QC agent held (not approved by a person) are made and judged again."""
+        if self.redo is True:
+            return False
+        if not self.made(path, pose):
+            return False
+        if self.redo == "held":
+            from .qcagent import passed
+
+            qc = path.parent / "qc.json"
+            try:
+                row = (json.loads(qc.read_text()).get(pose) or {}).get("check") or {}
+            except (OSError, ValueError):
+                return True
+            return not (row.get("held") and not passed(qc, pose))
+        return True
+
     def made(self, path: Path, pose: str) -> bool:
         """A recoloured photo exists: its PNG, or only its marketplace JPG when PNGs aren't kept, or that JPG
         went to Google Drive and was taken off the server."""

@@ -318,10 +318,10 @@ class Studio:
 
     def start(self, body: dict) -> Job:
         stage = body.pop("stage", "all")
-        redo = stage in ("redo", "redo_prints", "qc")  # make finished photos again
-        stage = {"redo": "recolor", "redo_prints": "prints"}.get(stage, stage)
+        redo = "held" if stage == "held" else stage in ("redo", "redo_prints", "qc")  # make finished photos again
+        stage = {"redo": "recolor", "redo_prints": "prints", "held": "recolor"}.get(stage, stage)
         if stage not in ("all", "bases", "recolor", "prints", "qc"):
-            raise ValueError("stage must be all, bases, recolor, redo, qc or prints")
+            raise ValueError("stage must be all, bases, recolor, redo, held, qc or prints")
         if stage == "prints" and not self.cloud:
             raise ValueError("Prints come from Google Drive print folders, in the website version")
         workers = max(1, min(16, int(body.pop("workers", self.workers) or 1)))  # parallel AI requests
