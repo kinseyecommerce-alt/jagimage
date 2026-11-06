@@ -116,6 +116,9 @@ def bottom_ref_path(out: Path, bottom: str) -> Path:
     return Path(out) / "_refs" / "bottoms" / f"{bottom}.jpg"
 
 
+# hair accessories in the clothes' colour get recoloured with them (or keep the old colour): none at all
+HAIR_RULE = (" No hair accessories in any colour: no bows, ribbons, hair slides, flowers or scrunchies; hair held only by "
+             "plain black or dark brown elastics where needed.")
 UNTUCKED_RULE = (" The top is worn untucked: its hem hangs loosely OVER the waistband of the bottom, which is hidden under "
                  "the top's hem; the top is never tucked in.")
 WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paired with this bottom
@@ -505,6 +508,7 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
         text += f" Also: {spec.extra.rstrip('.')}."
     if kids:
         text += L.KIDS_RULE
+    text += HAIR_RULE
     product = "Trackpants" if spec.bottom == "Trackpants" else spec.top
     negative = L.build_negative(spec.category, product, pose)
     if not top_only:  # the top's hem over the waistband in every pose, as the shop sells them

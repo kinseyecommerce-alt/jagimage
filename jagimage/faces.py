@@ -44,7 +44,7 @@ FEATURES: Dict[str, Dict[str, List[str]]] = {
                  "soft square face with full cheeks"],
         "skin": SKIN,
         "hair": ["short bob with a straight fringe", "two high pigtails", "a single high ponytail", "two neat braids",
-                 "shoulder-length curly hair", "half-up hair with a small clip", "short wavy bob", "two low pigtails with ribbons"],
+                 "shoulder-length curly hair", "half-up hair", "short wavy bob", "two low pigtails"],
         "eyes": EYES,
         "brows": ["thick dark eyebrows", "soft thin eyebrows", "naturally arched eyebrows"],
         "smile": ["wide toothy grin", "shy closed-mouth smile", "big dimpled smile", "playful half smile"],

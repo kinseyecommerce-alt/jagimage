@@ -1073,3 +1073,14 @@ def test_a_batch_can_be_deleted_to_free_space(tmp_path):
         assert _post(f"{base}/api/batches/..%2Fetc/delete", {})[0] == 400  # only a batch folder, nothing else
     finally:
         httpd.shutdown()
+
+
+def test_prompts_ask_for_no_hair_accessories_that_would_take_the_clothes_colour():
+    # OpenAI added bows and scrunchies in the shorts' colour to many girls: the QC agent rejected them, paid twice
+    from jagimage import faces
+
+    sp = studio.Spec(category="Kids_Girls", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=8)
+    for m in range(1, 9):
+        text = studio.prompt(sp, m, ("light", "light"), "front_main", "none")
+        assert "No hair accessories" in text and "ribbon" not in faces.describe("Kids_Girls", m).lower()
+        assert "clip" not in faces.describe("Kids_Girls", m).lower()
