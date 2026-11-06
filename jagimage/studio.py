@@ -1401,6 +1401,9 @@ class Batch:
                 out, ms = local_fix(img, out, [tmask] + ([bmask] if bottom else []), [thex] + ([bhex] if bottom else []), repaint)
                 tmask, bmask = ms[0], (ms[1] if bottom else bmask)
                 check, problems = judge(out, tmask, bmask, qc)
+                if check["bleed_px"]:  # the retouch recolours afresh: skin and backdrop get their own pixels back again
+                    out = fix_photo(img, out, {"_bleed": check["_bleed"]}, None)
+                    check, problems = judge(out, tmask, bmask, qc)
                 if check["bleed_px"] + check["base_left_px"] > sum(before):  # the retouch made it worse: keep the fix
                     out, tmask, bmask, qc, check, problems = kept
                 fixed.append(f"retouch: bleed {before[0]}→{check['bleed_px']} px, base colour {before[1]}→{check['base_left_px']} px")
