@@ -637,6 +637,15 @@ def make_handler(app: Studio):
                 return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
             if parts == ["api", "guides"]:
                 return self._json({"guides": c.guides()})
+            if parts == ["api", "drive", "inventory"]:  # admin: photos per folder in the photos folder (see POST)
+                self._admin()
+                return self._json(c.inventory)
+            if parts == ["api", "drive", "file"]:  # admin: one photo of the photos folder by its path, to look at
+                self._admin()
+                path = [p for p in q.get("path", [""])[0].split("/") if p]
+                if not path:
+                    raise ValueError("path=Folder/Sub/name.jpg")
+                return self._send(200, c.drive.fetch(path[:-1], path[-1]), "image/jpeg")
             if parts == ["api", "dropbox"]:
                 return self._json(c.dropbox.status())
             if parts == ["dropbox", "connect"]:
@@ -805,6 +814,23 @@ def make_handler(app: Studio):
                 self._admin()
                 c.drive.set_client(body.get("client_id"), body.get("client_secret"))
                 return self._json(c.drive_status())
+            if parts == ["api", "drive", "inventory"]:
+                self._admin()
+                if c.inventory.get("running"):
+                    return self._json(c.inventory)
+
+                def walk():
+                    import collections
+
+                    try:
+                        files = c.drive.list_tree(c.drive.folder_id([]), depth=7, limit=400000)
+                        n = collections.Counter("/".join(f["path"]) for f in files)
+                        c.inventory = {"running": False, "files": len(files), "folders": dict(sorted(n.items()))}
+                    except Exception as exc:
+                        c.inventory = {"running": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+                c.inventory = {"running": True}
+                threading.Thread(target=walk, daemon=True).start()
+                return self._json(c.inventory)
             if parts == ["api", "dropbox", "client"]:
                 self._admin()
                 c.dropbox.set_client(body.get("app_key"), body.get("app_secret"), body.get("root", ""))
