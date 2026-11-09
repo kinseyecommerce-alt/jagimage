@@ -189,7 +189,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#listings" role="tab" data-tab="listings" class="hide" id="tabListings">Listings</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-meta"></span>Meta</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
@@ -259,7 +259,27 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     </div>
     <p class="hint" id="colMsg"></p>
   </section>
-<section class="panel hide" id="drivePanel">
+<section class="panel hide" id="dropboxPanel">
+      <h2>Dropbox</h2>
+      <div id="dbState" class="hint">–</div>
+      <div id="dbSetup" class="hide">
+        <ol class="hint" style="margin:6px 0 8px;padding-left:18px;line-height:1.6">
+          <li>Open <a href="https://www.dropbox.com/developers/apps/create" target="_blank" rel="noopener">Dropbox App Console</a>: <b>Scoped access</b>, <b>Full Dropbox</b>, name it e.g. <b>JagStudio-SPB</b>, Create.</li>
+          <li>Permissions tab: tick <b>files.content.write</b>, <b>files.content.read</b>, <b>sharing.write</b>, <b>sharing.read</b>, <b>account_info.read</b>, Submit.</li>
+          <li>Settings tab, OAuth 2 Redirect URIs: add <code id="dbRedirect"></code>.</li>
+          <li>Paste the App key and App secret here:</li>
+        </ol>
+        <div class="row">
+          <input type="text" id="dbKey" placeholder="App key" autocomplete="off" style="flex:1;min-width:160px">
+          <input type="password" id="dbSecret" placeholder="App secret" autocomplete="off" style="flex:1;min-width:160px">
+          <input type="text" id="dbRoot" placeholder="Folder in Dropbox (e.g. SPB Printed)" style="flex:1;min-width:160px">
+          <button class="btn primary" id="dbSave" type="button">Save and connect</button>
+        </div>
+      </div>
+      <div class="row hide" id="dbActions"><a class="btn" href="/dropbox/connect">Connect again</a><button class="btn" id="dbOff" type="button">Disconnect</button></div>
+      <p class="e" id="dbErr"></p>
+    </section>
+    <section class="panel hide" id="drivePanel">
       <h2>Google Drive</h2>
       <div id="driveState" class="hint">–</div>
       <div id="driveSetup" class="hide">
@@ -312,6 +332,25 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   </section>
 </div>
 <div id="printTab" class="hide tabpage">
+  <section class="panel" id="driveRunPanel">
+    <h2>Print from Google Drive links</h2>
+    <p class="hint">Paste a Drive folder of plain T-shirt photos (your model photos, flat lays or hanger shots, in subfolders by colour and style is best) and a Drive folder of prints. The AI finds the shirt in every front photo, prints each artwork on it exactly as drawn, and puts each print only on the shirt colours it suits. Every print × product is one SKU, saved as <b>Printed/&lt;SKU&gt;</b> in Google Drive and in Dropbox, ready for the Listings tab. About ₹0.3 of AI per photo looked at.</p>
+    <div class="row">
+      <label class="field" style="flex:3"><span>Plain T-shirts folder link</span><input type="text" id="drTees" placeholder="https://drive.google.com/drive/folders/…"></label>
+      <label class="field" style="flex:3"><span>Prints folder link</span><input type="text" id="drPrints" placeholder="https://drive.google.com/drive/folders/…"></label>
+    </div>
+    <div class="row">
+      <label class="field"><span>Print position</span><select id="drPlace"></select></label>
+      <label class="field"><span>Photos per SKU</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
+      <label class="field"><span>Test: stop after (SKUs, 0 = all)</span><input type="number" id="drLimit" value="3" min="0"></label>
+      <label class="field" style="flex:2"><span>SKU pattern</span><input type="text" id="drPattern" placeholder="{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"></label>
+      <label class="field"><span>Brand</span><input type="text" id="drBrand" placeholder="SPB"></label>
+    </div>
+    <p class="hint">SKU pattern fields: {BRAND} {CAT} (M, W, KB, KG) {CATEGORY} {STYLE} (HS, FS, SL, OS, SW, HD, ZH) {STYLE_NAME} {FABRIC} (CM, PC) {COLOUR} {COL3} {PRINT} (the print's file name) {N} (running number). Example: <span id="drExample"></span></p>
+    <div class="row"><button class="btn primary" id="drStart" type="button">Start printing</button><button class="btn hide" id="drStop" type="button">Stop</button></div>
+    <p class="e" id="drErr"></p>
+    <div id="drStatus" class="hint"></div>
+  </section>
   <section class="panel" id="printRunPanel">
     <h2>Put prints on photos</h2>
     <p class="hint">Pick a finished batch. Every print from its matching print folder goes on each finished front photo, exactly as drawn: no AI, no cost. Printed photos sit next to the plain ones and upload to Google Drive too.</p>
@@ -365,6 +404,24 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <button class="btn primary" id="pAddBtn" type="button">Add</button>
     </div>
     <p class="e" id="printErr"></p>
+  </section>
+</div>
+<div id="listingsTab" class="hide tabpage">
+  <section class="panel">
+    <h2>Listing creator</h2>
+    <p class="hint">Marketplace upload files for your printed SKUs. The AI looks at each product photo and writes every marketplace's title in that marketplace's own pattern with the words buyers search, bullets, description, keywords and every filter attribute; the software then holds it to each marketplace's rules (lengths, banned words, keyword limits) so files aren't rejected. Image links come from Dropbox. About ₹0.5 of AI per SKU.</p>
+    <div class="row"><label class="field" style="flex:3"><span>Print runs (SKUs)</span><select id="lsRuns" multiple size="4"></select></label></div>
+    <div class="row" id="lsMarkets"></div>
+    <h3 style="margin:12px 0 4px">Product facts <span class="hint">(saved for next time; leave empty what you don't know)</span></h3>
+    <div class="row" id="lsFacts"></div>
+    <details style="margin-top:8px"><summary>Use my marketplace templates (optional)</summary>
+      <p class="hint">Download the category's listing template from each seller portal and add it here: the listings are written into its own columns. Without one you get a clean sheet with every field (Shopify: its product import CSV).</p>
+      <div class="row" id="lsTemplates"></div>
+    </details>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="lsStart" type="button">Create listings</button></div>
+    <p class="e" id="lsErr"></p>
+    <div id="lsStatus" class="hint"></div>
+    <div id="lsPreview"></div>
   </section>
 </div>
 <div id="marketTab" class="hide tabpage">
@@ -954,9 +1011,97 @@ function initGuide() {
   $("guideUse").onclick = () => { const g = (S.guides || []).find((x) => x.id === $("guideSel").value); if (g) { applyGuide(g); $("guideOut").innerHTML = guideHtml(g) + '<p class="hint">Studio is set up with it: pick the product and colours there, then run.</p>'; } };
   $("guideDel").onclick = async () => { const id = $("guideSel").value; if (id && confirm("Delete this saved guide?")) { await api(`/api/guides/${encodeURIComponent(id)}/delete`, {}); guidesRefresh(); $("guideOut").innerHTML = ""; } };
 }
+
+// ---------- print from Drive links: a print run on the server (jagimage.printrun)
+const SKU_DEMO = { BRAND: "SPB", CAT: "KB", CATEGORY: "KIDSBOYS", STYLE: "HS", STYLE_NAME: "HALFSLEEVETEE", FABRIC: "PC", COLOUR: "RED", COL3: "RED", PRINT: "DINO01", N: "0001" };
+function skuExample() {
+  const pat = $("drPattern").value || "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}", brand = ($("drBrand").value || "SPB").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  $("drExample").textContent = pat.replace(/\{([A-Za-z_0-9]+)\}/g, (m, k) => k.toUpperCase() === "BRAND" ? brand : (SKU_DEMO[k.toUpperCase()] ?? "")).replace(/[^A-Za-z0-9_-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+}
+async function initDriveRun() {
+  const places = (await api("/api/prints")).places || {};
+  $("drPlace").innerHTML = Object.entries(places).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  const shop = await api("/api/shop"); $("drPattern").value = shop.sku_pattern; $("drBrand").value = shop.brand; skuExample();
+  $("drPattern").oninput = skuExample; $("drBrand").oninput = skuExample;
+  $("drStart").onclick = async () => {
+    $("drErr").textContent = "";
+    try {
+      await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
+      S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
+        per_sku: +$("drPer").value, limit: +$("drLimit").value });
+      driveRunRefresh();
+    } catch (e) { $("drErr").textContent = e.message; }
+  };
+  $("drStop").onclick = async () => { if (S.printRun) await api(`/api/printruns/${S.printRun.id}/stop`, {}); driveRunRefresh(); };
+}
+async function driveRunRefresh() {
+  clearTimeout(S.drTimer);
+  const runs = (await api("/api/printruns")).runs || []; const r = runs.find((x) => x.running) || runs[0];
+  $("drStop").classList.toggle("hide", !(r && r.running)); $("drStart").disabled = !!(r && r.running);
+  if (!r) { $("drStatus").innerHTML = ""; return; }
+  S.printRun = r; const c = r.counts || {};
+  $("drStatus").innerHTML = `<p>${r.running ? status("idle", "Printing: " + (r.stage || "")) : r.error ? status("bad", r.error) : status("good", "Done")}
+    ${fmt(c.skus || 0)} SKUs · ${fmt(c.photos || 0)} photos · ${fmt(c.left_out || 0)} print/colour pairs left out (didn't suit) · ${fmt(c.dropbox || 0)} in Dropbox · ${fmt(c.errors || 0)} errors</p>`
+    + ((r.skus || []).length ? `<div class="tablewrap"><table class="agenttab"><tr><th>SKU</th><th>Category</th><th>Style</th><th>Colour</th><th>Print</th><th class="r">Photos</th></tr>`
+      + r.skus.slice(-60).reverse().map((x) => `<tr><td>${esc(x.sku)}</td><td>${esc(label(x.category || ""))}</td><td>${esc(nice(x.style || ""))}</td><td>${esc(x.colour)}</td><td>${esc(x.print)}</td><td class="r">${x.photos}</td></tr>`).join("") + `</table></div>` : "");
+  if (r.running) S.drTimer = setTimeout(driveRunRefresh, 5000);
+}
+// ---------- listing creator (jagimage.listing)
+const MARKET_NAMES = { amazon: "Amazon", flipkart: "Flipkart", myntra: "Myntra", meesho: "Meesho", jiomart: "JioMart", shopify: "Shopify" };
+const FACTS = [["brand", "Brand"], ["sizes", "Sizes (comma separated)"], ["mrp", "MRP ₹"], ["price", "Selling price ₹"], ["gsm", "GSM"],
+  ["fabric", "Fabric (e.g. 100% Cotton)"], ["hsn", "HSN code"], ["gst", "GST %"], ["weight", "Weight (g)"], ["wash_care", "Wash care"],
+  ["origin", "Country of origin"], ["manufacturer", "Manufacturer name & address"], ["packer", "Packer name & address"], ["stock", "Stock per size"]];
+async function initListings() {
+  $("lsMarkets").innerHTML = Object.entries(MARKET_NAMES).map(([k, v]) => `<label class="check"><input type="checkbox" value="${k}" checked> <span>${v}</span></label>`).join("");
+  $("lsTemplates").innerHTML = Object.entries(MARKET_NAMES).filter(([k]) => k !== "shopify").map(([k, v]) => `<label class="field"><span>${v} template (.xlsx)</span><input type="file" data-m="${k}" accept=".xlsx,.xlsm"></label>`).join("");
+  const shop = await api("/api/shop"), f = shop.facts || {};
+  $("lsFacts").innerHTML = FACTS.map(([k, t]) => `<label class="field"><span>${t}</span><input type="text" data-k="${k}" value="${esc(f[k] ?? (k === "brand" ? shop.brand : k === "hsn" ? "6109" : k === "gst" ? "5" : k === "origin" ? "India" : ""))}"></label>`).join("");
+  $("lsStart").onclick = async () => {
+    $("lsErr").textContent = "";
+    try {
+      const facts = {}; document.querySelectorAll("#lsFacts input").forEach((i) => { facts[i.dataset.k] = i.value; });
+      await api("/api/shop", { facts });
+      const templates = {};
+      for (const i of document.querySelectorAll("#lsTemplates input")) if (i.files[0]) templates[i.dataset.m] = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(i.files[0]); });
+      const runs = [...$("lsRuns").selectedOptions].map((o) => o.value);
+      const markets = [...document.querySelectorAll("#lsMarkets input:checked")].map((i) => i.value);
+      S.listJob = await api("/api/listings/start", { runs, markets, facts, templates });
+      listingPoll();
+    } catch (e) { $("lsErr").textContent = e.message; }
+  };
+}
+async function listingsRefresh() {
+  const runs = ((await api("/api/printruns")).runs || []).filter((r) => (r.skus || []).length);
+  $("lsRuns").innerHTML = runs.length ? runs.map((r, i) => `<option value="${r.id}" ${i === 0 ? "selected" : ""}>${esc(r.label || r.id)} · ${(r.counts || {}).skus || r.skus.length} SKUs${r.running ? " (still printing)" : ""}</option>`).join("")
+    : `<option value="">No printed SKUs yet: make some in Print placement first</option>`;
+}
+async function listingPoll() {
+  clearTimeout(S.lsTimer); if (!S.listJob) return;
+  const j = S.listJob = await api(`/api/listings/${S.listJob.id}`);
+  $("lsStatus").innerHTML = `<p>${j.running ? status("idle", `Writing listings: ${j.done} of ${j.total} SKUs`) : j.error ? status("bad", j.error) : status("good", `${j.done} SKUs listed`)}</p>`
+    + (Object.keys(j.files).length ? `<p>${Object.entries(j.files).map(([m, u]) => `<a class="btn" href="${u}">${MARKET_NAMES[m]} file</a>`).join(" ")}</p>` : "")
+    + (j.errors.length ? `<p class="e">${j.errors.map(esc).join("<br>")}</p>` : "");
+  $("lsPreview").innerHTML = (j.preview || []).map((p) => `<div class="panel" style="margin-top:8px"><b>${esc(p.sku)}</b>` + Object.entries(p.markets).map(([m, c]) =>
+    `<p><b>${MARKET_NAMES[m]}</b>: ${esc(c.title)} <span class="hint">(${c.title.length} chars)</span><br><span class="hint">${(c.bullets || []).map(esc).join(" · ")}</span><br><span class="hint">${esc(c.search_terms || (c.keywords || []).join(", "))}</span></p>`).join("") + `</div>`).join("");
+  if (j.running) S.lsTimer = setTimeout(listingPoll, 4000);
+}
+// ---------- Dropbox (admin, Settings)
+async function initDropbox() {
+  $("dropboxPanel").classList.remove("hide");
+  $("dbRedirect").textContent = location.origin + "/dropbox/callback";
+  const st = await api("/api/dropbox");
+  $("dbState").innerHTML = st.connected ? status("good", `Connected${st.account ? " as " + st.account : ""}: photos go to Dropbox / ${st.root}`) : st.configured ? status("bad", "Not connected yet") : "Not set up yet";
+  $("dbSetup").classList.toggle("hide", st.connected); $("dbActions").classList.toggle("hide", !st.configured);
+  $("dbRoot").value = st.root || "";
+  $("dbSave").onclick = async () => {
+    try { await api("/api/dropbox/client", { app_key: $("dbKey").value, app_secret: $("dbSecret").value, root: $("dbRoot").value }); location.href = "/dropbox/connect"; }
+    catch (e) { $("dbErr").textContent = e.message; }
+  };
+  $("dbOff").onclick = async () => { if (confirm("Disconnect Dropbox?")) { await api("/api/dropbox/disconnect", {}); initDropbox(); } };
+}
 function initCloud() {
-  ["tabPrints", "tabMarket"].forEach((id) => $(id).classList.remove("hide"));
-  initGuide(); initPrints();
+  ["tabPrints", "tabMarket", "tabListings"].forEach((id) => $(id).classList.remove("hide"));
+  initGuide(); initPrints(); initDriveRun(); initListings(); if (isAdmin()) initDropbox();
   ["signOut", "agentPanel", "setsPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
@@ -1003,8 +1148,8 @@ function initCloud() {
 }
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
-const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", prints: "printTab", market: "marketTab", settings: "settingsTab" };
-const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", market: "Marketplace", settings: "Settings" };
+const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", prints: "printTab", listings: "listingsTab", market: "marketTab", settings: "settingsTab" };
+const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", listings: "Listings", market: "Marketplace", settings: "Settings" };
 function showTab(tab) {
   const f = $("recolorTab");
   if (tab === "recolor" && !f.src) f.src = "/recolor/";
@@ -1014,7 +1159,8 @@ function showTab(tab) {
   document.title = TITLES[tab] ? `Jag Studio · ${TITLES[tab]}` : "Jag Studio";
   if (tab === "settings" && S.opts) renderSettings();
   if (tab === "dashboard") setTimeout(loadDashboard);  // after the whole script has loaded
-  if (tab === "prints" && S.opts && S.opts.cloud) setTimeout(printTabRefresh);
+  if (tab === "prints" && S.opts && S.opts.cloud) { setTimeout(printTabRefresh); setTimeout(driveRunRefresh); }
+  if (tab === "listings" && S.opts && S.opts.cloud) setTimeout(listingsRefresh);
 }
 // "#studio" is a tab; "#stepColours" is a part of one (the Studio step links): that tab stays open
 function tabFromHash() {

@@ -637,6 +637,48 @@ def make_handler(app: Studio):
                 return self._json({"runs": [r.status() for r in app.agent_runs.values()]})
             if parts == ["api", "guides"]:
                 return self._json({"guides": c.guides()})
+            if parts == ["api", "dropbox"]:
+                return self._json(c.dropbox.status())
+            if parts == ["dropbox", "connect"]:
+                self._admin()
+                if not c.dropbox.configured:
+                    return self._json({"error": "Dropbox isn't set up yet: an admin pastes the Dropbox app key and secret in Settings"}, 400)
+                state = uuid.uuid4().hex
+                c.oauth_states[state] = time.time()
+                return self._redirect(c.dropbox.auth_url(self._origin() + "/dropbox/callback", state))
+            if parts == ["dropbox", "callback"]:
+                state, code = q.get("state", [""])[0], q.get("code", [""])[0]
+                if not code or time.time() - c.oauth_states.pop(state, 0) > 600:
+                    return self._redirect("/?dropbox=failed#settings")
+                c.dropbox.finish(code, self._origin() + "/dropbox/callback")
+                return self._redirect("/?dropbox=connected#settings")
+            if parts == ["api", "shop"]:
+                return self._json(c.shop())
+            if parts == ["api", "printruns"]:
+                from .printrun import saved_runs
+
+                live = {r.id: r.status() for r in c.printruns.values()}
+                old = [{"id": r["id"], "label": r.get("label", ""), "stage": r.get("stage"), "counts": r.get("counts"),
+                        "error": r.get("error"), "running": False, "started": r.get("started"),
+                        "skus": [{k: x.get(k) for k in ("sku", "category", "style", "colour", "print", "photos")} for x in r.get("skus", [])][-200:]}
+                       for r in saved_runs(c.data) if r["id"] not in live]
+                return self._json({"runs": list(live.values()) + old})
+            if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "manifest":
+                from .printrun import saved_runs
+
+                run = next((r for r in saved_runs(c.data) if r["id"] == parts[2]), None)
+                return self._json(run) if run else self._json({"error": "no such print run"}, 404)
+            if len(parts) == 3 and parts[:2] == ["api", "listings"]:
+                job = c.listing_jobs.get(parts[2])
+                return self._json(job.status()) if job else self._json({"error": "no such listing job"}, 404)
+            if len(parts) == 5 and parts[:2] == ["api", "listings"] and parts[3] == "file":
+                job = c.listing_jobs.get(parts[2])
+                name = job.files.get(parts[4]) if job else None
+                if not name:
+                    return self._json({"error": "not found"}, 404)
+                ctype = "text/csv" if name.endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                return self._send(200, (job.dir / name).read_bytes(), ctype,
+                                  {"Content-Disposition": f'attachment; filename="{name}"'})
             if parts == ["api", "prints"]:
                 from .prints import PLACE_NAMES
 
@@ -763,6 +805,69 @@ def make_handler(app: Studio):
                 self._admin()
                 c.drive.set_client(body.get("client_id"), body.get("client_secret"))
                 return self._json(c.drive_status())
+            if parts == ["api", "dropbox", "client"]:
+                self._admin()
+                c.dropbox.set_client(body.get("app_key"), body.get("app_secret"), body.get("root", ""))
+                return self._json(c.dropbox.status())
+            if parts == ["api", "dropbox", "root"]:
+                self._admin()
+                c.dropbox.set_root(body.get("root"))
+                return self._json(c.dropbox.status())
+            if parts == ["api", "dropbox", "disconnect"]:
+                self._admin()
+                c.dropbox.disconnect()
+                return self._json(c.dropbox.status())
+            if parts == ["api", "shop"]:
+                return self._json(c.set_shop(body))
+            if parts == ["api", "printruns", "start"]:
+                from .cloud import drive_folder_id
+                from .printrun import PrintRun
+
+                if not c.drive.can_read:
+                    raise ValueError("Connect Google Drive with permission to read folders first (Settings → Google Drive)")
+                if any(r.finished is None for r in c.printruns.values()):
+                    raise ValueError("A print run is already going: wait for it or stop it")
+                shop = c.shop()
+                run = PrintRun(c.drive, c.ai, c.data, drive_folder_id(str(body.get("tees") or "")),
+                               drive_folder_id(str(body.get("prints") or "")), dropbox=c.dropbox,
+                               place=str(body.get("place") or "chest_large"), per_sku=body.get("per_sku") or 5,
+                               brand=shop["brand"], pattern=shop["sku_pattern"], limit=body.get("limit") or 0,
+                               label=" ".join(str(body.get("label") or "").split())[:80])
+                c.printruns[run.id] = run.start()
+                return self._json(run.status())
+            if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "stop":
+                run = c.printruns.get(parts[2])
+                if not run:
+                    return self._json({"error": "no such print run"}, 404)
+                run.stop.set()
+                return self._json(run.status())
+            if parts == ["api", "listings", "start"]:
+                import base64
+
+                from .listing import ListingJob
+                from .printrun import saved_runs
+
+                want = set(body.get("skus") or [])
+                runs = set(body.get("runs") or [])
+                skus = []
+                for r in saved_runs(c.data):
+                    if runs and r["id"] not in runs:
+                        continue
+                    for s in r.get("skus", []):
+                        if want and s["sku"] not in want:
+                            continue
+                        skus.append({**s, "local": str(c.data / "printed" / r["id"] / s["sku"] / "listing.jpg")})
+                templates = {}
+                for m, b64 in (body.get("templates") or {}).items():
+                    try:
+                        templates[str(m)] = base64.b64decode(str(b64), validate=True)
+                    except ValueError:
+                        raise ValueError(f"The {m} template didn't arrive in one piece: add it again")
+                facts = {**c.shop()["facts"], **(body.get("facts") or {})}
+                facts.setdefault("brand", c.shop()["brand"])
+                job = ListingJob(c.ai, c.data, skus, body.get("markets") or [], facts, templates).start()
+                c.listing_jobs[job.id] = job
+                return self._json(job.status())
             if parts == ["api", "drive", "disconnect"]:
                 self._admin()
                 c.drive.disconnect()
@@ -943,7 +1048,7 @@ def make_handler(app: Studio):
             try:
                 if not self._host_ok() or not self._signed_in(parts):
                     return
-                body = self._body(GUIDE_LIMIT if parts in (["api", "guide"], ["api", "prints", "preview"]) else 2_000_000)
+                body = self._body(GUIDE_LIMIT if parts in (["api", "guide"], ["api", "prints", "preview"], ["api", "listings", "start"]) else 2_000_000)
                 if app.cloud and self._cloud_post(parts, body) is not None:
                     return
                 if parts == ["api", "preview"]:

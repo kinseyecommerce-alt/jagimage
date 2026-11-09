@@ -653,3 +653,26 @@ def test_a_bulk_run_switches_engine_when_the_job_itself_ends_on_no_credits():
     assert [b["provider"] for b in started] == ["gemini", "openai", "openai"]
     assert started[1]["first_model"] == 21 and "image_size" not in started[1]
     assert run.done == 2 and run.status()["engine"] == "openai"
+
+
+def test_shop_settings_print_runs_and_dropbox_routes(tmp_path):
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"),
+                  agent=Agent(client=None, model="gemini-test"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        code, _, r = call(base + "/api/shop", {"brand": "SPB", "sku_pattern": "{BRAND}-{STYLE}-{COLOUR}-{PRINT}"}, cookie=cookie)
+        assert code == 200 and json.loads(r)["sku_pattern"] == "{BRAND}-{STYLE}-{COLOUR}-{PRINT}"
+        assert call(base + "/api/shop", {"sku_pattern": "{NOPE}"}, cookie=cookie)[0] == 400
+        assert json.loads(call(base + "/api/shop", cookie=cookie)[2])["brand"] == "SPB"
+        assert json.loads(call(base + "/api/printruns", cookie=cookie)[2]) == {"runs": []}
+        code, _, r = call(base + "/api/printruns/start", {"tees": "x", "prints": "y"}, cookie=cookie)
+        assert code == 400 and "Google Drive" in json.loads(r)["error"]
+        assert json.loads(call(base + "/api/dropbox", cookie=cookie)[2])["connected"] is False
+        code, _, r = call(base + "/api/dropbox/client", {"app_key": "abcdefgh12", "app_secret": "secret12345", "root": "SPB Printed"}, cookie=cookie)
+        assert code == 200 and json.loads(r) == {"configured": True, "connected": False, "root": "SPB Printed", "account": ""}
+        assert call(base + "/api/listings/start", {"markets": ["amazon"]}, cookie=cookie)[0] == 400  # no SKUs yet
+    finally:
+        httpd.shutdown()

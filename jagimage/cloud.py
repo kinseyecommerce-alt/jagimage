@@ -289,6 +289,34 @@ class Drive:
             if not page:
                 return files
 
+    def list_tree(self, folder: str, depth: int = 5, limit: int = 20000) -> list:
+        """Every picture in a Drive folder and its subfolders (to depth levels): [{id, name, modifiedTime, path}],
+        path being the subfolder names from the given folder down."""
+        out, todo = [], [(folder, [])]
+        while todo:
+            fid, path = todo.pop(0)
+            page = None
+            while True:
+                q = {"q": f"'{fid}' in parents and trashed = false and (mimeType contains 'image/' or "
+                          "mimeType = 'application/vnd.google-apps.folder')", "pageSize": 1000,
+                     "fields": "nextPageToken, files(id, name, mimeType, modifiedTime)", "orderBy": "name",
+                     "supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
+                if page:
+                    q["pageToken"] = page
+                r = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(q))
+                for f in r.get("files") or []:
+                    if f.get("mimeType") == "application/vnd.google-apps.folder":
+                        if len(path) < depth:
+                            todo.append((f["id"], path + [f["name"]]))
+                    else:
+                        out.append({"id": f["id"], "name": f["name"], "modifiedTime": f.get("modifiedTime", ""), "path": path})
+                        if len(out) >= limit:
+                            return out
+                page = r.get("nextPageToken")
+                if not page:
+                    break
+        return out
+
     def download(self, file_id: str) -> bytes:
         req = urllib.request.Request(f"https://www.googleapis.com/drive/v3/files/{urllib.parse.quote(file_id)}?alt=media&supportsAllDrives=true",
                                      headers={"Authorization": f"Bearer {self._token()}"})
@@ -1046,6 +1074,11 @@ class Cloud:
                                     self.data, os.environ.get("JAGIMAGE_DRIVE_FOLDER", "kinsey models 2026"))
         self.sync = DriveSync(self.drive, out_dir)
         self.agent = agent or Agent()
+        from .dropbox import Dropbox
+
+        self.dropbox = Dropbox(self.data, os.environ.get("DROPBOX_APP_KEY", ""), os.environ.get("DROPBOX_APP_SECRET", ""))
+        self.printruns = {}  # id -> PrintRun, this session
+        self.listing_jobs = {}  # id -> ListingJob, this session
         self.oauth_states = {}
         self.plans = {}  # plan id -> agent plan, until Start
 
@@ -1054,6 +1087,33 @@ class Cloud:
         path = Path(path)
         parts = ["_bases", path.parent.parent.parent.parent.name, path.parent.parent.parent.name, path.parent.name]
         return self.drive.fetch(parts, path.name)
+
+    # ---- SKU pattern (Print placement) and the shop's listing facts (Listing tab), saved for everyone
+    def shop(self) -> dict:
+        from .printrun import DEFAULT_PATTERN
+
+        f = self.data / "shop.json"
+        saved = json.loads(f.read_text()) if f.exists() else {}
+        return {"brand": saved.get("brand", "SPB"), "sku_pattern": saved.get("sku_pattern", DEFAULT_PATTERN),
+                "facts": saved.get("facts", {})}
+
+    def set_shop(self, body: dict) -> dict:
+        from .printrun import make_sku, sku_fields
+
+        cur = self.shop()
+        if "brand" in body:
+            cur["brand"] = " ".join(str(body["brand"] or "").split())[:40] or "SPB"
+        if "sku_pattern" in body:
+            pat = " ".join(str(body["sku_pattern"] or "").split())[:120]
+            make_sku(pat, sku_fields(cur["brand"], {"category": "Men", "style": "HalfSleeveTee", "colour": "Red"}, "Test", 1))
+            cur["sku_pattern"] = pat
+        if isinstance(body.get("facts"), dict):
+            cur["facts"] = {str(k)[:40]: " ".join(str(v).split())[:300] for k, v in body["facts"].items()}
+        (self.data / "shop.json").write_text(json.dumps(cur, indent=1))
+        return cur
+
+    def ai(self, message, system, schema, images=()):
+        return self.agent._ask(message, system, schema, list(images))
 
     def drive_status(self) -> dict:
         return {"configured": self.drive.configured, "connected": self.drive.connected, "can_read": self.drive.can_read,
