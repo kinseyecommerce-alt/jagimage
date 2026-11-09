@@ -71,6 +71,9 @@ def base_points(spec, pose: str) -> List[str]:
     points = [STYLE_POINTS.get(spec.top, "The top is the right garment type."),
               "Only the model is in the photo, on a plain studio backdrop. FAIL if there is anything else: a separate "
               "garment, shorts, pants or a product photo beside or behind the model, a box, a floor panel or a second figure."]
+    if pose == "back":
+        points.append("A true rear view: the model stands with the back fully to the camera and the face is NOT visible. "
+                      "FAIL if the face, a profile or the front of the body shows (a front, side or three-quarter view).")
     outfit = spec.shot == "outfit"
     if outfit:
         points.append("The top is worn untucked: its hem hangs over the waistband of the shorts or pants. FAIL if the top "

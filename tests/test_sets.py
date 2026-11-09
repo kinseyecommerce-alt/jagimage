@@ -409,3 +409,37 @@ def test_a_model_with_a_wrong_base_is_made_again_from_scratch(tmp_path, shop_col
     drive.files.clear()
     DriveSync(drive, lambda: str(tmp_path)).run_once()
     assert drive.files and all("m0002" in f for f in drive.files if not f.startswith("_bases/"))
+
+
+def test_a_wrong_back_is_shot_again_from_its_front_on_drive(tmp_path, shop_colours):
+    # a back made from its own front: when that front had moved to Drive, the back was skipped for ever
+    from jagimage.cloud import DriveSync
+
+    store = {}
+
+    class FakeDrive:
+        connected = True
+
+        def upload(self, local, parts, name):
+            store["/".join(parts + [name])] = Path(local).read_bytes()
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main", "back"], one_base=True, keep_png=False,
+                     drive_layout="catalogue", free_after_upload=True, also_fabrics=[])
+    studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1).run()
+    DriveSync(FakeDrive(), lambda: str(tmp_path)).run_once()
+    front = tmp_path / sp.name / "m0001" / "_base" / "light-light" / "front_main.png"
+    assert studio.archived(front) and not front.exists()
+    assert studio.forget_poses(tmp_path / sp.name, [1], ["back"]) >= 1
+    assert studio.archived(front)  # the front is kept
+
+    def restore(path):
+        p = Path(path)
+        return store["/".join(["_bases", p.parent.parent.parent.parent.name, p.parent.parent.parent.name, p.parent.name, p.name])]
+    calls = []
+
+    def gen(prompt, refs):
+        calls.append(refs)
+        return fake_generate(prompt, refs)
+    counts = studio.Batch(sp, out=tmp_path, generate=gen, workers=1, restore=restore).run()
+    assert len(calls) == 1 and str(front) in calls[0]  # only the back, made from the front brought back
+    assert counts["recoloured"] == 1 and (tmp_path / sp.name / "m0001" / "_base" / "light-light" / "back.png").exists()

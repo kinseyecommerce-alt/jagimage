@@ -133,6 +133,36 @@ def archived(path: Path) -> bool:
     return Path(str(path) + ARCHIVED).exists()
 
 
+def forget_poses(root: Path, models: List[int], poses: List[str], twins: List[Path] = ()) -> int:
+    """Like forget_models, for some poses only (a back shot wrong, its front fine): those poses' base photos,
+    masks and finished photos go, with their upload notes, so the next run shoots them again from the kept front.
+    Returns how many files were removed."""
+    gone = 0
+    for r in [Path(root)] + [Path(t) for t in twins]:
+        for m in models:
+            d = r / f"m{int(m):04d}"
+            if not d.exists():
+                continue
+            for f in list(d.rglob("*")):
+                if f.is_file() and any(f.name == p + ".png" or f.name.startswith(p + "_") or f.name.startswith(p + ".png")
+                                       for p in poses):
+                    f.unlink()
+                    gone += 1
+            for qc in d.glob("*/qc.json"):
+                rows = json.loads(qc.read_text())
+                if any(p in rows for p in poses):
+                    qc.write_text(json.dumps({k: v for k, v in rows.items() if k not in poses}, indent=2))
+        with DRIVE_LIST_LOCK:
+            for name in ("_drive.txt", "_freed.txt"):
+                f = r / name
+                if f.exists():
+                    keep = [x for x in f.read_text().splitlines()
+                            if not (x.startswith(tuple(f"m{int(m):04d}/" for m in models)) and any(f"/{p}_" in x for p in poses))]
+                    f.write_text("".join(f"{x}\n" for x in keep))
+        (r / "_complete").unlink(missing_ok=True)
+    return gone
+
+
 def forget_models(root: Path, models: List[int], twins: List[Path] = ()) -> int:
     """Models whose photos must be made again from scratch (a wrong base: half sleeves in a full-sleeve batch, a
     product photo pasted beside the model): their folders go, here and in the fabric twins, and so does every note
@@ -960,6 +990,23 @@ class Batch:
         (self.root.parent / path.relative_to(self.root.parent).parts[0] / "_complete").unlink(missing_ok=True)
         return True
 
+    def _bring_back(self, path: Path, m: int) -> bool:
+        """An archived base photo fetched from Drive because another shot needs it as its reference (a back
+        photo is made from its own front). Without this, a back whose front had gone to Drive was never made."""
+        if not archived(path) or self.restore is None:
+            return False
+        try:
+            data = self.restore(path)
+        except Exception as exc:
+            self._event("errors", model=m, path=str(path), error=f"reference on Drive: {type(exc).__name__}: {exc}"[:300])
+            return False
+        tmp = path.with_suffix(".restore.png")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        Path(str(path) + ARCHIVED).unlink(missing_ok=True)
+        (self.root / "_complete").unlink(missing_ok=True)
+        return True
+
     def face_file(self, m: int) -> Path:
         """Model m's face for the whole category: the first front ever made for this model in any
         batch, so the same person can wear every top style (half sleeve, hoodie, ...)."""
@@ -999,6 +1046,9 @@ class Batch:
             ref, refs = ("none", []) if is_first else ("face", [str(first_front)])
         else:
             ref, refs = ("front", [str(own_front)]) if is_first else ("face+front", [str(first_front), str(own_front)])
+        for r in refs:  # a reference front moved to Drive (archived) comes back to make the missing shot from it
+            if not Path(r).exists():
+                self._bring_back(Path(r), m)
         if any(not Path(r).exists() for r in refs):
             return None
         text = prompt(self.spec, m, base, pose, ref)

@@ -1238,6 +1238,9 @@ def make_handler(app: Studio):
                     if not models or any(m < lo or m >= lo + b.spec.models for m in models):
                         raise ValueError(f"models must be numbers from {lo} to {lo + b.spec.models - 1}")
                     twins = [b.root.parent / studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
+                    poses = [p for p in (body or {}).get("poses") or [] if p in b.spec.poses]
+                    if poses:  # only these shots (e.g. a wrong back), the rest of the model is kept
+                        return self._json({"removed": studio.forget_poses(b.root, models, poses, twins), "models": models, "poses": poses})
                     return self._json({"removed": studio.forget_models(b.root, models, twins), "models": models})
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "approve":
                     # a person approves held photos: {"photos": ["m0014/Red__Red/front_main_2000x2000.jpg", ...]}

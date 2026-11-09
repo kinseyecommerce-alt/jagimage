@@ -45,7 +45,8 @@ def test_base_points_ask_for_what_recolouring_cant_fix():
     pts = " ".join(qcagent.base_points(spec(), "front_main"))
     for want in ("untucked", "NO drawstring", "inside of the hood", "hair bows", "five fingers", "face"):
         assert want in pts
-    assert "face" not in " ".join(qcagent.base_points(spec(), "back")).replace("surface", "")
+    back = " ".join(qcagent.base_points(spec(), "back"))
+    assert "undistorted face" not in back and "face is NOT visible" in back  # backs: a true rear view
     assert "hood" not in " ".join(qcagent.base_points(spec(top="HalfSleeveTee", category="Kids_Boys"), "front_main"))
 
 
