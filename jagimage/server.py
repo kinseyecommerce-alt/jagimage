@@ -1226,6 +1226,19 @@ def make_handler(app: Studio):
                     # the QC agent re-checks a whole batch: bad bases made again, every photo recoloured and checked
                     spec = json.loads((app.batch_for(unquote(parts[2])).root / "spec.json").read_text())
                     return self._json(app.start({**spec, "qc_agent": True, "stage": "qc", "same_models": True}).status())
+                if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "remake":
+                    # admin: {"models": [23, 32]} made again from scratch, in this batch and its fabric twins
+                    self._admin()
+                    name = unquote(parts[2])
+                    b = app.batch_for(name)
+                    if any(j.finished is None for j in app.jobs.values()):
+                        raise ValueError("A batch is running: wait for it first")
+                    models = sorted({int(m) for m in (self._body() or {}).get("models") or []})
+                    lo = b.spec.first_model
+                    if not models or any(m < lo or m >= lo + b.spec.models for m in models):
+                        raise ValueError(f"models must be numbers from {lo} to {lo + b.spec.models - 1}")
+                    twins = [b.root.parent / studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
+                    return self._json({"removed": studio.forget_models(b.root, models, twins), "models": models})
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "approve":
                     # a person approves held photos: {"photos": ["m0014/Red__Red/front_main_2000x2000.jpg", ...]}
                     b = app.batch_for(unquote(parts[2]))

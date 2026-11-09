@@ -52,11 +52,25 @@ def default_ask(model: Optional[str] = None) -> Callable:
     return ask
 
 
+# the garment's cut, checked on every base photo: the AI sometimes copies a reference photo's sleeves
+STYLE_POINTS = {
+    "HalfSleeveTee": "The top is a short-sleeve T-shirt: sleeves end above the elbow. FAIL for long sleeves or no sleeves.",
+    "OversizedTee": "The top is an oversized drop-shoulder T-shirt with short, wide sleeves ending around the elbow. FAIL for long sleeves or no sleeves.",
+    "FullSleeveTee": "The top is a full-sleeve (long-sleeve) T-shirt: both sleeves reach the wrists. FAIL for short or half sleeves.",
+    "SleevelessTee": "The top is sleeveless (a vest): bare arms from the shoulder, no sleeves at all. FAIL for any sleeves.",
+    "Sweatshirt": "The top is a crew-neck sweatshirt with long sleeves to the wrists and no hood. FAIL for short sleeves or a hood.",
+    "Hoodie": "The top is a pullover hoodie with a hood and long sleeves to the wrists, no front zip. FAIL for short sleeves or no hood.",
+    "ZipHoodie": "The top is a full-zip hoodie with a hood, long sleeves to the wrists and a zip down the front. FAIL for short sleeves or no hood.",
+}
+
+
 def base_points(spec, pose: str) -> List[str]:
     """What a base photo must get right, for this batch and pose."""
     from . import library as L
 
-    points = []
+    points = [STYLE_POINTS.get(spec.top, "The top is the right garment type."),
+              "Only the model is in the photo, on a plain studio backdrop. FAIL if there is anything else: a separate "
+              "garment, shorts, pants or a product photo beside or behind the model, a box, a floor panel or a second figure."]
     outfit = spec.shot == "outfit"
     if outfit:
         points.append("The top is worn untucked: its hem hangs over the waistband of the shorts or pants. FAIL if the top "

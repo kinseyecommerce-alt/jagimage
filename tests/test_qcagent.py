@@ -384,3 +384,14 @@ def test_local_fix_paints_a_thin_strip_of_base_colour_along_a_seam():
     out, _ = local_fix(Image.fromarray(before), Image.fromarray(after), [m], ["#C7B2DE"], lambda ms: Image.fromarray(after))
     o = np.asarray(out).astype(int)
     assert abs(o[30, 29] - lav.astype(int)).max() < 25  # the seam line took the lavender
+
+
+def test_base_qc_checks_the_cut_and_that_nothing_else_is_in_the_photo():
+    # the AI made half sleeves for a full-sleeve batch (copying a reference), and pasted the shorts' product photo
+    full = " ".join(qcagent.base_points(spec(top="FullSleeveTee", category="Kids_Boys"), "front_main"))
+    assert "reach the wrists" in full and "FAIL for short or half sleeves" in full
+    assert "product photo beside" in full
+    sl = " ".join(qcagent.base_points(spec(top="SleevelessTee", category="Women"), "back"))
+    assert "FAIL for any sleeves" in sl
+    for top in studio.TOPS:
+        assert top in qcagent.STYLE_POINTS

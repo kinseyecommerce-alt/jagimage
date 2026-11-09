@@ -108,7 +108,8 @@ RETOUCH_BOTTOMS = ("Edit image 1. Change only the shorts or pants: remove the dr
 BOTTOM_WORD = {"Shorts": "shorts", "Trackpants": "track pants"}
 BOTTOM_REF_LINE = (" Image {n} is a product photo of the exact {item} the model wears: copy its cut, length, plain covered "
                    "waistband and smooth flat front and sides exactly (no drawstring, no pockets), but in the bottom colour "
-                   "stated above, not the colour in that photo, and worn by the model, not laid flat.")
+                   "stated above, not the colour in that photo, and worn by the model, not laid flat. The new photo shows "
+                   "only the model: never that product photo, or a second garment, beside or behind the model.")
 
 
 def bottom_ref_path(out: Path, bottom: str) -> Path:
@@ -130,6 +131,31 @@ ARCHIVED = ".archived"  # next to a base photo moved to Google Drive (kinseymode
 def archived(path: Path) -> bool:
     """The base photo is kept on Google Drive, not on the server: it is never made (or paid for) again."""
     return Path(str(path) + ARCHIVED).exists()
+
+
+def forget_models(root: Path, models: List[int], twins: List[Path] = ()) -> int:
+    """Models whose photos must be made again from scratch (a wrong base: half sleeves in a full-sleeve batch, a
+    product photo pasted beside the model): their folders go, here and in the fabric twins, and so does every note
+    that they were uploaded, so the next run shoots, recolours and uploads them again (replacing them on Drive).
+    Returns how many model folders were removed."""
+    import shutil
+
+    gone = 0
+    for r in [Path(root)] + [Path(t) for t in twins]:
+        prefixes = tuple(f"m{int(m):04d}/" for m in models)
+        for m in models:
+            d = r / f"m{int(m):04d}"
+            if d.exists():
+                shutil.rmtree(d)
+                gone += 1
+        with DRIVE_LIST_LOCK:
+            for name in ("_drive.txt", "_freed.txt"):
+                f = r / name
+                if f.exists():
+                    keep = [x for x in f.read_text().splitlines() if not x.startswith(prefixes)]
+                    f.write_text("".join(f"{x}\n" for x in keep))
+        (r / "_complete").unlink(missing_ok=True)
+    return gone
 
 
 def fabric_twin(spec: "Spec", fabric: str) -> "Spec":

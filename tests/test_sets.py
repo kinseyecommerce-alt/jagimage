@@ -373,3 +373,39 @@ def test_base_archiving_skips_files_still_being_written(tmp_path, shop_colours):
     assert not sync.status.get("bases_error")
     assert sorted(f for f in drive.files if f.startswith("_bases/")) == [
         f"_bases/{sp.name}/m0001/light-light/back.png", f"_bases/{sp.name}/m0001/light-light/front_main.png"]
+
+
+def test_a_model_with_a_wrong_base_is_made_again_from_scratch(tmp_path, shop_colours):
+    from jagimage.cloud import DriveSync
+
+    class FakeDrive:
+        connected = True
+
+        def __init__(self):
+            self.files = []
+
+        def upload(self, local, parts, name):
+            self.files.append("/".join(parts + [name]))
+
+    sp = studio.Spec(category="Kids_Boys", top="FullSleeveTee", bottom="Trackpants", fabric="CottonMix", models=2,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main", "back"], also_fabrics=["PureCotton"],
+                     one_base=True, keep_png=False, drive_layout="catalogue", free_after_upload=True)
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run()
+    drive = FakeDrive()
+    DriveSync(drive, lambda: str(tmp_path)).run_once()
+    twin = tmp_path / studio.fabric_twin(sp, "PureCotton").name
+    assert any("m0002" in f for f in drive.files) and (twin / "m0002").exists()
+    assert studio.forget_models(b.root, [2], [twin]) == 2
+    assert not (b.root / "m0002").exists() and not (twin / "m0002").exists()
+    assert not [x for x in (b.root / "_drive.txt").read_text().splitlines() if x.startswith("m0002/")]
+    calls = []
+
+    def counting(prompt, refs):
+        calls.append(prompt)
+        return fake_generate(prompt, refs)
+    again = studio.Batch(sp, out=tmp_path, generate=counting, workers=1).run()
+    assert len(calls) == 2 and again["recoloured"] >= 2  # model 2's front and back shot again; model 1 untouched
+    drive.files.clear()
+    DriveSync(drive, lambda: str(tmp_path)).run_once()
+    assert drive.files and all("m0002" in f for f in drive.files if not f.startswith("_bases/"))

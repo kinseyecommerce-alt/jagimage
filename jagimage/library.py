@@ -189,7 +189,8 @@ BACKGROUNDS = {
 }
 GREY = "Plain seamless light grey studio background (#EDEDED), soft even lighting."
 
-REFERENCE_LINE = "Use the reference image ONLY for identity: keep exactly the same face, facial features, skin tone, hairstyle, hair colour and hair length. Create a new full-body photo. "
+REFERENCE_LINE = ("Use the reference image ONLY for identity: keep exactly the same face, facial features, skin tone, hairstyle, hair colour and hair length. "
+                  "Ignore the clothes in it: the garment, its sleeves and its colour come only from this description. Create a new full-body photo. ")
 MATCH_FRONT_LINE = "Also match image 2 (approved front of the same model and colour) for garment, colour and hairstyle. "
 
 RULES = ("Exact garment colour {COLOUR} ({HEX}), uniform and true under neutral daylight-balanced 5500K studio light, no colour cast. "
