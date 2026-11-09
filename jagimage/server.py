@@ -1233,7 +1233,7 @@ def make_handler(app: Studio):
                     b = app.batch_for(name)
                     if any(j.finished is None for j in app.jobs.values()):
                         raise ValueError("A batch is running: wait for it first")
-                    models = sorted({int(m) for m in (self._body() or {}).get("models") or []})
+                    models = sorted({int(m) for m in (body or {}).get("models") or []})
                     lo = b.spec.first_model
                     if not models or any(m < lo or m >= lo + b.spec.models for m in models):
                         raise ValueError(f"models must be numbers from {lo} to {lo + b.spec.models - 1}")
@@ -1242,7 +1242,7 @@ def make_handler(app: Studio):
                 if len(parts) == 4 and parts[:2] == ["api", "batches"] and parts[3] == "approve":
                     # a person approves held photos: {"photos": ["m0014/Red__Red/front_main_2000x2000.jpg", ...]}
                     b = app.batch_for(unquote(parts[2]))
-                    n = studio.approve(b.root, (self._body() or {}).get("photos") or [])
+                    n = studio.approve(b.root, (body or {}).get("photos") or [])
                     if app.cloud and getattr(app.cloud, "sync", None):
                         app.cloud.sync.wake.set()
                     return self._json({"approved": n})

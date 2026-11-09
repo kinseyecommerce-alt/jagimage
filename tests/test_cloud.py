@@ -676,3 +676,25 @@ def test_shop_settings_print_runs_and_dropbox_routes(tmp_path):
         assert call(base + "/api/listings/start", {"markets": ["amazon"]}, cookie=cookie)[0] == 400  # no SKUs yet
     finally:
         httpd.shutdown()
+
+
+def test_remake_and_approve_routes_answer(tmp_path):
+    # both read the request body the handler had already read: they hung waiting for it
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="CottonMix", models=2,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], also_fabrics=[], one_base=True, keep_png=False)
+    studio.Batch(sp, out=tmp_path / "out", generate=fake_generate, workers=1).run()
+    cloud = Cloud(tmp_path / "data", lambda: str(tmp_path / "out"), password=PASSWORD, drive=Drive("", "", tmp_path / "data"),
+                  agent=Agent(client=None, model="gemini-test"))
+    app, httpd = serve(port=0, out=str(tmp_path / "out"), cloud=cloud)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    cookie = call(base + "/login", {"password": PASSWORD})[1]["Set-Cookie"].split(";")[0]
+    try:
+        code, _, r = call(base + f"/api/batches/{sp.name}/approve", {"photos": []}, cookie=cookie)
+        assert code == 200 and json.loads(r) == {"approved": 0}
+        code, _, r = call(base + f"/api/batches/{sp.name}/remake", {"models": [2]}, cookie=cookie)
+        assert code == 200 and json.loads(r) == {"removed": 1, "models": [2]}
+        assert not (tmp_path / "out" / sp.name / "m0002").exists() and (tmp_path / "out" / sp.name / "m0001").exists()
+        assert call(base + f"/api/batches/{sp.name}/remake", {"models": [9]}, cookie=cookie)[0] == 400
+    finally:
+        httpd.shutdown()
