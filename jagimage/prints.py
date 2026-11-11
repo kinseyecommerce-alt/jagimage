@@ -18,6 +18,7 @@ PLACES: Dict[str, Tuple[float, float, float]] = {
     "left_chest": (0.17, 0.16, 0.22),  # the wearer's left chest = the viewer's right in a front photo
 }
 PLACE_NAMES = {"chest_large": "Centre chest, large", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo"}
+CENTRE_AT = {"chest_large": 0.34, "chest_medium": 0.32}  # a short print's middle, below the neckline (share of the chest width)
 MAX_TALL = 0.8     # a tall print stops at this share of the chest width in height, so it stays above the hem
 INK = 0.97         # screen-print ink hides almost all of the fabric colour under it
 KNIT = 0.6         # how much of the fabric's knit texture shows through the ink
@@ -141,6 +142,11 @@ def _layout(mask: np.ndarray, art: Image.Image, place: str, dx=0.0, dy=0.0, scal
     pw, ph = max(2, int(round(pw))), max(2, int(round(ph)))
     x0 = int(round(cx + offset * cw - pw / 2))
     y0 = int(round(neck + below * cw))
+    # a short, wide print (a badge, a word) hangs from the same top line as a tall one and looks stuck under the
+    # collar: its middle goes to chest height instead (where a printer centres it), never higher than the top line
+    low = CENTRE_AT.get(place)
+    if low is not None:
+        y0 = max(y0, int(round(neck + (low + a_["dy"]) * cw - ph / 2)))
     if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
         raise PrintError("the print doesn't fit on this photo")
     return {"cx": cx, "neck": neck, "cw": cw, "art": art, "x0": x0, "y0": y0, "pw": pw, "ph": ph}

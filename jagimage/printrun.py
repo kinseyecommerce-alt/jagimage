@@ -195,7 +195,7 @@ class PrintRun:
 
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
-                 limit: int = 0, label: str = ""):
+                 limit: int = 0, label: str = "", checker: Optional[Callable] = None):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -204,7 +204,7 @@ class PrintRun:
         self.tees_folder, self.prints_folder = tees_folder, prints_folder
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
-        self.label = label
+        self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
         self.counts = {"tee_photos": 0, "products": 0, "prints": 0, "skus": 0, "photos": 0, "left_out": 0,
                        "fixed": 0, "errors": 0, "dropbox": 0}
         self.log: List[dict] = []
@@ -250,16 +250,31 @@ class PrintRun:
                                  "text": " ".join(str(ans.get("text") or "").split())[:120]}
         return self.suits[k]
 
-    def _place(self, photo: Image.Image, mask: np.ndarray, art: Image.Image) -> Image.Image:
+    def _placement(self, photo: Image.Image, mask: np.ndarray, art: Image.Image) -> dict:
+        """The print placement agent, once per SKU on its first photo: the firm rules, then the AI looks at the
+        printed photo next to the artwork (too high? too big? off-centre?) and moves or resizes it, at most twice.
+        The other photos of the SKU get the same placement."""
+        from .studio import judge_print
+
         adj = adjust()
-        try:
-            issues, fix = rule_check(measure(mask, art, self.place, **adj), self.place)
-            if issues:
-                adj = adjust(fix["dx"], fix["dy"], fix["scale"])
-                self.counts["fixed"] += 1
-        except PrintError:
-            pass
-        return place_print(photo, mask, art, self.place, **adj)
+        for _ in range(3):
+            try:
+                out = place_print(photo, mask, art, self.place, **adj)
+                verdict = judge_print(out, art, mask, self.place, adj, self.checker)
+            except PrintError:
+                return adj
+            except Exception as exc:  # the AI checker couldn't run: the rules' placement stands
+                self._note("error", error=f"print agent: {type(exc).__name__}: {exc}"[:200])
+                return adj
+            if verdict["ok"] or (verdict["dx"], verdict["dy"], verdict["scale"]) == (0.0, 0.0, 1.0):
+                return adj
+            adj = adjust(adj["dx"] + verdict["dx"], adj["dy"] + verdict["dy"], adj["scale"] * verdict["scale"])
+            self.counts["fixed"] += 1
+            self._note("moved", why="; ".join(verdict.get("issues") or [])[:200], **adj)
+        return adj
+
+    def _place(self, photo: Image.Image, mask: np.ndarray, art: Image.Image, adj: Optional[dict] = None) -> Image.Image:
+        return place_print(photo, mask, art, self.place, **(adj or adjust()))
 
     def _products(self, tees: list) -> List[dict]:
         """The tee photos grouped into products (one folder each), front photos first, at most per_sku models."""
@@ -361,10 +376,12 @@ class PrintRun:
                     continue
                 n += 1
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
-                files = []
+                files, adj = [], None
                 for i, (m, photo, mask, _) in enumerate(fronts):
                     try:
-                        files.append(self._place(photo, mask, art))
+                        if adj is None:
+                            adj = self._placement(photo, mask, art)
+                        files.append(self._place(photo, mask, art, adj))
                     except PrintError as exc:
                         self._note("error", sku=sku, error=str(exc))
                         self.counts["errors"] += 1

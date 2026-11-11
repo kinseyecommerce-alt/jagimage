@@ -233,3 +233,34 @@ def test_dropbox_says_which_permission_is_missing():
     assert "files.content.write" in _why("files/upload", exc) and "Connect again" in _why.__doc__ + _why("files/upload",
         urllib.error.HTTPError("u", 400, "Bad", {}, io.BytesIO(body)))
     assert printrun.stem_of("m0005_front_main.jpg") == printrun.stem_of("m0005_back.jpg") == "m0005"
+
+
+def test_a_short_wide_print_sits_at_chest_height_not_under_the_collar():
+    from jagimage.prints import _layout, chest
+
+    mask = shirt_truth().astype(np.float32)
+    cx, neck, cw = chest(mask)
+    badge = Image.open(io.BytesIO(art_png((250, 250, 250), size=(600, 200))))
+    tall = Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 400))))
+    g = _layout(mask, badge, "chest_large")
+    assert abs((g["y0"] + g["ph"] / 2 - neck) / cw - 0.34) < 0.02  # its middle at chest height
+    t = _layout(mask, tall, "chest_large")
+    assert abs((t["y0"] - neck) / cw - 0.12) < 0.02  # a tall print still starts just under the collar
+
+
+def test_the_print_placement_agent_moves_the_first_photo_and_the_sku_follows(tmp_path):
+    red = jpg(tee_photo())
+    path = ["Cotton Mix", "Boys", "Red", "Half sleeve"]
+    tees = [{"id": f"t{i}", "name": f"m000{i}_front.jpg", "path": path, "data": red} for i in (1, 2, 3)]
+    prints = [{"id": "p1", "name": "Moon.png", "path": [], "data": art_png((250, 250, 250))}]
+    seen = []
+
+    def checker(photo, art, measured):
+        seen.append(measured["collar_gap"])
+        if len(seen) == 1:
+            return {"ok": False, "score": 5, "issues": ["a little high"], "dx": 0.0, "dy": 0.05, "scale": 1.0}
+        return {"ok": True, "score": 9, "issues": [], "dx": 0.0, "dy": 0.0, "scale": 1.0}
+    run = printrun.PrintRun(FakeDrive(tees, prints), fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=3, checker=checker)
+    run._run()
+    assert run.error is None and len(seen) == 2 and seen[1] > seen[0]  # moved down once, then right
+    assert run.counts["fixed"] == 1 and run.skus[0]["photos"] == 3  # one look per SKU, all photos placed alike

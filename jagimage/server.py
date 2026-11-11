@@ -858,7 +858,8 @@ def make_handler(app: Studio):
                                drive_folder_id(str(body.get("prints") or "")), dropbox=c.dropbox,
                                place=str(body.get("place") or "chest_large"), per_sku=body.get("per_sku") or 5,
                                brand=shop["brand"], pattern=shop["sku_pattern"], limit=body.get("limit") or 0,
-                               label=" ".join(str(body.get("label") or "").split())[:80])
+                               label=" ".join(str(body.get("label") or "").split())[:80],
+                               checker=c.agent.check_print if body.get("agent", True) else None)
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "stop":
