@@ -175,6 +175,11 @@ def _art_jpeg(art: Image.Image, side: int = 512) -> tuple:
     return _jpeg(bg, side)
 
 
+def _file_name(print_name: str) -> str:
+    """A print's name as a safe file name (the photo carries the print's own name)."""
+    return re.sub(r'[\\/:*?"<>|]+', "-", str(print_name)).strip(" .") or "print"
+
+
 def stem_of(name: str) -> str:
     """m0001_front.jpg and m0001_back.jpg share the stem m0001: photos of the same model or piece."""
     base = re.sub(r"\.[A-Za-z0-9]+$", "", name)
@@ -195,7 +200,7 @@ class PrintRun:
 
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
-                 limit: int = 0, label: str = "", checker: Optional[Callable] = None):
+                 limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -204,6 +209,7 @@ class PrintRun:
         self.tees_folder, self.prints_folder = tees_folder, prints_folder
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
+        self.one_model, self._turn = one_model, 0
         self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
         self.counts = {"tee_photos": 0, "products": 0, "prints": 0, "skus": 0, "photos": 0, "left_out": 0,
                        "fixed": 0, "errors": 0, "dropbox": 0}
@@ -377,7 +383,11 @@ class PrintRun:
                 n += 1
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
                 files, adj = [], None
-                for i, (m, photo, mask, _) in enumerate(fronts):
+                chosen = fronts
+                if self.one_model:  # one print, one model: each print on the next model in turn, front only
+                    chosen = [fronts[self._turn % len(fronts)]]
+                    self._turn += 1
+                for i, (m, photo, mask, _) in enumerate(chosen):
                     try:
                         if adj is None:
                             adj = self._placement(photo, mask, art)
@@ -386,7 +396,7 @@ class PrintRun:
                         self._note("error", sku=sku, error=str(exc))
                         self.counts["errors"] += 1
                         continue
-                    if m["back"] and len(files) < self.per_sku * 2:
+                    if m["back"] and not self.one_model and len(files) < self.per_sku * 2:
                         try:
                             files.append(open_image(self.drive.download(m["back"]["id"])).convert("RGB"))
                         except PrintError:
@@ -401,7 +411,8 @@ class PrintRun:
         folder.mkdir(parents=True, exist_ok=True)
         images = []
         for i, im in enumerate(photos, 1):
-            name = f"{sku}_{i}.jpg"
+            # one model per print: the photo is named as the print file (223.png -> 223.jpg)
+            name = f"{_file_name(pname)}.jpg" if self.one_model else f"{sku}_{i}.jpg"
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}

@@ -341,7 +341,8 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     </div>
     <div class="row">
       <label class="field"><span>Print position</span><select id="drPlace"></select></label>
-      <label class="field"><span>Photos per SKU</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
+      <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
+      <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (front only, photo named as the print)</span></label>
       <label class="field"><span>Test: stop after (SKUs, 0 = all)</span><input type="number" id="drLimit" value="3" min="0"></label>
       <label class="field" style="flex:2"><span>SKU pattern</span><input type="text" id="drPattern" placeholder="{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"></label>
       <label class="field"><span>Brand</span><input type="text" id="drBrand" placeholder="SPB"></label>
@@ -1028,7 +1029,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
