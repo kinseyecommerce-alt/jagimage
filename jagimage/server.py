@@ -854,7 +854,10 @@ def make_handler(app: Studio):
                 if any(r.finished is None for r in c.printruns.values()):
                     raise ValueError("A print run is already going: wait for it or stop it")
                 shop = c.shop()
-                run = PrintRun(c.drive, c.ai, c.data, drive_folder_id(str(body.get("tees") or "")),
+                tees_path = [x for x in str(body.get("tees_path") or "").split("/") if x.strip()]
+                # tees_path: a folder of the photos folder ("Cotton Mix/Boys/Red/Half sleeve"), else a Drive link
+                tees = c.drive.folder_id(tees_path) if tees_path else drive_folder_id(str(body.get("tees") or ""))
+                run = PrintRun(c.drive, c.ai, c.data, tees,
                                drive_folder_id(str(body.get("prints") or "")), dropbox=c.dropbox,
                                place=str(body.get("place") or "chest_large"), per_sku=body.get("per_sku") or 5,
                                brand=shop["brand"], pattern=shop["sku_pattern"], limit=body.get("limit") or 0,
