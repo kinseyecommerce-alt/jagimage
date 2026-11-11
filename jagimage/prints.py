@@ -13,7 +13,7 @@ from scipy import ndimage
 # where the print goes: width as a share of the chest, top below the neckline (share of the chest width),
 # and the centre's offset from the chest's middle (share of the chest width; + is the viewer's right)
 PLACES: Dict[str, Tuple[float, float, float]] = {
-    "chest_large": (0.45, 0.24, 0.0),  # centre front: sized by who wears it and the design's shape (FIT)
+    "chest_large": (0.45, 0.20, 0.0),  # centre front: sized by who wears it and the design's shape (FIT)
     "chest_medium": (0.42, 0.14, 0.0),
     "left_chest": (0.17, 0.16, 0.22),  # the wearer's left chest = the viewer's right in a front photo
 }
@@ -126,7 +126,7 @@ def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
 # the design's shape: wide artwork (text, a badge) uses the full width, square artwork less (it looks heavier),
 # tall artwork is held by its height. As shares of the chest width (a 4-5 year old's tee is about 12-13 in
 # across, a man's medium about 20 in), for "chest_large": (width, top line below the neckline, most height).
-FIT = {"kids": (0.45, 0.24, 0.50),   # approved by the shop on its kids' tees (the GYM print, 2026-11)
+FIT = {"kids": (0.45, 0.20, 0.50),   # approved by the shop on its kids' tees (the GYM print, a little higher, 2026-11)
        "women": (0.48, 0.20, 0.60),
        "men": (0.55, 0.18, 0.68)}
 SQUARE = (0.75, 1.33)   # width / height of a square-ish design

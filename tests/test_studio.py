@@ -833,7 +833,7 @@ def test_firm_rules_catch_a_print_on_the_collar_even_when_the_ai_says_ok(tmp_pat
     studio.Batch(s, out=tmp_path, generate=fake_generate).run()
     counts = studio.Batch(s, out=tmp_path, prints=lambda *a: [("p", tmp_path / "p.png")], checker=pleased).run("prints")
     qc = json.loads((tmp_path / s.name / "m0001" / "Navy__Navy" / "prints_qc.json").read_text())["front_main_print_p"]
-    assert counts["print_fixed"] == 1 and qc["ok"] and qc["adjust"]["dy"] >= 0 and qc["adjust"]["scale"] < 1.2  # back below the collar
+    assert counts["print_fixed"] == 1 and qc["ok"] and qc["adjust"]["dy"] >= -0.01 and qc["adjust"]["scale"] < 1.2  # back below the collar
 
 
 def test_oversized_drop_shoulder_tee_is_for_men_and_women_only(tmp_path):

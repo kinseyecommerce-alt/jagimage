@@ -243,9 +243,9 @@ def test_every_print_gets_the_shops_standard_size_and_line():
     badge = Image.open(io.BytesIO(art_png((250, 250, 250), size=(600, 200))))
     tall = Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 400))))
     g = _layout(mask, badge, "chest_large")  # the shop's standard: every print starts on the same line, same size
-    assert abs((g["y0"] - neck) / cw - 0.24) < 0.02 and abs(g["pw"] / cw - 0.45) < 0.02
+    assert abs((g["y0"] - neck) / cw - 0.20) < 0.02 and abs(g["pw"] / cw - 0.45) < 0.02
     t = _layout(mask, tall, "chest_large")
-    assert abs((t["y0"] - neck) / cw - 0.24) < 0.02 and t["ph"] / cw <= 0.51  # a tall print shrinks to fit the box
+    assert abs((t["y0"] - neck) / cw - 0.20) < 0.02 and t["ph"] / cw <= 0.51  # a tall print shrinks to fit the box
     men = _layout(mask, badge, "chest_large:men")  # adults: a wider print, a little nearer the collar
     assert abs(men["pw"] / cw - 0.55) < 0.02 and abs((men["y0"] - neck) / cw - 0.18) < 0.02
     sq = _layout(mask, Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 300)))), "chest_large")
