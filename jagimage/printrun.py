@@ -75,6 +75,7 @@ SKIP_FOLDERS = ("combo sets", "_bases", "printed")  # combo-set photos show two 
 DEFAULT_PATTERN = "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"
 LOW_CONTRAST = 0.12   # OKLab distance under which ink hardly shows on the shirt
 HIDDEN_SHARE = 0.6    # a print with more than this share of its ink in low contrast is left out without asking
+AGENT_MIN_DY = -0.02  # the placement agent may raise a print at most this much above the start line
 MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's box
 
 
@@ -305,7 +306,9 @@ class PrintRun:
             if verdict["ok"] or (verdict["dx"], verdict["dy"], verdict["scale"]) == (0.0, 0.0, 1.0):
                 return adj
             # the agent only moves a print; its size is the shop's standard for every print
-            adj = adjust(adj["dx"] + verdict["dx"], adj["dy"] + verdict["dy"], 1.0)
+            # never above the start line under the collar (the rules set it per wearer and cut): the agent may
+            # only lower a print or move it sideways
+            adj = adjust(adj["dx"] + verdict["dx"], max(AGENT_MIN_DY, adj["dy"] + verdict["dy"]), 1.0)
             if (verdict["dx"], verdict["dy"]) == (0.0, 0.0):
                 return adj
             self.counts["fixed"] += 1

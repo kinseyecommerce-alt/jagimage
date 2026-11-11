@@ -369,3 +369,18 @@ def test_oversized_tees_start_prints_lower_than_regular_ones():
     tall = Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 400))))
     reg, ov = _layout(mask, tall, "chest_large:men"), _layout(mask, tall, "chest_large:men_oversized")
     assert ov["y0"] - reg["y0"] > 0.06 * cw and ov["ph"] < reg["ph"]
+
+
+
+def test_the_placement_agent_never_raises_a_print_onto_the_collar(tmp_path):
+    red = jpg(tee_photo())
+    tees = [{"id": "t1", "name": "m0001_front.jpg", "path": ["Cotton Mix", "Men", "Red", "Oversized"], "data": red}]
+    prints = [{"id": "p1", "name": "225.png", "path": [], "data": art_png((250, 250, 250))}]
+    seen = []
+
+    def checker(photo, art, measured):  # an agent that keeps asking for the print to go up
+        seen.append(measured["collar_gap"])
+        return {"ok": False, "score": 4, "issues": ["too low"], "dx": 0.0, "dy": -0.15, "scale": 1.0}
+    run = printrun.PrintRun(FakeDrive(tees, prints), fake_ask([]), tmp_path, "TEES", "PRINTS", checker=checker, one_model=True)
+    run._run()
+    assert run.error is None and min(seen) >= seen[0] - 0.021
