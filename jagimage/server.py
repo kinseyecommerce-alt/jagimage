@@ -677,6 +677,13 @@ def make_handler(app: Studio):
 
                 run = next((r for r in saved_runs(c.data) if r["id"] == parts[2]), None)
                 return self._json(run) if run else self._json({"error": "no such print run"}, 404)
+            if len(parts) == 6 and parts[:2] == ["api", "printruns"] and parts[3] == "photo":
+                # a test run's photo, kept on the server (nothing was uploaded)
+                root = (c.data / "printed").resolve()
+                f = (root / parts[2] / parts[4] / parts[5]).resolve()
+                if root not in f.parents or not f.is_file() or f.suffix.lower() != ".jpg":
+                    return self._json({"error": "not found"}, 404)
+                return self._send(200, f.read_bytes(), "image/jpeg")
             if len(parts) == 3 and parts[:2] == ["api", "listings"]:
                 job = c.listing_jobs.get(parts[2])
                 return self._json(job.status()) if job else self._json({"error": "no such listing job"}, 404)
@@ -863,7 +870,7 @@ def make_handler(app: Studio):
                                brand=shop["brand"], pattern=shop["sku_pattern"], limit=body.get("limit") or 0,
                                label=" ".join(str(body.get("label") or "").split())[:80],
                                checker=c.agent.check_print if body.get("agent", True) else None,
-                               one_model=bool(body.get("one_model", True)))
+                               one_model=bool(body.get("one_model", True)), test=bool(body.get("test")))
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "stop":

@@ -200,7 +200,8 @@ class PrintRun:
 
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
-                 limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False):
+                 limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
+                 test: bool = False):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -210,6 +211,7 @@ class PrintRun:
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
         self.one_model, self._turn = one_model, 0
+        self.test = test  # nothing goes to Drive or Dropbox: the photos are only looked at
         self._where = f"{place}:kids"  # set per product (who wears it) before printing
         self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
         self.counts = {"tee_photos": 0, "products": 0, "prints": 0, "skus": 0, "photos": 0, "left_out": 0,
@@ -228,7 +230,8 @@ class PrintRun:
     def status(self) -> dict:
         return {"id": self.id, "label": self.label, "stage": self.stage, "counts": dict(self.counts), "error": self.error,
                 "running": self.finished is None, "elapsed": round((self.finished or time.time()) - self.started),
-                "skus": [{k: s[k] for k in ("sku", "category", "style", "colour", "print", "photos")} for s in self.skus[-200:]],
+                "skus": [{**{k: s[k] for k in ("sku", "category", "style", "colour", "print", "photos")},
+                          "view": next((i["view"] for i in s.get("images", []) if i.get("view")), None)} for s in self.skus[-200:]],
                 "log": self.log[-40:], "manifest": f"/api/printruns/{self.id}/manifest"}
 
     def _note(self, kind: str, **kw):
@@ -423,6 +426,11 @@ class PrintRun:
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}
+            if self.test:  # a test: nothing uploaded, the photo stays on the server to look at
+                row["view"] = f"/api/printruns/{self.id}/photo/{sku}/{name}"
+                images.append(row)
+                self.counts["photos"] += 1
+                continue
             try:
                 self.drive.upload(local, ["Printed", sku], name)
                 row["drive"] = True

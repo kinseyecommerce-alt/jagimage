@@ -285,3 +285,16 @@ def test_one_print_one_model_front_only_named_as_the_print(tmp_path):
     assert sorted(drive.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-225/225.jpg",
                                       "Printed/SPB-KB-FS-RED-229/229.jpg"]
     assert all(s["photos"] == 1 for s in run.skus)
+
+
+def test_a_test_run_uploads_nothing_and_keeps_its_photos_to_look_at(tmp_path):
+    red = jpg(tee_photo())
+    tees = [{"id": "t1", "name": "m0001_front.jpg", "path": ["Cotton Mix", "Boys", "Red", "Half sleeve"], "data": red}]
+    prints = [{"id": "p1", "name": "230.png", "path": [], "data": art_png((250, 250, 250))}]
+    drive, box = FakeDrive(tees, prints), FakeDropbox()
+    run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", dropbox=box, one_model=True, test=True)
+    run._run()
+    assert run.error is None and not drive.uploaded and not box.files
+    view = run.status()["skus"][0]["view"]
+    assert view == f"/api/printruns/{run.id}/photo/SPB-KB-HS-RED-230/230.jpg"
+    assert (tmp_path / "printed" / run.id / "SPB-KB-HS-RED-230" / "230.jpg").exists()

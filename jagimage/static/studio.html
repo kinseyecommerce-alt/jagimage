@@ -342,6 +342,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="row">
       <label class="field"><span>Print position</span><select id="drPlace"></select></label>
       <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
+      <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (front only, photo named as the print)</span></label>
       <label class="field"><span>Test: stop after (SKUs, 0 = all)</span><input type="number" id="drLimit" value="3" min="0"></label>
       <label class="field" style="flex:2"><span>SKU pattern</span><input type="text" id="drPattern" placeholder="{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"></label>
@@ -1029,7 +1030,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
@@ -1044,7 +1045,8 @@ async function driveRunRefresh() {
   $("drStatus").innerHTML = `<p>${r.running ? status("idle", "Printing: " + (r.stage || "")) : r.error ? status("bad", r.error) : status("good", "Done")}
     ${fmt(c.skus || 0)} SKUs · ${fmt(c.photos || 0)} photos · ${fmt(c.left_out || 0)} print/colour pairs left out (didn't suit) · ${fmt(c.dropbox || 0)} in Dropbox · ${fmt(c.errors || 0)} errors</p>`
     + ((r.skus || []).length ? `<div class="tablewrap"><table class="agenttab"><tr><th>SKU</th><th>Category</th><th>Style</th><th>Colour</th><th>Print</th><th class="r">Photos</th></tr>`
-      + r.skus.slice(-60).reverse().map((x) => `<tr><td>${esc(x.sku)}</td><td>${esc(label(x.category || ""))}</td><td>${esc(nice(x.style || ""))}</td><td>${esc(x.colour)}</td><td>${esc(x.print)}</td><td class="r">${x.photos}</td></tr>`).join("") + `</table></div>` : "");
+      + r.skus.slice(-60).reverse().map((x) => `<tr><td>${esc(x.sku)}</td><td>${esc(label(x.category || ""))}</td><td>${esc(nice(x.style || ""))}</td><td>${esc(x.colour)}</td><td>${esc(x.print)}</td><td class="r">${x.photos}</td></tr>`).join("") + `</table></div>` : "")
+    + ((r.skus || []).filter((x) => x.view).length ? `<div class="gallery">${r.skus.filter((x) => x.view).slice(-60).reverse().map((x) => `<a class="card" href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""><span class="cap"><b>${esc(x.sku)}</b></span></a>`).join("")}</div>` : "");
   if (r.running) S.drTimer = setTimeout(driveRunRefresh, 5000);
 }
 // ---------- listing creator (jagimage.listing)
