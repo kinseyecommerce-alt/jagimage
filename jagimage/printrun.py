@@ -77,6 +77,18 @@ LOW_CONTRAST = 0.12   # OKLab distance under which ink hardly shows on the shirt
 HIDDEN_SHARE = 0.6    # a print with more than this share of its ink in low contrast is left out without asking
 
 
+def sane(mask: np.ndarray, box, size) -> None:
+    """The shirt found must be the one the AI saw: its neckline inside the AI's box (not up on the face) and
+    its chest no wider than the box. Otherwise the photo is skipped rather than printed in the wrong place."""
+    from .prints import chest
+
+    W, H = size
+    cx, neck, cw = chest(mask)
+    x0, y0, x1, y1 = (float(v) for v in box)
+    if neck < (y0 - 0.04) * H or neck > (y0 + 0.6 * (y1 - y0)) * H or cw > (x1 - x0) * W * 1.1:
+        raise SegmentError("the shirt found doesn't match the photo: skipped")
+
+
 def guess(path: List[str]) -> dict:
     """What the folder names say: category, style, fabric and colour (colour = a shop colour named in the path)."""
     low = [p.lower() for p in path]
@@ -367,6 +379,7 @@ class PrintRun:
                         self._note("skipped", file=f["name"], why="already printed")
                         continue
                     mask = shirt_mask(photo, look.get("box") or [], look.get("chest") or [])
+                    sane(mask, look.get("box") or [], photo.size)
                     fronts.append((m, photo, mask, look))
                 except (PrintError, SegmentError) as exc:
                     self._note("error", file=f["name"], error=str(exc))

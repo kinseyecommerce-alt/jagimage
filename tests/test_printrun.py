@@ -326,3 +326,22 @@ def test_dropbox_delete_stays_inside_the_apps_folder():
         assert calls[-1] == {"path": "/Jag Studio/SPB-KB-FS-BLA-223"}
         with pytest.raises(ValueError):
             box.delete()
+
+
+def test_a_white_tee_on_a_light_backdrop_and_a_hood_are_found_right():
+    # a white tee on a light grey studio wall leaked into the backdrop and face; a hood moved the neckline up
+    from jagimage.prints import chest
+
+    im = tee_photo(colour=(246, 246, 246))
+    im = Image.fromarray(np.where(np.asarray(im) == 225, 222, np.asarray(im)).astype(np.uint8))
+    m = shirt_mask(im, (0.22, 0.2, 0.78, 0.66), (0.5, 0.4)) > 0.5
+    truth = shirt_truth()
+    assert (m & truth).sum() / (m | truth).sum() > 0.85
+    hood = np.zeros((800, 600), np.float32)
+    hood[60:120, 220:380] = 1          # the hood above the head
+    hood[170:520, 200:400] = 1         # the body
+    cx, neck, cw = chest(hood)
+    assert abs(neck - 170) <= 2        # the neckline under the face, not the hood's top
+    printrun.sane(truth.astype(np.float32), (0.22, 0.2, 0.78, 0.66), (600, 800))
+    with pytest.raises(Exception):
+        printrun.sane(truth.astype(np.float32), (0.3, 0.35, 0.7, 0.7), (600, 800))  # a box well below: face-level mask

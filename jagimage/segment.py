@@ -59,13 +59,27 @@ def shirt_mask(photo: Image.Image, box: Sequence[float], chest: Sequence[float])
     d = np.linalg.norm(diff, axis=-1)
     inbox = np.zeros((h, w), bool)
     inbox[by0:by1, bx0:bx1] = True
+    grow = max(2, int(0.02 * max(h, w)))
+    near_box = ndimage.binary_dilation(inbox, iterations=grow)
     markers = np.zeros((h, w), np.int16)
-    out = ~ndimage.binary_dilation(inbox, iterations=max(2, int(0.02 * max(h, w))))
+    out = ~near_box
     out[[0, -1], :] = True
     out[:, [0, -1]] = True
     markers[out] = 1
-    markers[inbox & (d > FAR)] = 1
-    core = disc | ndimage.binary_erosion(inbox & (d < NEAR), iterations=2)
+    # the backdrop's own colour, read just outside the box: a white tee on a light grey studio wall differs
+    # from it mostly in lightness, so the colour distance alone can't tell them apart
+    ring = ndimage.binary_dilation(near_box, iterations=grow * 2) & ~near_box
+    back = np.median(lab[ring], axis=0) if ring.any() else lab[0, 0]
+    d_shirt = np.linalg.norm(lab - colour, axis=-1)
+    d_back = np.linalg.norm(lab - back, axis=-1)
+    # skin (face, neck, arms, hands) is never shirt, unless the shirt itself is a skin colour
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    skin = (lab[..., 1] > 0.015) & (lab[..., 2] > 0.0) & (C > 0.035)
+    shirt_skinlike = bool(skin[disc].mean() > 0.5)
+    # (the backdrop is not marked inside the box: the shaded sides of a white shirt match a light grey wall)
+    background = (d > FAR) | (skin if not shirt_skinlike else np.zeros_like(skin))
+    markers[inbox & background] = 1
+    core = disc | ndimage.binary_erosion(inbox & (d < NEAR) & (d_shirt < 0.5 * d_back) & ~background, iterations=2)
     markers[core] = 2
     # the colour gradient (lightness counts less: folds and shadows are not the shirt's edge)
     g = np.zeros((h, w), np.float32)
@@ -74,7 +88,7 @@ def shirt_mask(photo: Image.Image, box: Sequence[float], chest: Sequence[float])
         g += wt * np.hypot(ndimage.sobel(ch, 0), ndimage.sobel(ch, 1))
     g = (np.clip(g / max(1e-6, float(np.percentile(g, 99))), 0, 1) * 65535).astype(np.uint16)
     lab_ws = ndimage.watershed_ift(g, markers)
-    m = lab_ws == 2
+    m = (lab_ws == 2) & near_box  # the shirt is where the AI saw it, never the whole frame
     m = ndimage.binary_opening(m, iterations=1)
     labels, n = ndimage.label(m)
     if not n:

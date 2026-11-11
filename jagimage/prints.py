@@ -99,7 +99,15 @@ def chest(mask: np.ndarray):
     w = float(np.percentile(widths, 25))
     cx = float(np.median([c for c, wd in zip(centres, widths) if wd <= w * 1.15]))
     band = m[:, max(0, int(cx) - 3):int(cx) + 4].any(axis=1)
-    neck = int(np.argmax(band))
+    # the neckline: where the shirt starts above the chest in the middle column. A hood above the head (or any
+    # shirt part above the face) is a separate run there, so the run that holds the chest is the one counted.
+    mid = int(top + 0.45 * h)
+    if band[mid]:
+        neck = mid
+        while neck > 0 and band[neck - 1]:
+            neck -= 1
+    else:
+        neck = int(np.argmax(band))
     return cx, neck, w
 
 
