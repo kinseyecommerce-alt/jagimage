@@ -846,6 +846,12 @@ def make_handler(app: Studio):
                 self._admin()
                 c.dropbox.set_root(body.get("root"))
                 return self._json(c.dropbox.status())
+            if parts == ["api", "dropbox", "delete"]:  # admin: {"folders": ["SPB-KB-FS-BLA-223", ...]} inside the app's folder
+                self._admin()
+                names = [str(n) for n in body.get("folders") or [] if str(n).strip() and "/" not in str(n) and ".." not in str(n)]
+                if not names:
+                    raise ValueError("name the folders to delete")
+                return self._json({"deleted": [c.dropbox.delete(n) for n in names]})
             if parts == ["api", "dropbox", "disconnect"]:
                 self._admin()
                 c.dropbox.disconnect()

@@ -298,3 +298,31 @@ def test_a_test_run_uploads_nothing_and_keeps_its_photos_to_look_at(tmp_path):
     view = run.status()["skus"][0]["view"]
     assert view == f"/api/printruns/{run.id}/photo/SPB-KB-HS-RED-230/230.jpg"
     assert (tmp_path / "printed" / run.id / "SPB-KB-HS-RED-230" / "230.jpg").exists()
+
+
+def test_dropbox_delete_stays_inside_the_apps_folder():
+    import tempfile
+
+    calls = []
+
+    class R:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def opener(req, timeout=0):
+        calls.append(json.loads(req.data))
+        return R()
+    with tempfile.TemporaryDirectory() as d:
+        box = Dropbox(d, "appkey1234", "secret1234", opener=opener)
+        box.state["refresh_token"] = "r"
+        box._access = ("tok", 9e18)
+        assert box.delete("SPB-KB-FS-BLA-223") == "/Jag Studio/SPB-KB-FS-BLA-223"
+        assert calls[-1] == {"path": "/Jag Studio/SPB-KB-FS-BLA-223"}
+        with pytest.raises(ValueError):
+            box.delete()

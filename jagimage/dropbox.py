@@ -177,6 +177,18 @@ class Dropbox:
                                                       "commit": {"path": path, "mode": "overwrite", "mute": True}}, data[off:])
         return path
 
+    def delete(self, *parts: str) -> str:
+        """Removes a file or folder under the app's folder (<root>/<parts...>); nothing outside it."""
+        if not parts:
+            raise ValueError("name what to delete inside the Dropbox folder")
+        path = dropbox_path(self.root, *parts)
+        try:
+            self._rpc("files/delete_v2", {"path": path})
+        except RuntimeError as exc:
+            if "not_found" not in str(exc):
+                raise
+        return path
+
     def link(self, path: str) -> str:
         """A link anyone can download the file from (marketplaces fetch listing images this way)."""
         try:
