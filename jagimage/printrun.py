@@ -75,18 +75,32 @@ SKIP_FOLDERS = ("combo sets", "_bases", "printed")  # combo-set photos show two 
 DEFAULT_PATTERN = "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"
 LOW_CONTRAST = 0.12   # OKLab distance under which ink hardly shows on the shirt
 HIDDEN_SHARE = 0.6    # a print with more than this share of its ink in low contrast is left out without asking
+MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's box
 
 
-def sane(mask: np.ndarray, box, size) -> None:
-    """The shirt found must be the one the AI saw: its neckline inside the AI's box (not up on the face) and
-    its chest no wider than the box. Otherwise the photo is skipped rather than printed in the wrong place."""
+def sane(mask: np.ndarray, box, size, photo: Optional[Image.Image] = None, colour_hex: str = "") -> None:
+    """The shirt found must be the one the AI saw: its neckline inside the AI's box (not up on the face), its
+    chest no wider than the box, a fair part of the box (not a face-sized patch), and the shirt's colour.
+    Otherwise the photo is skipped rather than printed in the wrong place."""
     from .prints import chest
 
     W, H = size
     cx, neck, cw = chest(mask)
     x0, y0, x1, y1 = (float(v) for v in box)
+    m = mask > 0.5
     if neck < (y0 - 0.04) * H or neck > (y0 + 0.6 * (y1 - y0)) * H or cw > (x1 - x0) * W * 1.1:
         raise SegmentError("the shirt found doesn't match the photo: skipped")
+    if m.sum() < MIN_BOX_SHARE * (x1 - x0) * W * (y1 - y0) * H or cw < 0.35 * (x1 - x0) * W:
+        raise SegmentError("the shirt found is too small (a face or a patch, not the shirt): skipped")
+    if photo is not None and colour_hex:
+        small = photo.convert("RGB").resize((max(1, W // 4), max(1, H // 4)))
+        sm = np.asarray(Image.fromarray((m * 255).astype(np.uint8)).resize(small.size)) > 127
+        if sm.any():
+            got = np.median(rgb_to_lab(np.asarray(small))[sm], axis=0)
+            dt = got - hex_to_lab(colour_hex)
+            dt[0] *= 0.5
+            if float(np.linalg.norm(dt)) > 0.15:
+                raise SegmentError("the shirt found is not the shirt's colour (skin?): skipped")
 
 
 def guess(path: List[str]) -> dict:
@@ -378,8 +392,9 @@ class PrintRun:
                     if look.get("plain") is False:
                         self._note("skipped", file=f["name"], why="already printed")
                         continue
-                    mask = shirt_mask(photo, look.get("box") or [], look.get("chest") or [])
-                    sane(mask, look.get("box") or [], photo.size)
+                    want = colour_hex_for(prod.get("colour", ""), prod.get("fabric", "")) or str(look.get("colour_hex") or "")
+                    mask = shirt_mask(photo, look.get("box") or [], look.get("chest") or [], want)
+                    sane(mask, look.get("box") or [], photo.size, photo, want)
                     fronts.append((m, photo, mask, look))
                 except (PrintError, SegmentError) as exc:
                     self._note("error", file=f["name"], error=str(exc))

@@ -345,3 +345,15 @@ def test_a_white_tee_on_a_light_backdrop_and_a_hood_are_found_right():
     printrun.sane(truth.astype(np.float32), (0.22, 0.2, 0.78, 0.66), (600, 800))
     with pytest.raises(Exception):
         printrun.sane(truth.astype(np.float32), (0.3, 0.35, 0.7, 0.7), (600, 800))  # a box well below: face-level mask
+
+
+def test_the_shirt_is_found_even_when_the_ai_points_at_the_face():
+    # the AI sometimes gave a chest point on the face: the print then landed on the face
+    for colour, hex_ in (((200, 30, 40), "#C8202A"), ((246, 246, 246), "#F6F6F6")):
+        m = shirt_mask(tee_photo(colour), (0.22, 0.2, 0.78, 0.66), (0.5, 0.13), hex_) > 0.5
+        truth = shirt_truth()
+        assert (m & truth).sum() / (m | truth).sum() > 0.85
+    with pytest.raises(Exception):  # a face-sized patch is never accepted as the shirt
+        face = np.zeros((800, 600), np.float32)
+        face[60:160, 255:345] = 1
+        printrun.sane(face, (0.22, 0.2, 0.78, 0.66), (600, 800))

@@ -34,9 +34,15 @@ def _clamp_box(box: Sequence[float]):
     return x0, y0, x1, y1
 
 
-def shirt_mask(photo: Image.Image, box: Sequence[float], chest: Sequence[float]) -> np.ndarray:
+def _skinlike(t) -> bool:
+    return bool(t[1] > 0.015 and t[2] > 0.0 and np.hypot(t[1], t[2]) > 0.035)
+
+
+def shirt_mask(photo: Image.Image, box: Sequence[float], chest: Sequence[float], colour_hex: str = "") -> np.ndarray:
     """The shirt as a float mask (photo size). box: (x0, y0, x1, y1) and chest: (x, y), shares of the photo's
-    width and height, as the vision AI saw them."""
+    width and height, as the vision AI saw them. colour_hex: the shirt's known colour (from its folder or the AI):
+    when the AI's chest point isn't on that colour (it sometimes points at the face), the seed moves to the
+    middle of the biggest patch of that colour in the box."""
     W, H = photo.size
     s = min(1.0, WORK_SIDE / max(W, H))
     small = photo.convert("RGB").resize((max(1, round(W * s)), max(1, round(H * s))), Image.BILINEAR)
@@ -52,6 +58,28 @@ def shirt_mask(photo: Image.Image, box: Sequence[float], chest: Sequence[float])
         cx, cy = (bx0 + bx1) // 2, int(by0 + 0.35 * (by1 - by0))
     r = max(2, int(SEED_RADIUS * (bx1 - bx0)))
     yy, xx = np.mgrid[0:h, 0:w]
+    disc = (yy - cy) ** 2 + (xx - cx) ** 2 <= r * r
+    # where to seed the shirt: the AI's chest point, or the chest of its box (middle, a third down). The AI
+    # sometimes points at the face; the seed that is the shirt's known colour (and not skin) wins.
+    C0 = np.hypot(lab[..., 1], lab[..., 2])
+    skin0 = (lab[..., 1] > 0.015) & (lab[..., 2] > 0.0) & (C0 > 0.035)
+    target = None
+    if colour_hex:
+        from .recolor import hex_to_lab
+
+        target = hex_to_lab(colour_hex)
+    candidates = [(cy, cx), (int(by0 + 0.35 * (by1 - by0)), (bx0 + bx1) // 2), (int(by0 + 0.5 * (by1 - by0)), (bx0 + bx1) // 2)]
+
+    def score(p):
+        d_ = (yy - p[0]) ** 2 + (xx - p[1]) ** 2 <= r * r
+        px = lab[d_]
+        bad = float(skin0[d_].mean()) if target is None or not _skinlike(target) else 0.0
+        if target is None:
+            return bad
+        dt = px - target
+        dt[:, 0] *= 0.5
+        return float(np.median(np.linalg.norm(dt, axis=-1))) + bad
+    cy, cx = min(candidates, key=score)
     disc = (yy - cy) ** 2 + (xx - cx) ** 2 <= r * r
     colour = np.median(lab[disc], axis=0)
     diff = lab - colour
