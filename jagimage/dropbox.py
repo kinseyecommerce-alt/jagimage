@@ -4,6 +4,7 @@ the Dropbox v2 API; no extra libraries."""
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -24,6 +25,20 @@ def dropbox_path(*parts: str) -> str:
     bad = '\\/:?*"<>|'
     clean = ["".join("-" if ch in bad else ch for ch in str(p)).strip().strip(".") or "_" for p in parts if str(p).strip()]
     return "/" + "/".join(clean)
+
+
+def _why(endpoint: str, exc) -> str:
+    """Dropbox's own words for a refused call; a missing permission says which one to tick."""
+    raw = exc.read()[:2000].decode("utf-8", "replace")
+    try:
+        msg = (json.loads(raw).get("user_message") or {}).get("text") or json.loads(raw).get("error_summary") or raw
+    except ValueError:
+        msg = raw
+    m = re.search(r"required scope '([a-z._]+)'", msg)
+    if m:
+        return (f"Dropbox app is missing the permission {m.group(1)}: in the Dropbox App Console → Permissions tick it "
+                "(and files.content.write, sharing.write), Submit, then Settings → Dropbox → Connect again")
+    return f"Dropbox {endpoint}: {exc.code} {msg[:400]}"
 
 
 class Dropbox:
@@ -133,7 +148,7 @@ class Dropbox:
                 raw = r.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"Dropbox {endpoint}: {exc.code} {exc.read()[:300].decode('utf-8', 'replace')}") from exc
+            raise RuntimeError(_why(endpoint, exc)) from exc
 
     def _content(self, endpoint: str, args: dict, data: bytes) -> dict:
         req = urllib.request.Request(f"{CONTENT}/{endpoint}", data=data, method="POST", headers={
@@ -143,7 +158,7 @@ class Dropbox:
             with self.opener(req, timeout=300) as r:
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"Dropbox {endpoint}: {exc.code} {exc.read()[:300].decode('utf-8', 'replace')}") from exc
+            raise RuntimeError(_why(endpoint, exc)) from exc
 
     def upload(self, data: bytes, *parts: str) -> str:
         """Puts the bytes at <root>/<parts...> (the last part is the file name), replacing a file already there.

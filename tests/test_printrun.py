@@ -219,3 +219,17 @@ def test_dropbox_paths_and_links():
         assert path == "/Jag Studio/SPB-KB-1/a.jpg"
         assert json.loads(calls[0][1]["Dropbox-api-arg"])["mode"] == "overwrite"
         assert box.link(path) == "https://www.dropbox.com/scl/fi/abc/x.jpg?rlkey=k&raw=1"
+
+
+def test_dropbox_says_which_permission_is_missing():
+    import urllib.error
+
+    from jagimage.dropbox import _why
+
+    body = json.dumps({"error_summary": "missing_scope/", "user_message": {"locale": "en", "text":
+        "Error in call to API function \"files/upload\": Your app (ID: 1) is not permitted to access this endpoint because it "
+        "does not have the required scope 'files.content.write'. The owner of the app can enable the scope."}}).encode()
+    exc = urllib.error.HTTPError("u", 400, "Bad", {}, io.BytesIO(body))
+    assert "files.content.write" in _why("files/upload", exc) and "Connect again" in _why.__doc__ + _why("files/upload",
+        urllib.error.HTTPError("u", 400, "Bad", {}, io.BytesIO(body)))
+    assert printrun.stem_of("m0005_front_main.jpg") == printrun.stem_of("m0005_back.jpg") == "m0005"

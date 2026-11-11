@@ -178,7 +178,12 @@ def _art_jpeg(art: Image.Image, side: int = 512) -> tuple:
 def stem_of(name: str) -> str:
     """m0001_front.jpg and m0001_back.jpg share the stem m0001: photos of the same model or piece."""
     base = re.sub(r"\.[A-Za-z0-9]+$", "", name)
-    return re.sub(r"[ _-]*(front|back|main|rear|side|\d+x\d+)$", "", base, flags=re.I) or base
+    stem = base
+    while True:  # m0001_front_main_2000x2000 -> m0001
+        cut = re.sub(r"[ _-]*(front|back|main|rear|side|\d+x\d+)$", "", stem, flags=re.I)
+        if cut == stem or not cut:
+            return stem
+        stem = cut
 
 
 def is_back_name(name: str) -> bool:
@@ -396,7 +401,7 @@ class PrintRun:
                     row["url"] = self.dropbox.link(path)
                     self.counts["dropbox"] += 1
                 except Exception as exc:
-                    self._note("error", sku=sku, error=f"Dropbox: {exc}"[:200])
+                    self._note("error", sku=sku, error=f"Dropbox: {exc}"[:600])
                     self.counts["errors"] += 1
             images.append(row)
             self.counts["photos"] += 1
