@@ -770,7 +770,7 @@ def test_print_adjustment_moves_and_resizes_and_stays_within_limits(tmp_path):
     from jagimage.prints import adjust, place_print
     from jagimage.recolor import garment_mask, rgb_to_lab
     from test_gemini_bases import fake_photo
-    assert adjust(5, -5, 9) == {"dx": 0.3, "dy": -0.15, "scale": 1.6} and adjust(None, None, None) == {"dx": 0, "dy": 0, "scale": 1}
+    assert adjust(5, -5, 9) == {"dx": 0.3, "dy": -0.25, "scale": 2.0} and adjust(None, None, None) == {"dx": 0, "dy": 0, "scale": 1}
     photo = fake_photo("#1E4636")
     mask, _ = garment_mask(rgb_to_lab(np.asarray(photo)), "#1E4636")
     art = Image.open(make_print(tmp_path / "p.png"))
@@ -822,14 +822,14 @@ def test_firm_rules_catch_a_print_on_the_collar_even_when_the_ai_says_ok(tmp_pat
     art = Image.open(make_print(tmp_path / "p.png"))
     good = measure(mask, art)
     assert rule_check(good) == ([], {"dx": 0.0, "dy": 0.0, "scale": 1.0})
-    high = measure(mask, art, dy=-0.12, scale=1.4)
+    high = measure(mask, art, dy=-0.22, scale=1.8)
     issues, fix = rule_check(high)
     assert "too high: touches the collar" in issues and "too big for the chest" in issues and fix["dy"] > 0.1 and fix["scale"] < 0.8
     pleased = lambda photo, art, measured: {"ok": True, "issues": [], "dx": 0, "dy": 0, "scale": 1}
-    verdict = studio.judge_print(photo, art, mask, "chest_large", {"dx": 0, "dy": -0.12, "scale": 1.4}, pleased)
+    verdict = studio.judge_print(photo, art, mask, "chest_large", {"dx": 0, "dy": -0.22, "scale": 1.8}, pleased)
     assert not verdict["ok"] and verdict["dy"] == fix["dy"]
     # the batch's checker then moves it down and shrinks it until the rules pass
-    s = studio.Spec(top_colours=["Navy"], models=1, poses=["front_main"], keep_png=False, print_dy=-0.12, print_scale=1.4)
+    s = studio.Spec(top_colours=["Navy"], models=1, poses=["front_main"], keep_png=False, print_dy=-0.22, print_scale=1.8)
     studio.Batch(s, out=tmp_path, generate=fake_generate).run()
     counts = studio.Batch(s, out=tmp_path, prints=lambda *a: [("p", tmp_path / "p.png")], checker=pleased).run("prints")
     qc = json.loads((tmp_path / s.name / "m0001" / "Navy__Navy" / "prints_qc.json").read_text())["front_main_print_p"]

@@ -738,7 +738,7 @@ def make_handler(app: Studio):
             if body.get("check"):
                 if not (ready().get("gemini") or ready().get("openai")):
                     raise ValueError("The print checker needs a Gemini or OpenAI key (Settings → API keys)")
-                check = studio.judge_print(out, art, mask, place, adj, c.agent.check_print)
+                check = studio.judge_print(out, art, mask, batch._where(place), adj, c.agent.check_print)
             shown = out.convert("RGB")
             shown.thumbnail((900, 1200))
             buf = io.BytesIO()

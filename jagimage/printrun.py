@@ -210,6 +210,7 @@ class PrintRun:
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
         self.one_model, self._turn = one_model, 0
+        self._where = f"{place}:kids"  # set per product (who wears it) before printing
         self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
         self.counts = {"tee_photos": 0, "products": 0, "prints": 0, "skus": 0, "photos": 0, "left_out": 0,
                        "fixed": 0, "errors": 0, "dropbox": 0}
@@ -265,8 +266,8 @@ class PrintRun:
         adj = adjust()
         for _ in range(3):
             try:
-                out = place_print(photo, mask, art, self.place, **adj)
-                verdict = judge_print(out, art, mask, self.place, adj, self.checker)
+                out = place_print(photo, mask, art, self._where, **adj)
+                verdict = judge_print(out, art, mask, self._where, adj, self.checker)
             except PrintError:
                 return adj
             except Exception as exc:  # the AI checker couldn't run: the rules' placement stands
@@ -274,13 +275,16 @@ class PrintRun:
                 return adj
             if verdict["ok"] or (verdict["dx"], verdict["dy"], verdict["scale"]) == (0.0, 0.0, 1.0):
                 return adj
-            adj = adjust(adj["dx"] + verdict["dx"], adj["dy"] + verdict["dy"], adj["scale"] * verdict["scale"])
+            # the agent only moves a print; its size is the shop's standard for every print
+            adj = adjust(adj["dx"] + verdict["dx"], adj["dy"] + verdict["dy"], 1.0)
+            if (verdict["dx"], verdict["dy"]) == (0.0, 0.0):
+                return adj
             self.counts["fixed"] += 1
             self._note("moved", why="; ".join(verdict.get("issues") or [])[:200], **adj)
         return adj
 
     def _place(self, photo: Image.Image, mask: np.ndarray, art: Image.Image, adj: Optional[dict] = None) -> Image.Image:
-        return place_print(photo, mask, art, self.place, **(adj or adjust()))
+        return place_print(photo, mask, art, self._where, **(adj or adjust()))
 
     def _products(self, tees: list) -> List[dict]:
         """The tee photos grouped into products (one folder each), front photos first, at most per_sku models."""
@@ -382,6 +386,9 @@ class PrintRun:
                     continue
                 n += 1
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
+                from .prints import fit_for
+
+                self._where = f"{self.place}:{fit_for(prod.get('category', ''))}"  # sized for who wears it
                 files, adj = [], None
                 chosen = fronts
                 if self.one_model:  # one print, one model: each print on the next model in turn, front only

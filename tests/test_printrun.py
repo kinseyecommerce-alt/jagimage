@@ -235,17 +235,23 @@ def test_dropbox_says_which_permission_is_missing():
     assert printrun.stem_of("m0005_front_main.jpg") == printrun.stem_of("m0005_back.jpg") == "m0005"
 
 
-def test_a_short_wide_print_sits_at_chest_height_not_under_the_collar():
+def test_every_print_gets_the_shops_standard_size_and_line():
     from jagimage.prints import _layout, chest
 
     mask = shirt_truth().astype(np.float32)
     cx, neck, cw = chest(mask)
     badge = Image.open(io.BytesIO(art_png((250, 250, 250), size=(600, 200))))
     tall = Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 400))))
-    g = _layout(mask, badge, "chest_large")
-    assert abs((g["y0"] + g["ph"] / 2 - neck) / cw - 0.34) < 0.02  # its middle at chest height
+    g = _layout(mask, badge, "chest_large")  # the shop's standard: every print starts on the same line, same size
+    assert abs((g["y0"] - neck) / cw - 0.24) < 0.02 and abs(g["pw"] / cw - 0.45) < 0.02
     t = _layout(mask, tall, "chest_large")
-    assert abs((t["y0"] - neck) / cw - 0.12) < 0.02  # a tall print still starts just under the collar
+    assert abs((t["y0"] - neck) / cw - 0.24) < 0.02 and t["ph"] / cw <= 0.51  # a tall print shrinks to fit the box
+    men = _layout(mask, badge, "chest_large:men")  # adults: a wider print, a little nearer the collar
+    assert abs(men["pw"] / cw - 0.55) < 0.02 and abs((men["y0"] - neck) / cw - 0.18) < 0.02
+    sq = _layout(mask, Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 300)))), "chest_large")
+    assert abs(sq["pw"] / cw - 0.45 * 0.85) < 0.02  # a square design a little narrower
+    m = _layout(mask, badge, "chest_medium")
+    assert abs((m["y0"] + m["ph"] / 2 - neck) / cw - 0.32) < 0.02  # medium: a short print's middle at chest height
 
 
 def test_the_print_placement_agent_moves_the_first_photo_and_the_sku_follows(tmp_path):

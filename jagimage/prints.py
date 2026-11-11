@@ -13,12 +13,12 @@ from scipy import ndimage
 # where the print goes: width as a share of the chest, top below the neckline (share of the chest width),
 # and the centre's offset from the chest's middle (share of the chest width; + is the viewer's right)
 PLACES: Dict[str, Tuple[float, float, float]] = {
-    "chest_large": (0.62, 0.12, 0.0),
+    "chest_large": (0.45, 0.24, 0.0),  # centre front: sized by who wears it and the design's shape (FIT)
     "chest_medium": (0.42, 0.14, 0.0),
     "left_chest": (0.17, 0.16, 0.22),  # the wearer's left chest = the viewer's right in a front photo
 }
-PLACE_NAMES = {"chest_large": "Centre chest, large", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo"}
-CENTRE_AT = {"chest_large": 0.34, "chest_medium": 0.32}  # a short print's middle, below the neckline (share of the chest width)
+PLACE_NAMES = {"chest_large": "Centre chest (standard)", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo"}
+CENTRE_AT = {"chest_medium": 0.32}  # a short print's middle, below the neckline (share of the chest width)
 MAX_TALL = 0.8     # a tall print stops at this share of the chest width in height, so it stays above the hem
 INK = 0.97         # screen-print ink hides almost all of the fabric colour under it
 KNIT = 0.6         # how much of the fabric's knit texture shows through the ink
@@ -103,7 +103,7 @@ def chest(mask: np.ndarray):
     return cx, neck, w
 
 
-LIMITS = {"dx": (-0.3, 0.3), "dy": (-0.15, 0.4), "scale": (0.5, 1.6)}  # how far a placement may be adjusted
+LIMITS = {"dx": (-0.3, 0.3), "dy": (-0.25, 0.4), "scale": (0.5, 2.0)}  # how far a placement may be adjusted
 
 
 def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
@@ -120,31 +120,63 @@ def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
     return {"dx": round(clamp(dx, "dx"), 3), "dy": round(clamp(dy, "dy"), 3), "scale": round(clamp(scale, "scale"), 3)}
 
 
+# How print shops size a front print (screen-print / DTG / DTF placement guides, 2025-26): every design starts on
+# the same line below the collar (about 2-2.5 in on kids' and youth tees, 3-4 in on adults'), and its width
+# depends on who wears the shirt (about 5-6 in on toddler and kids' tees, 8-9 in youth, 10-12 in adult) and on
+# the design's shape: wide artwork (text, a badge) uses the full width, square artwork less (it looks heavier),
+# tall artwork is held by its height. As shares of the chest width (a 4-5 year old's tee is about 12-13 in
+# across, a man's medium about 20 in), for "chest_large": (width, top line below the neckline, most height).
+FIT = {"kids": (0.45, 0.24, 0.50),   # approved by the shop on its kids' tees (the GYM print, 2026-11)
+       "women": (0.48, 0.20, 0.60),
+       "men": (0.55, 0.18, 0.68)}
+SQUARE = (0.75, 1.33)   # width / height of a square-ish design
+SQUARE_SHARE = 0.85     # ...which gets this share of the full width
+
+
+def fit_for(category: str) -> str:
+    c = str(category or "")
+    return "kids" if c.startswith("Kids") else "women" if c == "Women" else "men" if c == "Men" else "kids"
+
+
+def rule(place: str, aspect: float = 2.0):
+    """(width, top line, offset, most height) for a place, as shares of the chest width. A place may name who
+    wears the shirt: "chest_large:men" (default kids)."""
+    base, _, who = str(place).partition(":")
+    if base not in PLACES:
+        raise PrintError(f"place must be one of {', '.join(PLACES)}")
+    share, below, offset = PLACES[base]
+    tall = MAX_TALL
+    if base == "chest_large":
+        share, below, tall = FIT.get(who or "kids", FIT["kids"])
+        if SQUARE[0] <= aspect <= SQUARE[1]:
+            share *= SQUARE_SHARE
+    return share, below, offset, tall
+
+
 def _layout(mask: np.ndarray, art: Image.Image, place: str, dx=0.0, dy=0.0, scale=1.0) -> dict:
     """Where the print goes on this shirt: the chest (cx, neck, cw) and the print's box (x0, y0, pw, ph)."""
-    if place not in PLACES:
-        raise PrintError(f"place must be one of {', '.join(PLACES)}")
-    share, below, offset = PLACES[place]
+    rule(place)  # an unknown place is refused before any work
     a_ = adjust(dx, dy, scale)
-    share, below, offset = share * a_["scale"], below + a_["dy"], offset + a_["dx"]
     H, W = mask.shape[:2]
     cx, neck, cw = chest(mask)
     art = artwork(art)
-    bbox = art.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    bbox = art.getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()  # faint haze around a design isn't the design
     if not bbox:
         raise PrintError("the print is empty (fully transparent)")
     art = art.crop(bbox)  # the design itself, without the empty canvas around it
+    share, below, offset, tall = rule(place, art.width / max(1, art.height))
+    share, below, offset = share * a_["scale"], below + a_["dy"], offset + a_["dx"]
     pw = share * cw
     ph = pw * art.height / art.width
-    if ph > MAX_TALL * a_["scale"] * cw:
-        ph = MAX_TALL * a_["scale"] * cw
+    if ph > tall * a_["scale"] * cw:
+        ph = tall * a_["scale"] * cw
         pw = ph * art.width / art.height
     pw, ph = max(2, int(round(pw))), max(2, int(round(ph)))
     x0 = int(round(cx + offset * cw - pw / 2))
     y0 = int(round(neck + below * cw))
     # a short, wide print (a badge, a word) hangs from the same top line as a tall one and looks stuck under the
     # collar: its middle goes to chest height instead (where a printer centres it), never higher than the top line
-    low = CENTRE_AT.get(place)
+    low = CENTRE_AT.get(str(place).partition(":")[0])
     if low is not None:
         y0 = max(y0, int(round(neck + (low + a_["dy"]) * cw - ph / 2)))
     if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
@@ -171,7 +203,7 @@ def measure(mask: np.ndarray, art: Image.Image, place: str = "chest_large", dx=0
     under = m[g["y0"]:g["y0"] + g["ph"], g["x0"]:g["x0"] + g["pw"]]
     cw = g["cw"]
     return {"collar_gap": round((g["y0"] - g["neck"]) / cw, 3), "hem_gap": round((hem - g["y0"] - g["ph"]) / cw, 3),
-            "width": round(g["pw"] / cw, 3), "off_centre": round((g["x0"] + g["pw"] / 2 - g["cx"]) / cw - PLACES[place][2], 3),
+            "width": round(g["pw"] / cw, 3), "off_centre": round((g["x0"] + g["pw"] / 2 - g["cx"]) / cw - rule(place)[2], 3),
             "hidden": round(float((alpha & ~under).sum()) / max(1, int(alpha.sum())), 3)}
 
 
@@ -180,13 +212,13 @@ def rule_check(info: dict, place: str = "chest_large"):
     issues, fix = [], {"dx": 0.0, "dy": 0.0, "scale": 1.0}
     if info["collar_gap"] < MIN_COLLAR_GAP:
         issues.append("too high: touches the collar")
-        fix["dy"] = round(PLACES[place][1] - info["collar_gap"], 3)
+        fix["dy"] = round(rule(place)[1] - info["collar_gap"], 3)
     elif info["hem_gap"] < MIN_HEM_GAP:
         issues.append("too low: runs towards the hem")
         fix["dy"] = round(info["hem_gap"] - MIN_HEM_GAP - 0.02, 3)
     if info["width"] > MAX_WIDTH:
         issues.append("too big for the chest")
-        fix["scale"] = round(PLACES[place][0] / info["width"], 3)
+        fix["scale"] = round(rule(place)[0] / info["width"], 3)
     if abs(info["off_centre"]) > MAX_OFF_CENTRE:
         issues.append("off-centre")
         fix["dx"] = round(-info["off_centre"], 3)

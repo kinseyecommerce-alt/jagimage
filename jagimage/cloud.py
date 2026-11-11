@@ -741,6 +741,14 @@ placement and look on the shirt, as a buyer on Myntra or Amazon would:
   armpits, not cut off by an arm or hand, a sensible size for the chest;
 - the artwork itself intact: same design, colours and proportions as image 2, nothing missing or stretched;
 - it looks printed on the fabric (follows its light and folds), not like a sticker floating on top.
+How print shops place a front print (judge against this, the way a print-shop owner would): every design starts
+on the same line below the collar: about 2-2.5 inches on kids' and youth tees, 3-4 inches on adults' (roughly a
+quarter of the chest width below the neckline on a child, a fifth on an adult). Its width follows the wearer:
+about 5-6 inches on a 4-5 year old's tee (just under half the chest width), 8-9 inches youth, 10-12 inches adult
+(about half the chest). Its shape decides the rest: wide text or a badge spans that width and is short; a square
+graphic is a little narrower (it looks heavier); a tall graphic is held by its height so it never runs to the
+belly or the hem. A small logo-like design belongs on the left chest, not in the centre. The design's visual
+middle sits on the chest, never in the neck hollow or on the stomach.
 Be strict: a print touching or overlapping the collar or neckband, cut by an arm, clearly off-centre, or covering
 the whole front is not ok. You also get the software's measurements of the placement (shares of the chest width);
 trust them for distances, and judge the look yourself. score: 1 (unusable) to 10 (perfect).

@@ -1343,6 +1343,12 @@ class Batch:
                             except (PrintError, OSError) as exc:
                                 self._event("errors", model=m, path=str(dest), error=f"print {name}: {exc}")
 
+    def _where(self, place: str) -> str:
+        """The place with who wears the shirt (prints are sized for kids, women or men)."""
+        from .prints import fit_for
+
+        return f"{place}:{fit_for(self.spec.category)}"
+
     def print_targets(self) -> List[dict]:
         """The finished front photos a print can go on: [{model, top, bottom, pose}] (for the preview)."""
         spec, rows = self.spec, []
@@ -1362,7 +1368,7 @@ class Batch:
         base = self.spec.base_key(t, b)
         img, tmask, bmask = self.masks(m, base, pose)
         plain = self._recoloured(img, tmask, bmask, base, t, b)
-        return place_print(plain, tmask, art, place, dx=dx, dy=dy, scale=scale), tmask
+        return place_print(plain, tmask, art, self._where(place), dx=dx, dy=dy, scale=scale), tmask
 
     PRINT_FIXES = 2  # the checker may move or resize a print this many times, then it is flagged for a person
 
@@ -1373,13 +1379,13 @@ class Batch:
 
         spec = self.spec
         adj = adjust(spec.print_dx, spec.print_dy, spec.print_scale)
-        out = place_print(plain, tmask, art, spec.print_place, **adj)
+        out = place_print(plain, tmask, art, self._where(spec.print_place), **adj)
         if not self.checker:
             return out, None
         record = {"rounds": [], "ok": False}
         for n in range(self.PRINT_FIXES + 1):
             try:
-                res = judge_print(out, art, tmask, spec.print_place, adj, self.checker)
+                res = judge_print(out, art, tmask, self._where(spec.print_place), adj, self.checker)
             except Exception as exc:  # the checker can't be reached: keep the print, say it wasn't checked
                 record.update(error=f"{type(exc).__name__}: {exc}"[:300])
                 self._event("errors", model=m, path=str(dest), error=f"print check: {exc}")
@@ -1390,7 +1396,7 @@ class Batch:
                 record["ok"] = res["ok"]
                 break
             adj = adjust(adj["dx"] + res["dx"], adj["dy"] + res["dy"], adj["scale"] * res["scale"])
-            out = place_print(plain, tmask, art, spec.print_place, **adj)
+            out = place_print(plain, tmask, art, self._where(spec.print_place), **adj)
         record["adjust"] = adj
         record["fixed"] = len(record["rounds"]) > 1
         if record["fixed"]:
