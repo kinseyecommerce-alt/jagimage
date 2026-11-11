@@ -1347,7 +1347,7 @@ class Batch:
         """The place with who wears the shirt (prints are sized for kids, women or men)."""
         from .prints import fit_for
 
-        return f"{place}:{fit_for(self.spec.category)}"
+        return f"{place}:{fit_for(self.spec.category, self.spec.top)}"
 
     def print_targets(self) -> List[dict]:
         """The finished front photos a print can go on: [{model, top, bottom, pose}] (for the preview)."""

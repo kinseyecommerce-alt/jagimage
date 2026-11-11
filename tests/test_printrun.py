@@ -357,3 +357,15 @@ def test_the_shirt_is_found_even_when_the_ai_points_at_the_face():
         face = np.zeros((800, 600), np.float32)
         face[60:160, 255:345] = 1
         printrun.sane(face, (0.22, 0.2, 0.78, 0.66), (600, 800))
+
+
+def test_oversized_tees_start_prints_lower_than_regular_ones():
+    from jagimage.prints import _layout, chest, fit_for
+
+    assert fit_for("Men", "OversizedTee") == "men_oversized" and fit_for("Men", "HalfSleeveTee") == "men"
+    assert fit_for("Kids_Boys", "OversizedTee") == "kids"
+    mask = shirt_truth().astype(np.float32)
+    cx, neck, cw = chest(mask)
+    tall = Image.open(io.BytesIO(art_png((250, 250, 250), size=(300, 400))))
+    reg, ov = _layout(mask, tall, "chest_large:men"), _layout(mask, tall, "chest_large:men_oversized")
+    assert ov["y0"] - reg["y0"] > 0.06 * cw and ov["ph"] < reg["ph"]

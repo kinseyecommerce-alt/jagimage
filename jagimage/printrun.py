@@ -419,7 +419,7 @@ class PrintRun:
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
                 from .prints import fit_for
 
-                self._where = f"{self.place}:{fit_for(prod.get('category', ''))}"  # sized for who wears it
+                self._where = f"{self.place}:{fit_for(prod.get('category', ''), prod.get('style', ''))}"  # sized for who wears it
                 files, adj = [], None
                 chosen = fronts
                 if self.one_model:  # one print, one model: each print on the next model in turn, front only

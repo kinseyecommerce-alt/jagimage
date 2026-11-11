@@ -136,14 +136,21 @@ def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
 # across, a man's medium about 20 in), for "chest_large": (width, top line below the neckline, most height).
 FIT = {"kids": (0.45, 0.20, 0.50),   # approved by the shop on its kids' tees (the GYM print, a little higher, 2026-11)
        "women": (0.48, 0.20, 0.60),
-       "men": (0.55, 0.18, 0.68)}
+       "men": (0.55, 0.18, 0.68),
+       # oversized (drop-shoulder) tees: a lower, wider neckline, so the print starts further down and a tall
+       # print is held a little shorter (it no longer reaches the neckband)
+       "men_oversized": (0.52, 0.26, 0.60),
+       "women_oversized": (0.46, 0.26, 0.54)}
 SQUARE = (0.75, 1.33)   # width / height of a square-ish design
 SQUARE_SHARE = 0.85     # ...which gets this share of the full width
 
 
-def fit_for(category: str) -> str:
+def fit_for(category: str, style: str = "") -> str:
     c = str(category or "")
-    return "kids" if c.startswith("Kids") else "women" if c == "Women" else "men" if c == "Men" else "kids"
+    who = "kids" if c.startswith("Kids") else "women" if c == "Women" else "men" if c == "Men" else "kids"
+    if style == "OversizedTee" and f"{who}_oversized" in FIT:
+        return f"{who}_oversized"
+    return who
 
 
 def rule(place: str, aspect: float = 2.0):
