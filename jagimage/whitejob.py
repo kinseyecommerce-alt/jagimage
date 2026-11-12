@@ -18,7 +18,7 @@ from typing import List
 from PIL import Image
 
 ROOT = "White background"
-WORKERS = 3  # photos done side by side (each keeps its own cutout model, about 0.5 GB)
+WORKERS = 6  # photos done side by side (they share one cutout model, used only for pale clothes)
 PHOTO = re.compile(r"\.(jpe?g|png|webp)$", re.I)
 
 

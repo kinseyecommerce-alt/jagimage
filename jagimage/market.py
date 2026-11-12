@@ -29,6 +29,10 @@ WHITE_FROM = 0.92  # backdrop at least this share of its lit brightness is pure 
 PERSON_IN = 0.5   # cutout: at least this sure it is the person, so never whitened
 PERSON_OUT = 0.08  # ...and this unsure, so a closed-in gap of wall-grey is backdrop
 GAP_DL, GAP_DC = 0.08, 0.03  # OKLab: how close a closed-in gap is to the wall's colour
+PALE_DL, PALE_DC = 0.12, 0.04  # OKLab: clothes this close to the wall's grey are "pale" (white, melange)...
+PALE_SHARE = 0.12  # ...and when this share of the photo's middle is pale, the cutout model protects them
+GAP_DL_TIGHT, GAP_DC_TIGHT = 0.03, 0.015  # without the model, only a gap of exactly the wall's grey...
+GAP_MIN = 0.0004  # ...and at least this share of the photo turns white
 WHITE_EDGE = 1.5  # px: the backdrop's edge is softened this much when it turns white, so hair stays natural
 
 
@@ -66,12 +70,11 @@ def person_mask(img: Image.Image) -> Optional[np.ndarray]:
 
 def on_white(img: Image.Image, person: Optional[np.ndarray] = None) -> Image.Image:
     """The studio backdrop made pure white (#FFFFFF). Darker spots in it (the contact shadow) keep
-    their share of darkness, so the model still stands on the floor instead of floating. Where a cutout
-    model is installed, nothing it sees as the person or the clothes is touched."""
+    their share of darkness, so the model still stands on the floor instead of floating. When the clothes are
+    pale (close to the wall's grey), a cutout model (where installed) keeps everything it sees as the person
+    or the clothes as it is. person: that model's mask, when already known."""
     rgb = np.asarray(img.convert("RGB"))
     lab = rgb_to_lab(rgb).astype(np.float32)  # float32 halves the memory a 2000 px photo needs
-    if person is None:
-        person = person_mask(img)
     # the studio can have two parts: the wall and a floor strip of another grey (or tint) along the bottom.
     # Each border's own colour is followed, and each part turns white against its own brightness.
     bg = np.zeros(lab.shape[:2], bool)
@@ -91,6 +94,27 @@ def on_white(img: Image.Image, person: Optional[np.ndarray] = None) -> Image.Ima
         bg |= part
     if bg.mean() < 0.05:  # no backdrop found: leave the photo as it is
         return img.convert("RGB")
+    wall = np.median(lab[bg], axis=0)
+    near_wall = (np.abs(lab[..., 0] - wall[0]) < PALE_DL) & (np.hypot(lab[..., 1] - wall[1], lab[..., 2] - wall[2]) < PALE_DC)
+    if person is None:
+        # the cutout model (slow) only where it is needed: clothes in the middle of the photo close to the wall's
+        # grey (white, melange, light grey), which the backdrop's colour could run into
+        h, w = near_wall.shape
+        if near_wall[int(0.3 * h):int(0.8 * h), int(0.4 * w):int(0.6 * w)].mean() > PALE_SHARE:
+            person = person_mask(img)
+        else:
+            # no pale clothes: a closed-in gap (between the legs) of exactly the wall's grey is backdrop
+            tight = near_wall & ~bg & (np.abs(lab[..., 0] - wall[0]) < GAP_DL_TIGHT) & \
+                (np.hypot(lab[..., 1] - wall[1], lab[..., 2] - wall[2]) < GAP_DC_TIGHT)
+            pockets, n = ndimage.label(tight)
+            if n:
+                sizes = ndimage.sum(tight, pockets, index=np.arange(1, n + 1))
+                big = np.zeros(n + 1, bool)
+                big[1:] = sizes >= GAP_MIN * tight.size
+                add = big[pockets]
+                lit = float(np.percentile(lab[..., 0][bg], 75))
+                shade[add] = np.clip(lab[..., 0][add] / (WHITE_FROM * max(lit, 1e-3)), 0, 1) ** 2
+                bg |= add
     if person is not None:
         bg &= person < PERSON_IN  # a pale garment the backdrop's colour ran into stays as it is
         # backdrop the border can't reach (between the legs, between an arm and the body): not the person,
