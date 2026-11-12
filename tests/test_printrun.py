@@ -529,3 +529,27 @@ def test_zip_hoodie_print_starts_one_cm_from_the_zip():
     g = _layout(mask, art, "zip_chest:kids")
     gap_cm = (g["x0"] - g["cx"]) / g["cw"] * CHEST_CM["kids"] - 0.4  # from the zip's edge
     assert abs(gap_cm - 1.0) < 0.15
+
+
+def test_tall_print_beside_the_zip_stays_logo_sized():
+    from jagimage.prints import SMALL_TALL, _layout
+
+    _, mask = _qc_shirt()
+    tall = Image.new("RGBA", (200, 600), (0, 0, 0, 0))
+    ImageDraw.Draw(tall).rectangle((10, 10, 190, 590), fill=(250, 250, 250, 255))
+    g = _layout(mask, tall, "zip_chest:kids")
+    assert g["ph"] <= SMALL_TALL * g["cw"] + 1
+
+
+def test_print_qc_does_not_take_a_yellow_shirt_for_skin():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo = Image.new("RGB", (600, 800), (230, 230, 230))
+    ImageDraw.Draw(photo).rectangle((120, 150, 480, 750), fill=(248, 169, 26))  # an orange-yellow tee
+    mask = np.zeros((800, 600), np.float32)
+    mask[150:750, 120:480] = 1
+    art = _qc_art((20, 30, 60, 255))
+    r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids",
+                      shirt_hex="#F9A712")
+    assert "hand" not in r["failed"], r

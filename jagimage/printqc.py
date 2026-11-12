@@ -24,7 +24,8 @@ OUTSIDE_DE = 0.04    # OKLab: a pixel outside the print's box this far from the 
 OUTSIDE_MAX = 0.002  # at most this share of the photo outside the print may change
 HAND_MAX = 0.02      # at most this share of a print may go under a hand or arm (the photo shows the shirt, not the hand)
 INK_ON_SKIN_MAX = 0.01  # at most this share of the print's ink may be painted over skin (a hand the shirt mask took in)
-SKIN_FROM_SHIRT = 0.08  # OKLab: skin this far from the shirt's colour is told apart from a pink or beige shirt
+SKIN_FROM_SHIRT = 0.08
+SKIN_C_MAX = 0.13       # OKLab chroma: skin is never this saturated (a yellow or orange shirt is)  # OKLab: skin this far from the shirt's colour is told apart from a pink or beige shirt
 VISIBILITY = "shows"  # the name of the visibility check (a print that doesn't show is left out, not held)
 
 
@@ -65,16 +66,24 @@ def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.
     a0 = rgb_to_lab(np.asarray(before.convert("RGB").crop((x0, y0, x1, y1))))
     b0 = rgb_to_lab(np.asarray(after.convert("RGB").crop((x0, y0, x1, y1))))
     C = np.hypot(a0[..., 1], a0[..., 2])
-    skinish = (a0[..., 1] > 0.015) & (a0[..., 2] > 0.0) & (C > 0.035)
+    hue = np.degrees(np.arctan2(a0[..., 2], a0[..., 1]))
+    # skin: a warm, muted colour (a yellow or orange shirt is far more saturated, a red one redder)
+    skinish = (a0[..., 1] > 0.015) & (C > 0.035) & (C < SKIN_C_MAX) & (hue > 20) & (hue < 80)
+    # ...and not the shirt's own colour, as it is in this photo (folds and shade included)
+    small = before.convert("RGB").reduce(4)
+    on = np.asarray(Image.fromarray(((np.asarray(mask) > 0.5) * 255).astype(np.uint8)).resize(small.size)) > 127
+    ref = [np.median(rgb_to_lab(np.asarray(small))[on], axis=0)] if on.any() else []
     if shirt_hex:
         from .recolor import hex_to_lab
 
         try:
-            dt = a0 - hex_to_lab(shirt_hex)
-            dt[..., 0] *= 0.35  # a fold's shadow on a pink shirt is darker, not skin
-            skinish &= np.linalg.norm(dt, axis=-1) > SKIN_FROM_SHIRT
+            ref.append(hex_to_lab(shirt_hex))
         except (ValueError, TypeError):
             pass
+    for r in ref:
+        dt = a0 - r
+        dt[..., 0] *= 0.35  # a fold's shadow is darker, not skin
+        skinish &= np.linalg.norm(dt, axis=-1) > SKIN_FROM_SHIRT
     ink = np.asarray(g["art"].resize((g["pw"], g["ph"])).getchannel("A"))[:a0.shape[0], :a0.shape[1]] > 128
     painted = ink & skinish & (np.linalg.norm(b0 - a0, axis=-1) > OUTSIDE_DE)
     share = float(painted.sum()) / max(1, int(ink.sum()))

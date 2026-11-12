@@ -24,6 +24,7 @@ CHEST_CM = {"kids": 30.0, "women": 44.0, "men": 52.0, "men_oversized": 58.0, "wo
 PLACE_NAMES = {"chest_large": "Centre chest (standard)", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo",
                "zip_chest": "Beside the zip (zip hoodies)"}
 CENTRE_AT = {"chest_medium": 0.32}  # a short print's middle, below the neckline (share of the chest width)
+SMALL_TALL = 0.24  # a left-chest or beside-the-zip print is at most this tall (share of the chest width)
 MAX_TALL = 0.8     # a tall print stops at this share of the chest width in height, so it stays above the hem
 INK = 0.97         # screen-print ink hides almost all of the fabric colour under it
 KNIT = 0.6         # how much of the fabric's knit texture shows through the ink
@@ -165,7 +166,7 @@ def rule(place: str, aspect: float = 2.0):
     if base not in PLACES:
         raise PrintError(f"place must be one of {', '.join(PLACES)}")
     share, below, offset = PLACES[base]
-    tall = MAX_TALL
+    tall = SMALL_TALL if base in ("left_chest", "zip_chest") else MAX_TALL  # a chest logo stays logo-sized
     if base == "zip_chest":  # the print's inner edge 1 cm from the zip: its middle half a print further out
         offset = (ZIP_HALF_CM + ZIP_GAP_CM) / CHEST_CM.get(who or "kids", CHEST_CM["kids"]) + share / 2
     if base == "chest_large":
