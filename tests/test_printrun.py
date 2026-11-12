@@ -413,3 +413,21 @@ def test_local_checks_ask_the_ai_only_where_the_shirt_is(tmp_path):
     assert set(asked) == {printrun.SHIRT_SYSTEM}  # no AI suitability call; the placement checked on the server
     out = np.asarray(Image.open(tmp_path / "printed" / run.id / "SPB-KB-HS-RED-230" / "230.jpg"))
     assert out[240, 300].mean() > 200 and out[110, 300, 0] > 150  # print on the chest; the face untouched
+
+
+def test_visible_share_leaves_dark_on_dark_out():
+    from PIL import ImageDraw
+    from jagimage.printrun import visible_share
+    from jagimage.prints import _layout, place_print
+
+    photo = Image.new("RGB", (600, 800), (230, 230, 230))
+    ImageDraw.Draw(photo).rectangle((120, 150, 480, 750), fill=(21, 21, 21))
+    mask = np.zeros((800, 600), np.float32)
+    mask[150:750, 120:480] = 1
+    seen = {}
+    for name, col in (("black", (10, 10, 10, 255)), ("white", (250, 250, 250, 255))):
+        art = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+        ImageDraw.Draw(art).ellipse((20, 20, 280, 280), fill=col)
+        out = place_print(photo, mask, art, "chest_large:kids")
+        seen[name] = visible_share(photo, out, _layout(mask, art, "chest_large:kids"))
+    assert seen["black"] < 0.2 and seen["white"] > 0.9

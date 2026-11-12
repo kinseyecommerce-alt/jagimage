@@ -80,7 +80,21 @@ MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's b
 
 
 LOCAL_HIDDEN_SHARE = 0.35  # local checks: a print with more than this share of its ink in low contrast is left out
-SKIN_MAX = 0.03           # at most this share of the print's box may lie on skin
+SKIN_MAX = 0.03
+VISIBLE_DE = 0.12         # OKLab: printed ink this far from the shirt's colour under it shows
+VISIBLE_MIN = 0.55        # local checks: at least this share of a print's ink must show, or it is left out           # at most this share of the print's box may lie on skin
+
+
+def visible_share(before: Image.Image, after: Image.Image, g: dict) -> float:
+    """How much of the print actually shows once printed: the share of its ink whose colour clearly differs
+    from the shirt under it (a black line print on a black tee hardly shows, whatever the artwork's file says)."""
+    x0, y0, x1, y1 = g["x0"], g["y0"], g["x0"] + g["pw"], g["y0"] + g["ph"]
+    a = rgb_to_lab(np.asarray(before.convert("RGB").crop((x0, y0, x1, y1))))
+    b = rgb_to_lab(np.asarray(after.convert("RGB").crop((x0, y0, x1, y1))))
+    ink = np.asarray(g["art"].resize((g["pw"], g["ph"])).getchannel("A"))[:a.shape[0], :a.shape[1]] > 128
+    if not ink.any():
+        return 0.0
+    return float((np.linalg.norm(b - a, axis=-1)[ink] > VISIBLE_DE).mean())
 
 
 def on_skin(photo: Image.Image, g: dict, mask: np.ndarray) -> float:
@@ -477,9 +491,17 @@ class PrintRun:
                     self._turn += 1
                 for i, (m, photo, mask, _) in enumerate(chosen):
                     try:
-                        if adj is None:
+                        first = adj is None
+                        if first:
                             adj = self._local_placement(photo, mask, art) if self.local else self._placement(photo, mask, art)
-                        files.append(self._place(photo, mask, art, adj))
+                        printed = self._place(photo, mask, art, adj)
+                        if first and self.local:
+                            from .prints import _layout
+
+                            seen = visible_share(photo, printed, _layout(mask, art, self._where, **adj))
+                            if seen < VISIBLE_MIN:
+                                raise PrintError(f"only {round(seen * 100)}% of the print shows on {prod['colour']}: left out")
+                        files.append(printed)
                     except PrintError as exc:
                         self._note("error", sku=sku, error=str(exc))
                         self.counts["errors"] += 1
