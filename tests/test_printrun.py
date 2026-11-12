@@ -553,3 +553,13 @@ def test_print_qc_does_not_take_a_yellow_shirt_for_skin():
     r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids",
                       shirt_hex="#F9A712")
     assert "hand" not in r["failed"], r
+
+
+def test_sleeveless_prints_are_bigger_and_lower():
+    from jagimage.prints import _layout, fit_for
+
+    assert fit_for("Kids_Boys", "SleevelessTee") == "kids_sleeveless"
+    _, mask = _qc_shirt()
+    art = _qc_art((250, 250, 250, 255))
+    tee, vest = _layout(mask, art, "chest_large:kids"), _layout(mask, art, "chest_large:kids_sleeveless")
+    assert vest["pw"] > tee["pw"] and vest["y0"] > tee["y0"]

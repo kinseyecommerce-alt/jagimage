@@ -146,7 +146,12 @@ FIT = {"kids": (0.45, 0.20, 0.50),   # approved by the shop on its kids' tees (t
        # oversized (drop-shoulder) tees: a lower, wider neckline, so the print starts further down and a tall
        # print is held a little shorter (it no longer reaches the neckband)
        "men_oversized": (0.52, 0.26, 0.60),
-       "women_oversized": (0.46, 0.26, 0.54)}
+       "women_oversized": (0.46, 0.26, 0.54),
+       # sleeveless tops: a lower neckline and a longer-looking body, so the print is bigger and starts lower
+       # (approved on the kids' sleeveless, 2026-11)
+       "kids_sleeveless": (0.56, 0.28, 0.60),
+       "women_sleeveless": (0.56, 0.26, 0.66),
+       "men_sleeveless": (0.64, 0.24, 0.72)}
 SQUARE = (0.75, 1.33)   # width / height of a square-ish design
 SQUARE_SHARE = 0.85     # ...which gets this share of the full width
 
@@ -156,6 +161,8 @@ def fit_for(category: str, style: str = "") -> str:
     who = "kids" if c.startswith("Kids") else "women" if c == "Women" else "men" if c == "Men" else "kids"
     if style == "OversizedTee" and f"{who}_oversized" in FIT:
         return f"{who}_oversized"
+    if style == "SleevelessTee" and f"{who}_sleeveless" in FIT:
+        return f"{who}_sleeveless"
     return who
 
 
