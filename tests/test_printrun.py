@@ -396,3 +396,20 @@ def test_at_most_n_prints_per_product(tmp_path):
                             per_product=2)
     run._run()
     assert run.error is None and len(run.skus) == 4  # 2 products x 2 prints each
+
+
+def test_local_checks_ask_the_ai_only_where_the_shirt_is(tmp_path):
+    red = jpg(tee_photo())
+    tees = [{"id": "t1", "name": "m0001_front.jpg", "path": ["Cotton Mix", "Boys", "Red", "Half sleeve"], "data": red},
+            {"id": "t2", "name": "m0002_back.jpg", "path": ["Cotton Mix", "Boys", "Red", "Half sleeve"], "data": red}]
+    prints = [{"id": "p1", "name": "230.png", "path": [], "data": art_png((250, 250, 250))},
+              {"id": "p2", "name": "224.png", "path": [], "data": art_png((200, 32, 42))}]
+
+    asked = []
+    run = printrun.PrintRun(FakeDrive(tees, prints), fake_ask(asked), tmp_path, "TEES", "PRINTS", one_model=True, test=True,
+                            local=True, checker=lambda *a: (_ for _ in ()).throw(AssertionError("no AI print checker")))
+    run._run()
+    assert run.error is None and [s["sku"] for s in run.skus] == ["SPB-KB-HS-RED-230"]  # the red-on-red print left out
+    assert set(asked) == {printrun.SHIRT_SYSTEM}  # no AI suitability call; the placement checked on the server
+    out = np.asarray(Image.open(tmp_path / "printed" / run.id / "SPB-KB-HS-RED-230" / "230.jpg"))
+    assert out[240, 300].mean() > 200 and out[110, 300, 0] > 150  # print on the chest; the face untouched

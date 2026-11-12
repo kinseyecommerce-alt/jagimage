@@ -875,9 +875,9 @@ def make_handler(app: Studio):
                                place=str(body.get("place") or "chest_large"), per_sku=body.get("per_sku") or 5,
                                brand=shop["brand"], pattern=shop["sku_pattern"], limit=body.get("limit") or 0,
                                label=" ".join(str(body.get("label") or "").split())[:80],
-                               checker=c.agent.check_print if body.get("agent", True) else None,
+                               checker=c.agent.check_print if body.get("agent", True) and not body.get("local") else None,
                                one_model=bool(body.get("one_model", True)), test=bool(body.get("test")),
-                               per_product=body.get("per_product") or 0)
+                               per_product=body.get("per_product") or 0, local=bool(body.get("local")))
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "stop":

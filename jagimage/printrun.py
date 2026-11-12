@@ -79,6 +79,21 @@ AGENT_MIN_DY = -0.02  # the placement agent may raise a print at most this much 
 MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's box
 
 
+LOCAL_HIDDEN_SHARE = 0.35  # local checks: a print with more than this share of its ink in low contrast is left out
+SKIN_MAX = 0.03           # at most this share of the print's box may lie on skin
+
+
+def on_skin(photo: Image.Image, g: dict, mask: np.ndarray) -> float:
+    """The share of the print's box that lies on skin off the shirt (a face, the neck, an arm). A red or pink shirt
+    is skin-coloured itself, so only what is outside the shirt counts."""
+    x0, y0, x1, y1 = g["x0"], g["y0"], g["x0"] + g["pw"], g["y0"] + g["ph"]
+    lab = rgb_to_lab(np.asarray(photo.convert("RGB").crop((x0, y0, x1, y1))))
+    off = np.asarray(mask)[y0:y1, x0:x1] < 0.5
+    C = np.hypot(lab[..., 1], lab[..., 2])
+    skin = (lab[..., 1] > 0.015) & (lab[..., 2] > 0.0) & (C > 0.035)
+    return float((skin & off[:skin.shape[0], :skin.shape[1]]).mean())
+
+
 def sane(mask: np.ndarray, box, size, photo: Optional[Image.Image] = None, colour_hex: str = "") -> None:
     """The shirt found must be the one the AI saw: its neckline inside the AI's box (not up on the face), its
     chest no wider than the box, a fair part of the box (not a face-sized patch), and the shirt's colour.
@@ -228,7 +243,7 @@ class PrintRun:
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
-                 test: bool = False, per_product: int = 0):
+                 test: bool = False, per_product: int = 0, local: bool = False):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -238,6 +253,7 @@ class PrintRun:
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
         self.one_model, self._turn = one_model, 0
+        self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
         self.test = test  # nothing goes to Drive or Dropbox: the photos are only looked at
         self._where = f"{place}:kids"  # set per product (who wears it) before printing
@@ -267,8 +283,10 @@ class PrintRun:
         del self.log[:-400]
 
     # ---- the steps
-    def _look(self, key: str, img: Image.Image) -> dict:
-        if key not in self.looks:
+    def _look(self, key: str, img: Image.Image, prod: Optional[dict] = None, name: str = "") -> dict:
+        if key in self.looks:
+            return self.looks[key]
+        if key not in self.looks:  # one AI look per model photo (cached): where the shirt is
             ans = self.ask("Look at this product photo.", SHIRT_SYSTEM, SHIRT_SCHEMA, [_jpeg(img, 1024)])
             self.looks[key] = ans if isinstance(ans, dict) else {}
         return self.looks[key]
@@ -280,6 +298,9 @@ class PrintRun:
             if hidden > HIDDEN_SHARE:
                 self.suits[k] = {"ok": False, "reason": f"{round(hidden * 100)}% of the print would hardly show on {colour}",
                                  "theme": "", "description": ""}
+            elif self.local:  # contrast alone decides (the Listing tab describes the print later)
+                self.suits[k] = {"ok": hidden <= LOCAL_HIDDEN_SHARE, "theme": "", "description": "",
+                                 "reason": f"{round(hidden * 100)}% of the ink in low contrast on {colour}"}
             else:
                 ans = self.ask(f"T-shirt colour: {colour} ({hex_}).", SUIT_SYSTEM, SUIT_SCHEMA, [_art_jpeg(art)])
                 self.suits[k] = {"ok": bool(ans.get("ok")), "reason": " ".join(str(ans.get("reason") or "").split())[:200],
@@ -315,6 +336,28 @@ class PrintRun:
             self.counts["fixed"] += 1
             self._note("moved", why="; ".join(verdict.get("issues") or [])[:200], **adj)
         return adj
+
+    def _local_placement(self, photo: Image.Image, mask: np.ndarray, art: Image.Image) -> dict:
+        """The placement check without AI: the firm rules (collar, hem, width, centre, hidden), then the print must not
+        lie on skin (a face, the neck, an arm): if it does, it moves down in small steps, at most three times."""
+        from .prints import _layout
+
+        adj = adjust()
+        for _ in range(4):
+            try:
+                issues, fix = rule_check(measure(mask, art, self._where, **adj), self._where)
+                if issues:
+                    adj = adjust(adj["dx"] + fix["dx"], adj["dy"] + fix["dy"], adj["scale"] * fix["scale"])
+                    self.counts["fixed"] += 1
+                    continue
+                g = _layout(mask, art, self._where, **adj)
+            except PrintError:
+                return adj
+            if on_skin(photo, g, mask) <= SKIN_MAX:
+                return adj
+            adj = adjust(adj["dx"], adj["dy"] + 0.04, adj["scale"])
+            self.counts["fixed"] += 1
+        raise PrintError("the print would lie on skin here: skipped")
 
     def _place(self, photo: Image.Image, mask: np.ndarray, art: Image.Image, adj: Optional[dict] = None) -> Image.Image:
         return place_print(photo, mask, art, self._where, **(adj or adjust()))
@@ -389,7 +432,7 @@ class PrintRun:
                 f = m["front"]
                 try:
                     photo = open_image(self.drive.download(f["id"])).convert("RGB")
-                    look = self._look(f["id"], photo)
+                    look = self._look(f["id"], photo, prod, f["name"])
                     if not look.get("is_top") or str(look.get("view", "")).lower() != "front":
                         self._note("skipped", file=f["name"], why="not a front view of a top")
                         continue
@@ -435,7 +478,7 @@ class PrintRun:
                 for i, (m, photo, mask, _) in enumerate(chosen):
                     try:
                         if adj is None:
-                            adj = self._placement(photo, mask, art)
+                            adj = self._local_placement(photo, mask, art) if self.local else self._placement(photo, mask, art)
                         files.append(self._place(photo, mask, art, adj))
                     except PrintError as exc:
                         self._note("error", sku=sku, error=str(exc))

@@ -342,6 +342,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="row">
       <label class="field"><span>Print position</span><select id="drPlace"></select></label>
       <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
+      <label class="check"><input type="checkbox" id="drLocal" checked> <span>Local checks: whether a print suits a colour (by contrast) and the placement (print-shop rules, never on skin) are checked on the server for free. The AI only finds the shirt, once per model photo.</span></label>
       <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (front only, photo named as the print)</span></label>
       <label class="field"><span>Prints per product (0 = all)</span><input type="number" id="drPerProd" value="10" min="0"></label>
@@ -1031,7 +1032,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
