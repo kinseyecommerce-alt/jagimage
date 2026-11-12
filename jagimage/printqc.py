@@ -2,7 +2,7 @@
 server from the photo itself (no AI cost), and holds a photo with the reasons in plain words:
 
 - the print shows on the shirt's colour (not black line art on a black tee)
-- the print shop's placement rules: below the collar, above the hem, not too wide or too small, centred,
+- the print shop's placement rules (a zip hoodie's print never across the zip): below the collar, above the hem, not too wide or too small, centred,
   not hidden by an arm or hand
 - the print is on the shirt, not on a face, the neck or an arm
 - nothing else in the photo changed (only the print's own box)
@@ -26,7 +26,7 @@ VISIBILITY = "shows"  # the name of the visibility check (a print that doesn't s
 
 
 def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.Image, place: str,
-          adj: Optional[dict] = None, sku: str = "", file_name: str = "", print_name: str = "") -> dict:
+          adj: Optional[dict] = None, sku: str = "", file_name: str = "", print_name: str = "", style: str = "") -> dict:
     """QC of one printed photo: {"ok", "problems": [plain sentences], "failed": [check names], "scores": {...}}."""
     from .printrun import SKIN_MAX, VISIBLE_MIN, on_skin, visible_share
 
@@ -47,10 +47,12 @@ def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.
     scores["shows"] = round(seen, 3)
     if seen < VISIBLE_MIN:
         fail(VISIBILITY, f"only {round(seen * 100)}% of the print shows on this shirt colour")
+    if style == "ZipHoodie" and not str(place).startswith("left_chest"):
+        fail("placement", "a zip hoodie opens down the middle: the print would run across the zip")
     issues, _ = rule_check(info, place)
     for issue in issues:
         fail("placement", issue)
-    if info["width"] < MIN_WIDTH:
+    if info["width"] < MIN_WIDTH and not str(place).startswith("left_chest"):  # a left-chest logo is small on purpose
         fail("placement", "too small for the chest")
     skin = on_skin(before, g, mask)
     scores["on_skin"] = round(skin, 3)

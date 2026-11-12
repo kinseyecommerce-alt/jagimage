@@ -109,7 +109,7 @@ def on_skin(photo: Image.Image, g: dict, mask: np.ndarray) -> float:
     return float((skin & off[:skin.shape[0], :skin.shape[1]]).mean())
 
 
-def sane(mask: np.ndarray, box, size, photo: Optional[Image.Image] = None, colour_hex: str = "") -> None:
+def sane(mask: np.ndarray, box, size, photo: Optional[Image.Image] = None, colour_hex: str = "", seen_hex: str = "") -> None:
     """The shirt found must be the one the AI saw: its neckline inside the AI's box (not up on the face), its
     chest no wider than the box, a fair part of the box (not a face-sized patch), and the shirt's colour.
     Otherwise the photo is skipped rather than printed in the wrong place."""
@@ -128,9 +128,17 @@ def sane(mask: np.ndarray, box, size, photo: Optional[Image.Image] = None, colou
         sm = np.asarray(Image.fromarray((m * 255).astype(np.uint8)).resize(small.size)) > 127
         if sm.any():
             got = np.median(rgb_to_lab(np.asarray(small))[sm], axis=0)
-            dt = got - hex_to_lab(colour_hex)
-            dt[0] *= 0.5
-            if float(np.linalg.norm(dt)) > 0.15:
+
+            def far(h: str) -> bool:
+                try:
+                    dt = got - hex_to_lab(h)
+                except (ValueError, TypeError):
+                    return True
+                dt[0] *= 0.5
+                return float(np.linalg.norm(dt)) > 0.15
+            # the folder's colour name is a guide (a "Green" folder may hold bottle green): the colour the AI saw
+            # in this photo counts too. Skin is far from both.
+            if far(colour_hex) and (not seen_hex or far(seen_hex)):
                 raise SegmentError("the shirt found is not the shirt's colour (skin?): skipped")
 
 
@@ -154,6 +162,7 @@ def guess(path: List[str]) -> dict:
 
 
 def colour_hex_for(name: str, fabric: str = "") -> Optional[str]:
+    fabric = re.sub(r"[^A-Za-z]", "", str(fabric or ""))  # the folder says "Cotton Mix", the table "CottonMix"
     for fab in ([fabric] if fabric in L.COLOURS else []) + list(L.COLOURS):
         for c, h in L.COLOURS[fab].items():
             if c.lower() == str(name or "").lower():
@@ -461,7 +470,7 @@ class PrintRun:
                         continue
                     want = colour_hex_for(prod.get("colour", ""), prod.get("fabric", "")) or str(look.get("colour_hex") or "")
                     mask = shirt_mask(photo, look.get("box") or [], look.get("chest") or [], want)
-                    sane(mask, look.get("box") or [], photo.size, photo, want)
+                    sane(mask, look.get("box") or [], photo.size, photo, want, str(look.get("colour_hex") or ""))
                     fronts.append((m, photo, mask, look))
                 except (PrintError, SegmentError) as exc:
                     self._note("error", file=f["name"], error=str(exc))
@@ -489,7 +498,9 @@ class PrintRun:
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
                 from .prints import fit_for
 
-                self._where = f"{self.place}:{fit_for(prod.get('category', ''), prod.get('style', ''))}"  # sized for who wears it
+                # sized for who wears it; a zip hoodie opens down the middle, so its print goes on the left chest
+                place = "left_chest" if prod.get("style") == "ZipHoodie" else self.place
+                self._where = f"{place}:{fit_for(prod.get('category', ''), prod.get('style', ''))}"
                 files, adj, qc = [], None, []
                 chosen = fronts
                 if self.one_model:  # one print, one model: each print on the next model in turn, front only
@@ -503,7 +514,8 @@ class PrintRun:
                         printed = self._place(photo, mask, art, adj)
                         # print QC: the last check before the photo is saved or uploaded
                         res = printqc.check(photo, printed, mask, art, self._where, adj, sku,
-                                            f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname))
+                                            f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname),
+                                            style=prod.get("style", ""))
                         if printqc.only_visibility(res):
                             raise PrintError(f"{res['problems'][0]} ({prod['colour']}): left out")
                         qc.append(res)

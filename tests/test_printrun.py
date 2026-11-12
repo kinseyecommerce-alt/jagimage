@@ -482,3 +482,20 @@ def test_print_run_holds_and_approves(tmp_path):
     assert st["counts"]["held"] == 1 and not st["skus"] and st["held"][0]["problems"] == ["too high: touches the collar"]
     st = run.approve("SPB-KB-HS-BLA-1")
     assert st["counts"]["held"] == 0 and st["skus"][0]["sku"] == "SPB-KB-HS-BLA-1"
+
+
+def test_folder_fabric_names_find_their_colours():
+    assert printrun.colour_hex_for("Green", "Cotton Mix") == "#2E7D32"
+    assert printrun.colour_hex_for("Green", "Pure Cotton") == "#6CC24A"
+
+
+def test_print_qc_keeps_zip_hoodie_prints_off_the_zip():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo, mask = _qc_shirt()
+    art = _qc_art((250, 250, 250, 255))
+    centre = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids", style="ZipHoodie")
+    assert "placement" in centre["failed"]
+    left = printqc.check(photo, place_print(photo, mask, art, "left_chest:kids"), mask, art, "left_chest:kids", style="ZipHoodie")
+    assert left["ok"], left
