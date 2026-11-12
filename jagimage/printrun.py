@@ -82,7 +82,7 @@ MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's b
 
 LOCAL_HIDDEN_SHARE = 0.35  # local checks: a print with more than this share of its ink in low contrast is left out
 SKIN_MAX = 0.03           # at most this share of the print's box may lie on skin
-VISIBLE_DE = 0.12         # OKLab: printed ink this far from the shirt's colour under it shows
+VISIBLE_DE = 0.18         # OKLab: printed ink this far from the shirt's colour under it shows clearly (teal on bottle green, 0.16, is too faint)
 VISIBLE_MIN = 0.55        # at least this share of a print's ink must show, or it is left out
 
 
