@@ -71,7 +71,7 @@ STYLE_WORDS = [("zip hood", "ZipHoodie"), ("sweatshirt", "Sweatshirt"), ("hood",
 CATEGORY_WORDS = [("cottonmens", "Men"), ("girl", "Kids_Girls"), ("boy", "Kids_Boys"), ("women", "Women"), ("woman", "Women"), ("ladies", "Women"),
                   ("men", "Men"), ("man", "Men")]
 FABRIC_WORDS = [("pure cotton", "PureCotton"), ("cotton mix", "CottonMix"), ("cottonmens", "PureCotton")]
-SKIP_FOLDERS = ("combo sets", "_bases", "printed")  # combo-set photos show two colours; bases are not finished photos
+SKIP_FOLDERS = ("combo sets", "co-ords", "_bases", "printed")  # set photos (outfits) would repeat the single top's SKU; bases are not finished photos
 DEFAULT_PATTERN = "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"
 LOW_CONTRAST = 0.12   # OKLab distance under which ink hardly shows on the shirt
 HIDDEN_SHARE = 0.6    # a print with more than this share of its ink in low contrast is left out without asking
