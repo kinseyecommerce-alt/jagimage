@@ -5,25 +5,29 @@ floor turned pure white (#FFFFFF) with market.on_white (a cutout model keeps the
 are), and uploaded to the same path under "White background/" ("White background/Cotton Mix/Boys/..."). The
 original photos are left as they are. A photo already there is skipped, so a stopped job can be started again."""
 
+import io
 import re
 import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
 from PIL import Image
 
 ROOT = "White background"
+WORKERS = 3  # photos done side by side (each keeps its own cutout model, about 0.5 GB)
 PHOTO = re.compile(r"\.(jpe?g|png|webp)$", re.I)
 
 
 class WhiteJob:
-    def __init__(self, drive, path: List[str], data: Path, limit: int = 0, skip=("white background", "printed", "_bases")):
+    def __init__(self, drive, path: List[str], data: Path, limit: int = 0, skip=("white background", "printed", "_bases"),
+                 workers: int = WORKERS):
         self.id = uuid.uuid4().hex[:8]
         self.drive, self.path, self.data = drive, [p for p in path if p], Path(data)
-        self.limit, self.skip = max(0, int(limit or 0)), skip
+        self.limit, self.skip, self.workers = max(0, int(limit or 0)), skip, max(1, int(workers))
         self.counts = {"photos": 0, "done": 0, "skipped": 0, "errors": 0}
         self.stage, self.error = "starting", None
         self.started, self.finished = time.time(), None
@@ -69,26 +73,35 @@ class WhiteJob:
         except Exception:
             have = set()
         tmp = Path(tempfile.mkdtemp(prefix="white-", dir=self.data if self.data.exists() else None))
-        made = 0
+        todo = []
         for f in files:
-            if self.stop.is_set() or (self.limit and made >= self.limit):
-                break
             name = re.sub(r"\.(png|webp)$", ".jpg", f["name"], flags=re.I)
             if ("/".join(f["path"]), name) in have:
                 self.counts["skipped"] += 1
-                continue
-            self.stage = "/".join(self.path + f["path"])
-            try:
-                import io
+            else:
+                todo.append((f, name))
+        if self.limit:
+            todo = todo[:self.limit]
+        lock = threading.Lock()
 
+        def one(item):
+            f, name = item
+            if self.stop.is_set():
+                return
+            self.stage = "/".join(self.path + f["path"])
+            local = tmp / f"{f['id']}_{name}"
+            try:
                 img = Image.open(io.BytesIO(self.drive.download(f["id"]))).convert("RGB")
-                local = tmp / name
                 on_white(img).save(local, "JPEG", quality=95, subsampling=0)
                 self.drive.upload(local, [ROOT] + self.path + list(f["path"]), name)
-                local.unlink(missing_ok=True)
-                self.counts["done"] += 1
-                made += 1
+                with lock:
+                    self.counts["done"] += 1
             except Exception as exc:
-                self.counts["errors"] += 1
-                self._note(file="/".join(f["path"] + [f["name"]]), error=str(exc)[:200])
+                with lock:
+                    self.counts["errors"] += 1
+                    self._note(file="/".join(f["path"] + [f["name"]]), error=str(exc)[:200])
+            finally:
+                local.unlink(missing_ok=True)
 
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            list(pool.map(one, todo))

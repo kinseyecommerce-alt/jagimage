@@ -32,7 +32,7 @@ GAP_DL, GAP_DC = 0.08, 0.03  # OKLab: how close a closed-in gap is to the wall's
 WHITE_EDGE = 1.5  # px: the backdrop's edge is softened this much when it turns white, so hair stays natural
 
 
-_CUTOUT = {}
+_CUTOUT = threading.local()  # one cutout session per thread, so photos can be done side by side
 CUTOUT_MODEL = "isnet-general-use"  # sharp edges on hair and hands; downloaded once (about 180 MB)
 _CUTOUT_LOCK = threading.Lock()
 
@@ -44,20 +44,19 @@ def person_mask(img: Image.Image) -> Optional[np.ndarray]:
         from rembg import new_session, remove
     except ImportError:
         return None
-    with _CUTOUT_LOCK:
-        if "session" not in _CUTOUT:
+    if not hasattr(_CUTOUT, "session"):
+        with _CUTOUT_LOCK:  # the first use downloads the model: once
             try:
-                _CUTOUT["session"] = new_session(CUTOUT_MODEL)
+                _CUTOUT.session = new_session(CUTOUT_MODEL)
             except Exception:
-                _CUTOUT["session"] = None
-        session = _CUTOUT["session"]
-        if session is None:
-            return None
-        small = img.convert("RGB")
-        if max(small.size) > 1024:  # the model looks at about 1024 px anyway
-            small = small.copy()
-            small.thumbnail((1024, 1024))
-        m = remove(small, session=session, only_mask=True, post_process_mask=False)
+                _CUTOUT.session = None
+    if _CUTOUT.session is None:
+        return None
+    small = img.convert("RGB")
+    if max(small.size) > 1024:  # the model looks at about 1024 px anyway
+        small = small.copy()
+        small.thumbnail((1024, 1024))
+    m = remove(small, session=_CUTOUT.session, only_mask=True, post_process_mask=False)
     m = m.convert("L").resize(img.size, Image.BILINEAR)
     return np.asarray(m, np.float32) / 255
 
