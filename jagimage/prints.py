@@ -16,8 +16,13 @@ PLACES: Dict[str, Tuple[float, float, float]] = {
     "chest_large": (0.45, 0.20, 0.0),  # centre front: sized by who wears it and the design's shape (FIT)
     "chest_medium": (0.42, 0.14, 0.0),
     "left_chest": (0.17, 0.16, 0.22),  # the wearer's left chest = the viewer's right in a front photo
+    "zip_chest": (0.17, 0.16, 0.0),    # a zip hoodie: beside the zip on the wearer's left chest (offset from ZIP_GAP_CM)
 }
-PLACE_NAMES = {"chest_large": "Centre chest (standard)", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo"}
+# a zip hoodie's print starts this far (cm) from the zip, on the viewer's right; the zip's own half-width is added
+ZIP_GAP_CM, ZIP_HALF_CM = 1.0, 0.4
+CHEST_CM = {"kids": 30.0, "women": 44.0, "men": 52.0, "men_oversized": 58.0, "women_oversized": 50.0}  # flat chest width
+PLACE_NAMES = {"chest_large": "Centre chest (standard)", "chest_medium": "Centre chest, medium", "left_chest": "Left chest, small logo",
+               "zip_chest": "Beside the zip (zip hoodies)"}
 CENTRE_AT = {"chest_medium": 0.32}  # a short print's middle, below the neckline (share of the chest width)
 MAX_TALL = 0.8     # a tall print stops at this share of the chest width in height, so it stays above the hem
 INK = 0.97         # screen-print ink hides almost all of the fabric colour under it
@@ -161,6 +166,8 @@ def rule(place: str, aspect: float = 2.0):
         raise PrintError(f"place must be one of {', '.join(PLACES)}")
     share, below, offset = PLACES[base]
     tall = MAX_TALL
+    if base == "zip_chest":  # the print's inner edge 1 cm from the zip: its middle half a print further out
+        offset = (ZIP_HALF_CM + ZIP_GAP_CM) / CHEST_CM.get(who or "kids", CHEST_CM["kids"]) + share / 2
     if base == "chest_large":
         share, below, tall = FIT.get(who or "kids", FIT["kids"])
         if SQUARE[0] <= aspect <= SQUARE[1]:

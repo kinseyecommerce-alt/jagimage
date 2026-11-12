@@ -497,7 +497,7 @@ def test_print_qc_keeps_zip_hoodie_prints_off_the_zip():
     art = _qc_art((250, 250, 250, 255))
     centre = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids", style="ZipHoodie")
     assert "placement" in centre["failed"]
-    left = printqc.check(photo, place_print(photo, mask, art, "left_chest:kids"), mask, art, "left_chest:kids", style="ZipHoodie")
+    left = printqc.check(photo, place_print(photo, mask, art, "zip_chest:kids"), mask, art, "zip_chest:kids", style="ZipHoodie")
     assert left["ok"], left
 
 
@@ -519,3 +519,13 @@ def test_print_qc_holds_prints_under_or_over_a_hand():
     r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids",
                       shirt_hex="#151515")
     assert "hand" in r["failed"], r
+
+
+def test_zip_hoodie_print_starts_one_cm_from_the_zip():
+    from jagimage.prints import CHEST_CM, _layout
+
+    _, mask = _qc_shirt()
+    art = _qc_art((250, 250, 250, 255))
+    g = _layout(mask, art, "zip_chest:kids")
+    gap_cm = (g["x0"] - g["cx"]) / g["cw"] * CHEST_CM["kids"] - 0.4  # from the zip's edge
+    assert abs(gap_cm - 1.0) < 0.15

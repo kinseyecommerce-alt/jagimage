@@ -499,7 +499,7 @@ class PrintRun:
                 from .prints import fit_for
 
                 # sized for who wears it; a zip hoodie opens down the middle, so its print goes on the left chest
-                place = "left_chest" if prod.get("style") == "ZipHoodie" else self.place
+                place = "zip_chest" if prod.get("style") == "ZipHoodie" else self.place
                 self._where = f"{place}:{fit_for(prod.get('category', ''), prod.get('style', ''))}"
                 files, adj, qc = [], None, []
                 chosen = fronts
