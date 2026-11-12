@@ -570,3 +570,35 @@ def test_products_read_the_picked_folder_path(tmp_path):
     prods = run._products([{"id": "1", "name": "m0001_front.jpg", "path": ["Sleeveless"]}])
     assert prods[0]["colour"] == "Red" and prods[0]["fabric"] and prods[0]["style"] == "SleevelessTee"
     assert prods[0]["path"] == ["Cotton Mix", "Boys", "Red", "Sleeveless"]
+
+
+def test_print_qc_leaves_out_a_print_whose_coloured_part_vanishes():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo = Image.new("RGB", (600, 800), (230, 230, 230))
+    ImageDraw.Draw(photo).rectangle((120, 150, 480, 750), fill=(200, 25, 30))  # a red tee
+    mask = np.zeros((800, 600), np.float32)
+    mask[150:750, 120:480] = 1
+    art = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+    d = ImageDraw.Draw(art)
+    d.rectangle((0, 0, 399, 120), fill=(250, 250, 250, 255))  # white text
+    d.rectangle((150, 150, 250, 299), fill=(205, 30, 35, 255))  # the red 5
+    r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids")
+    assert printqc.only_visibility(r) and "part" in r["problems"][0], r
+    # the same print on a black tee: every part shows
+    ImageDraw.Draw(photo).rectangle((120, 150, 480, 750), fill=(21, 21, 21))
+    assert printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids")["ok"]
+
+
+def test_print_qc_keeps_black_letters_inside_a_white_badge_on_black():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo, mask = _qc_shirt()  # a black tee
+    art = Image.new("RGBA", (400, 240), (0, 0, 0, 0))
+    d = ImageDraw.Draw(art)
+    d.ellipse((0, 0, 399, 239), fill=(250, 250, 250, 255))
+    d.rectangle((90, 90, 310, 150), fill=(15, 15, 15, 255))  # black lettering inside the badge
+    r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids")
+    assert r["ok"], r

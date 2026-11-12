@@ -26,6 +26,8 @@ HAND_MAX = 0.02      # at most this share of a print may go under a hand or arm 
 INK_ON_SKIN_MAX = 0.01  # at most this share of the print's ink may be painted over skin (a hand the shirt mask took in)
 SKIN_FROM_SHIRT = 0.08
 SKIN_C_MAX = 0.13       # OKLab chroma: skin is never this saturated (a yellow or orange shirt is)  # OKLab: skin this far from the shirt's colour is told apart from a pink or beige shirt
+PART_SHARE = 0.06    # a colour making up at least this share of a print's ink is a part of it (the red 5 in GYM 5)
+PART_SEEN_MIN = 0.35  # ...and at least this share of that part must show, or the print is left out of that colour
 VISIBILITY = "shows"  # the name of the visibility check (a print that doesn't show is left out, not held)
 
 
@@ -52,6 +54,10 @@ def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.
     scores["shows"] = round(seen, 3)
     if seen < VISIBLE_MIN:
         fail(VISIBILITY, f"only {round(seen * 100)}% of the print shows on this shirt colour")
+    else:
+        lost = lost_part(before, after, g)
+        if lost:
+            fail(VISIBILITY, f"{lost} of the print hardly shows on this shirt colour")
     if style == "ZipHoodie" and not str(place).startswith(("left_chest", "zip_chest")):
         fail("placement", "a zip hoodie opens down the middle: the print would run across the zip")
     issues, _ = rule_check(info, place)
@@ -140,3 +146,52 @@ def summary_rows(rows: List[dict]) -> dict:
         for k, v in r["reasons"].items():
             out["reasons"][k] = out["reasons"].get(k, 0) + v
     return out
+
+
+def _colour_word(rgb) -> str:
+    from .printrun import nearest_colour
+
+    hex_ = "#%02X%02X%02X" % tuple(int(v) for v in rgb)
+    return (nearest_colour(hex_) or "a coloured").lower() + " part"
+
+
+def lost_part(before: Image.Image, after: Image.Image, g: dict) -> str:
+    """A coloured part of the print (one of its main ink colours) that hardly shows on this shirt, though the rest
+    does: the red 5 of a white-and-red print on a red tee. Its name ("the red part"), or "" when every part shows."""
+    from scipy import ndimage
+
+    from .printrun import VISIBLE_DE
+
+    pw, ph = g["pw"], g["ph"]
+    pad = max(3, int(0.03 * max(pw, ph)))  # a margin of bare shirt around the print
+    x0, y0 = max(0, g["x0"] - pad), max(0, g["y0"] - pad)
+    x1, y1 = min(after.width, g["x0"] + pw + pad), min(after.height, g["y0"] + ph + pad)
+    b = rgb_to_lab(np.asarray(after.convert("RGB").crop((x0, y0, x1, y1))))
+    art = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    art.paste(g["art"].resize((pw, ph)), (g["x0"] - x0, g["y0"] - y0))
+    ink = np.asarray(art.getchannel("A")) > 128
+    if ink.sum() < 50:
+        return ""
+    # the artwork's main colours (a few at most), each ink pixel given to one
+    pal = art.convert("RGB").quantize(colors=6, method=Image.Quantize.MEDIANCUT)
+    idx = np.asarray(pal)
+    colours = np.asarray(pal.getpalette()[:18], dtype=np.uint8).reshape(-1, 3)
+    art_lab = rgb_to_lab(np.asarray(art.convert("RGB")))
+    for k in range(len(colours)):
+        part = ink & (idx == k)
+        if part.sum() < PART_SHARE * ink.sum():
+            continue
+        core = ndimage.binary_erosion(part, iterations=2)
+        if core.sum() < 0.4 * part.sum():  # the soft edge around the artwork's shapes, not a part of its own
+            continue
+        # a part shows when it stands out from what is around it once printed (other inks or the bare shirt):
+        # black letters inside a white badge show on a black tee, a red 5 on the bare red shirt doesn't
+        own = rgb_to_lab(colours[k][None, None, :])[0, 0]
+        same = ink & (np.linalg.norm(art_lab - own, axis=-1) < 0.1)  # the same ink (its soft edge too)
+        ring = ndimage.binary_dilation(part, iterations=pad) & ~same
+        if not ring.any():
+            continue
+        around = np.median(b[ring], axis=0)
+        if (np.linalg.norm(b[core] - around, axis=-1) > VISIBLE_DE).mean() < PART_SEEN_MIN:
+            return _colour_word(colours[k])
+    return ""
