@@ -24,6 +24,7 @@ import numpy as np
 from PIL import Image
 
 from . import library as L
+from . import printqc
 from .prints import PLACES, PrintError, adjust, artwork, measure, open_image, place_print, rule_check
 from .recolor import hex_to_lab, rgb_to_lab
 from .segment import SegmentError, shirt_mask
@@ -80,9 +81,9 @@ MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's b
 
 
 LOCAL_HIDDEN_SHARE = 0.35  # local checks: a print with more than this share of its ink in low contrast is left out
-SKIN_MAX = 0.03
+SKIN_MAX = 0.03           # at most this share of the print's box may lie on skin
 VISIBLE_DE = 0.12         # OKLab: printed ink this far from the shirt's colour under it shows
-VISIBLE_MIN = 0.55        # local checks: at least this share of a print's ink must show, or it is left out           # at most this share of the print's box may lie on skin
+VISIBLE_MIN = 0.55        # at least this share of a print's ink must show, or it is left out
 
 
 def visible_share(before: Image.Image, after: Image.Image, g: dict) -> float:
@@ -273,9 +274,11 @@ class PrintRun:
         self._where = f"{place}:kids"  # set per product (who wears it) before printing
         self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
         self.counts = {"tee_photos": 0, "products": 0, "prints": 0, "skus": 0, "photos": 0, "left_out": 0,
-                       "fixed": 0, "errors": 0, "dropbox": 0}
+                       "fixed": 0, "errors": 0, "dropbox": 0, "held": 0}
         self.log: List[dict] = []
         self.skus: List[dict] = []
+        self.held: List[dict] = []  # SKUs print QC held back: kept on the server, uploaded only once approved
+        self.qc: List[dict] = []
         self.error: Optional[str] = None
         self.stage = "starting"
         self.started, self.finished = time.time(), None
@@ -286,10 +289,13 @@ class PrintRun:
 
     # ---- what the tab shows
     def status(self) -> dict:
-        return {"id": self.id, "label": self.label, "stage": self.stage, "counts": dict(self.counts), "error": self.error,
+        return {"id": self.id, "live": True, "label": self.label, "stage": self.stage, "counts": dict(self.counts), "error": self.error,
                 "running": self.finished is None, "elapsed": round((self.finished or time.time()) - self.started),
                 "skus": [{**{k: s[k] for k in ("sku", "category", "style", "colour", "print", "photos")},
                           "view": next((i["view"] for i in s.get("images", []) if i.get("view")), None)} for s in self.skus[-200:]],
+                "held": [{**{k: h[k] for k in ("sku", "colour", "print", "problems")},
+                          "view": next((i["view"] for i in h.get("images", []) if i.get("view")), None)} for h in self.held[-200:]],
+                "qc": printqc.summary_rows(self.qc),
                 "log": self.log[-40:], "manifest": f"/api/printruns/{self.id}/manifest"}
 
     def _note(self, kind: str, **kw):
@@ -484,7 +490,7 @@ class PrintRun:
                 from .prints import fit_for
 
                 self._where = f"{self.place}:{fit_for(prod.get('category', ''), prod.get('style', ''))}"  # sized for who wears it
-                files, adj = [], None
+                files, adj, qc = [], None, []
                 chosen = fronts
                 if self.one_model:  # one print, one model: each print on the next model in turn, front only
                     chosen = [fronts[self._turn % len(fronts)]]
@@ -495,16 +501,20 @@ class PrintRun:
                         if first:
                             adj = self._local_placement(photo, mask, art) if self.local else self._placement(photo, mask, art)
                         printed = self._place(photo, mask, art, adj)
-                        if first and self.local:
-                            from .prints import _layout
-
-                            seen = visible_share(photo, printed, _layout(mask, art, self._where, **adj))
-                            if seen < VISIBLE_MIN:
-                                raise PrintError(f"only {round(seen * 100)}% of the print shows on {prod['colour']}: left out")
+                        # print QC: the last check before the photo is saved or uploaded
+                        res = printqc.check(photo, printed, mask, art, self._where, adj, sku,
+                                            f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname))
+                        if printqc.only_visibility(res):
+                            raise PrintError(f"{res['problems'][0]} ({prod['colour']}): left out")
+                        qc.append(res)
                         files.append(printed)
                     except PrintError as exc:
-                        self._note("error", sku=sku, error=str(exc))
-                        self.counts["errors"] += 1
+                        if str(exc).endswith("left out"):  # the print doesn't show on this colour: a pairing, not a fault
+                            self.counts["left_out"] += 1
+                            self._note("left_out", colour=prod["colour"], print=pname, why=str(exc))
+                        else:
+                            self._note("error", sku=sku, error=str(exc))
+                            self.counts["errors"] += 1
                         continue
                     if m["back"] and not self.one_model and len(files) < self.per_sku * 2:
                         try:
@@ -513,11 +523,14 @@ class PrintRun:
                             pass
                 if not files:
                     continue
-                self._save_sku(out_root, sku, prod, pname, verdict, hex_, files)
+                self.qc.append({"sku": sku, **printqc.summary(qc)})
+                bad = [p for r in qc for p in r["problems"]]
+                self._save_sku(out_root, sku, prod, pname, verdict, hex_, files, held=bad)
                 made_here += 1
         self.stage = "done"
 
-    def _save_sku(self, out_root: Path, sku: str, prod: dict, pname: str, verdict: dict, hex_: str, photos: list):
+    def _save_sku(self, out_root: Path, sku: str, prod: dict, pname: str, verdict: dict, hex_: str, photos: list,
+                  held: Optional[list] = None):
         folder = out_root / sku
         folder.mkdir(parents=True, exist_ok=True)
         images = []
@@ -527,48 +540,82 @@ class PrintRun:
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}
-            if self.test:  # a test: nothing uploaded, the photo stays on the server to look at
+            if self.test or held:  # a test, or held by print QC: the photo stays on the server to look at
                 row["view"] = f"/api/printruns/{self.id}/photo/{sku}/{name}"
                 images.append(row)
-                self.counts["photos"] += 1
+                if not held:
+                    self.counts["photos"] += 1
                 continue
-            try:
-                self.drive.upload(local, ["Printed", sku], name)
-                row["drive"] = True
-            except Exception as exc:
-                self._note("error", sku=sku, error=f"Drive: {exc}"[:200])
-                self.counts["errors"] += 1
-            if self.dropbox is not None and self.dropbox.connected:
-                try:
-                    path = self.dropbox.upload(local.read_bytes(), sku, name)
-                    row["dropbox"] = path
-                    row["url"] = self.dropbox.link(path)
-                    self.counts["dropbox"] += 1
-                except Exception as exc:
-                    self._note("error", sku=sku, error=f"Dropbox: {exc}"[:600])
-                    self.counts["errors"] += 1
+            self._upload(sku, folder, name, row, i == 1, im)
             images.append(row)
             self.counts["photos"] += 1
-            if i == 1:  # the server keeps only a small first photo, for the Listing tab's AI to look at
-                small = im.convert("RGB")
-                small.thumbnail((1024, 1024))
-                small.save(folder / "listing.jpg", "JPEG", quality=88)
-            local.unlink(missing_ok=True)
-        self.skus.append({"sku": sku, "category": prod.get("category", ""), "style": prod.get("style", ""),
-                          "fabric": prod.get("fabric", ""), "colour": prod.get("colour", ""), "colour_hex": hex_,
-                          "print": pname, "theme": verdict.get("theme", ""), "print_description": verdict.get("description", ""),
-                          "print_text": verdict.get("text", ""), "photos": len(images), "images": images,
-                          "folder": " / ".join(prod["path"])})
+        entry = {"sku": sku, "category": prod.get("category", ""), "style": prod.get("style", ""),
+                 "fabric": prod.get("fabric", ""), "colour": prod.get("colour", ""), "colour_hex": hex_,
+                 "print": pname, "theme": verdict.get("theme", ""), "print_description": verdict.get("description", ""),
+                 "print_text": verdict.get("text", ""), "photos": len(images), "images": images,
+                 "folder": " / ".join(prod["path"])}
+        if held:
+            self.held.append({**entry, "problems": list(dict.fromkeys(held))})
+            self.counts["held"] += 1
+            self._note("held", sku=sku, problems=list(dict.fromkeys(held)))
+            self._save()
+            return
+        self.skus.append(entry)
         self.counts["skus"] += 1
         self._note("sku", sku=sku, photos=len(images))
         self._save()
+
+    def _upload(self, sku: str, folder: Path, name: str, row: dict, first: bool, im: Optional[Image.Image] = None):
+        """One finished photo to Drive (Printed/<SKU>) and Dropbox; the server keeps only a small first photo."""
+        local = folder / name
+        try:
+            self.drive.upload(local, ["Printed", sku], name)
+            row["drive"] = True
+        except Exception as exc:
+            self._note("error", sku=sku, error=f"Drive: {exc}"[:200])
+            self.counts["errors"] += 1
+        if self.dropbox is not None and self.dropbox.connected:
+            try:
+                path = self.dropbox.upload(local.read_bytes(), sku, name)
+                row["dropbox"] = path
+                row["url"] = self.dropbox.link(path)
+                self.counts["dropbox"] += 1
+            except Exception as exc:
+                self._note("error", sku=sku, error=f"Dropbox: {exc}"[:600])
+                self.counts["errors"] += 1
+        if first:  # the server keeps only a small first photo, for the Listing tab's AI to look at
+            small = (im or Image.open(local)).convert("RGB")
+            small.thumbnail((1024, 1024))
+            small.save(folder / "listing.jpg", "JPEG", quality=88)
+        local.unlink(missing_ok=True)
+
+    def approve(self, sku: str) -> dict:
+        """A person looked at a held SKU and passed it: it joins the run's SKUs (and is uploaded, unless a test)."""
+        h = next((x for x in self.held if x["sku"] == sku), None)
+        if not h:
+            raise ValueError("no such held SKU in this run")
+        folder = self.data / "printed" / self.id / sku
+        for i, row in enumerate(h["images"], 1):
+            if not self.test:
+                row.pop("view", None)
+                self._upload(sku, folder, row["name"], row, i == 1)
+            self.counts["photos"] += 1
+        self.held.remove(h)
+        self.counts["held"] -= 1
+        entry = {k: v for k, v in h.items() if k != "problems"}
+        entry["approved"] = True
+        self.skus.append(entry)
+        self.counts["skus"] += 1
+        self._note("approved", sku=sku)
+        self._save()
+        return self.status()
 
     def _save(self):
         f = self.data / "printruns" / f"{self.id}.json"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps({"id": self.id, "label": self.label, "started": self.started, "finished": self.finished,
                                  "stage": self.stage, "counts": self.counts, "error": self.error, "place": self.place,
-                                 "skus": self.skus}, indent=1))
+                                 "skus": self.skus, "held": self.held, "qc": self.qc}, indent=1))
 
     def start(self):
         self.thread.start()

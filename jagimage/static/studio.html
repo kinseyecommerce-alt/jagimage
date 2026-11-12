@@ -1038,6 +1038,11 @@ async function initDriveRun() {
   };
   $("drStop").onclick = async () => { if (S.printRun) await api(`/api/printruns/${S.printRun.id}/stop`, {}); driveRunRefresh(); };
 }
+const QC_NAMES = { placement: "placement", on_skin: "on skin", photo: "photo changed", sharpness: "low-res artwork", sku: "SKU", name: "file name", fits: "doesn't fit", shows: "doesn't show" };
+async function drApprove(id, sku) {
+  try { await api(`/api/printruns/${id}/approve`, { sku }); } catch (e) { $("drErr").textContent = e.message; }
+  driveRunRefresh();
+}
 async function driveRunRefresh() {
   clearTimeout(S.drTimer);
   const runs = (await api("/api/printruns")).runs || []; const r = runs.find((x) => x.running) || runs[0];
@@ -1045,7 +1050,9 @@ async function driveRunRefresh() {
   if (!r) { $("drStatus").innerHTML = ""; return; }
   S.printRun = r; const c = r.counts || {};
   $("drStatus").innerHTML = `<p>${r.running ? status("idle", "Printing: " + (r.stage || "")) : r.error ? status("bad", r.error) : status("good", "Done")}
-    ${fmt(c.skus || 0)} SKUs · ${fmt(c.photos || 0)} photos · ${fmt(c.left_out || 0)} print/colour pairs left out (didn't suit) · ${fmt(c.dropbox || 0)} in Dropbox · ${fmt(c.errors || 0)} errors</p>`
+    ${fmt(c.skus || 0)} SKUs · ${fmt(c.photos || 0)} photos · ${fmt(c.left_out || 0)} print/colour pairs left out (didn't suit) · ${fmt(c.held || 0)} held by print QC · ${fmt(c.dropbox || 0)} in Dropbox · ${fmt(c.errors || 0)} errors</p>`
+    + (r.qc && r.qc.skus ? `<p class="hint">Print QC: ${fmt(r.qc.passed)} of ${fmt(r.qc.skus)} SKUs passed${Object.keys(r.qc.reasons || {}).length ? " · held for: " + Object.entries(r.qc.reasons).map(([k, v]) => `${esc(QC_NAMES[k] || k)} ${v}`).join(", ") : ""}</p>` : "")
+    + ((r.held || []).length ? `<h4>Held by print QC (not uploaded)</h4><div class="gallery">${r.held.slice(-60).reverse().map((x) => `<div class="card"><a href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""></a><span class="cap"><b>${esc(x.sku)}</b><br>${x.problems.map(esc).join("<br>")}</span>${!r.live ? "" : `<button class="small" onclick="drApprove('${esc(r.id)}','${esc(x.sku)}')">Approve</button>`}</div>`).join("")}</div>` : "")
     + ((r.skus || []).length ? `<div class="tablewrap"><table class="agenttab"><tr><th>SKU</th><th>Category</th><th>Style</th><th>Colour</th><th>Print</th><th class="r">Photos</th></tr>`
       + r.skus.slice(-60).reverse().map((x) => `<tr><td>${esc(x.sku)}</td><td>${esc(label(x.category || ""))}</td><td>${esc(nice(x.style || ""))}</td><td>${esc(x.colour)}</td><td>${esc(x.print)}</td><td class="r">${x.photos}</td></tr>`).join("") + `</table></div>` : "")
     + ((r.skus || []).filter((x) => x.view).length ? `<div class="gallery">${r.skus.filter((x) => x.view).slice(-60).reverse().map((x) => `<a class="card" href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""><span class="cap"><b>${esc(x.sku)}</b></span></a>`).join("")}</div>` : "");

@@ -669,7 +669,9 @@ def make_handler(app: Studio):
                 live = {r.id: r.status() for r in c.printruns.values()}
                 old = [{"id": r["id"], "label": r.get("label", ""), "stage": r.get("stage"), "counts": r.get("counts"),
                         "error": r.get("error"), "running": False, "started": r.get("started"),
-                        "skus": [{k: x.get(k) for k in ("sku", "category", "style", "colour", "print", "photos")} for x in r.get("skus", [])][-200:]}
+                        "skus": [{k: x.get(k) for k in ("sku", "category", "style", "colour", "print", "photos")} for x in r.get("skus", [])][-200:],
+                        "held": [{**{k: x.get(k) for k in ("sku", "colour", "print", "problems")},
+                                  "view": next((i.get("view") for i in x.get("images", []) if i.get("view")), None)} for x in r.get("held", [])][-200:]}
                        for r in saved_runs(c.data) if r["id"] not in live]
                 return self._json({"runs": list(live.values()) + old})
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "manifest":
@@ -880,6 +882,11 @@ def make_handler(app: Studio):
                                per_product=body.get("per_product") or 0, local=bool(body.get("local")))
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
+            if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "approve":
+                run = c.printruns.get(parts[2])
+                if not run:
+                    return self._json({"error": "this print run is no longer live: run it again"}, 404)
+                return self._json(run.approve(str(body.get("sku") or "")))
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "stop":
                 run = c.printruns.get(parts[2])
                 if not run:

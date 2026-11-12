@@ -431,3 +431,54 @@ def test_visible_share_leaves_dark_on_dark_out():
         out = place_print(photo, mask, art, "chest_large:kids")
         seen[name] = visible_share(photo, out, _layout(mask, art, "chest_large:kids"))
     assert seen["black"] < 0.2 and seen["white"] > 0.9
+
+
+def _qc_shirt():
+    photo = Image.new("RGB", (600, 800), (230, 230, 230))
+    ImageDraw.Draw(photo).rectangle((120, 150, 480, 750), fill=(21, 21, 21))
+    mask = np.zeros((800, 600), np.float32)
+    mask[150:750, 120:480] = 1
+    return photo, mask
+
+
+def _qc_art(col, side=300):
+    art = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    ImageDraw.Draw(art).ellipse((side // 15, side // 15, side - side // 15, side - side // 15), fill=col)
+    return art
+
+
+def test_print_qc_passes_a_good_print_and_holds_faults():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo, mask = _qc_shirt()
+    art = _qc_art((250, 250, 250, 255))
+    out = place_print(photo, mask, art, "chest_large:kids")
+    good = printqc.check(photo, out, mask, art, "chest_large:kids", {}, "SPB-KB-HS-BLA-223", "223.jpg", "223")
+    assert good["ok"], good
+    # black on black: doesn't show, left out rather than held
+    dark = _qc_art((10, 10, 10, 255))
+    r = printqc.check(photo, place_print(photo, mask, dark, "chest_large:kids"), mask, dark, "chest_large:kids")
+    assert printqc.only_visibility(r)
+    # a stray change elsewhere in the photo
+    spoilt = out.copy()
+    ImageDraw.Draw(spoilt).rectangle((10, 10, 100, 100), fill=(255, 0, 0))
+    assert "photo" in printqc.check(photo, spoilt, mask, art, "chest_large:kids")["failed"]
+    # a tiny artwork blown up
+    tiny = _qc_art((250, 250, 250, 255), side=30)
+    r = printqc.check(photo, place_print(photo, mask, tiny, "chest_large:kids"), mask, tiny, "chest_large:kids")
+    assert "sharpness" in r["failed"]
+    # an incomplete SKU and a photo not named after the print
+    r = printqc.check(photo, out, mask, art, "chest_large:kids", {}, "SPB-U-HS-BLA-223", "x.jpg", "223")
+    assert {"sku", "name"} <= set(r["failed"])
+
+
+def test_print_run_holds_and_approves(tmp_path):
+    run = printrun.PrintRun(None, None, tmp_path, "t", "p", test=True, one_model=True)
+    prod = {"category": "Boys", "style": "HalfSleeveTee", "colour": "Black", "path": ["Boys", "Black"]}
+    run._save_sku(tmp_path / "printed" / run.id, "SPB-KB-HS-BLA-1", prod, "1", {}, "#151515",
+                  [Image.new("RGB", (40, 40))], held=["too high: touches the collar"])
+    st = run.status()
+    assert st["counts"]["held"] == 1 and not st["skus"] and st["held"][0]["problems"] == ["too high: touches the collar"]
+    st = run.approve("SPB-KB-HS-BLA-1")
+    assert st["counts"]["held"] == 0 and st["skus"][0]["sku"] == "SPB-KB-HS-BLA-1"
