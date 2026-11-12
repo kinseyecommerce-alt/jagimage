@@ -648,3 +648,15 @@ def test_white_job_copies_photos_into_white_background(tmp_path, monkeypatch):
     job._run()
     assert job.error is None and d.up == [("White background/Cotton Mix/Boys/Red", "m0002_front.jpg")]
     assert job.counts["skipped"] == 1 and job.counts["done"] == 1
+
+
+def test_on_white_whitens_a_darker_floor_strip():
+    from jagimage.market import on_white
+
+    im = Image.new("RGB", (400, 500), (220, 220, 220))
+    d = ImageDraw.Draw(im)
+    d.rectangle((0, 470, 399, 499), fill=(179, 179, 179))  # a floor strip much darker than the wall
+    d.rectangle((150, 100, 250, 400), fill=(20, 20, 20))  # a black tee
+    out = np.asarray(on_white(im, person=None))
+    assert out[490, 20].min() >= 250 and out[5, 5].min() == 255
+    assert out[250, 200].max() <= 25

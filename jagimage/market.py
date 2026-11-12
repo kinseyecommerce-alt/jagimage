@@ -78,20 +78,25 @@ def on_white(img: Image.Image, person: Optional[np.ndarray] = None) -> Image.Ima
     # the studio can have two parts: the wall and a floor strip of another grey (or tint) along the bottom.
     # Each border's own colour is followed, and each part turns white against its own brightness.
     bg = np.zeros(lab.shape[:2], bool)
-    shade = np.ones(lab.shape[:2], np.float32)
-    done = []
+    studios = []
     for edge in (lab[0], lab[-1], lab[:, 0], lab[:, -1]):
         studio = np.median(edge, axis=0)
-        if any(np.linalg.norm(studio - d) < 0.02 for d in done):  # the same wall seen from another side
+        if any(np.linalg.norm(studio - d) < 0.02 for d in studios):  # the same wall seen from another side
             continue
-        done.append(studio)
-        part = backdrop_mask(lab, studio) & ~bg
-        if part.mean() < 0.005:
-            continue
-        lit = float(np.percentile(lab[..., 0][part], 75))
-        # the backdrop's own soft shading turns pure white (#FFFFFF); only a real shadow stays grey
-        shade[part] = (np.clip(lab[..., 0][part] / (WHITE_FROM * max(lit, 1e-3)), 0, 1) ** 2)
-        bg |= part
+        studios.append(studio)
+        bg |= backdrop_mask(lab, studio)
+    # each backdrop pixel belongs to the studio part (wall, floor strip) nearest its own brightness, and turns
+    # white against that part's brightness: a darker floor strip goes white too, a real shadow stays a shade
+    L = lab[..., 0]
+    shade = np.ones(lab.shape[:2], np.float32)
+    if studios and bg.any():
+        own = np.argmin(np.abs(L[..., None] - np.array([d[0] for d in studios], np.float32)), axis=-1)
+        for k in range(len(studios)):
+            part = bg & (own == k)
+            if not part.any():
+                continue
+            lit = float(np.percentile(L[part], 75))
+            shade[part] = np.clip(L[part] / (WHITE_FROM * max(lit, 1e-3)), 0, 1) ** 2
     if bg.mean() < 0.05:  # no backdrop found: leave the photo as it is
         return img.convert("RGB")
     wall = np.median(lab[bg], axis=0)
