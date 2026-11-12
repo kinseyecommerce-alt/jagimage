@@ -18,6 +18,7 @@ from typing import List
 from PIL import Image
 
 ROOT = "White background"
+REDO_BEFORE = "2026-11-12T12:38:00Z"  # copies made before the floor-strip fix are made again
 WORKERS = 6  # photos done side by side (they share one cutout model, used only for pale clothes)
 PHOTO = re.compile(r"\.(jpe?g|png|webp)$", re.I)
 
@@ -69,7 +70,8 @@ class WhiteJob:
         self.counts["photos"] = len(files)
         try:  # what is already white: a stopped job starts again where it left off
             have = {("/".join(f["path"]), f["name"]) for f in self.drive.list_tree(
-                self.drive.folder_id([ROOT] + self.path), depth=7, limit=400000)}
+                self.drive.folder_id([ROOT] + self.path), depth=7, limit=400000)
+                if str(f.get("modifiedTime") or REDO_BEFORE) >= REDO_BEFORE}  # older copies are made again
         except Exception:
             have = set()
         tmp = Path(tempfile.mkdtemp(prefix="white-", dir=self.data if self.data.exists() else None))
