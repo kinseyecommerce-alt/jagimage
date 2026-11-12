@@ -515,7 +515,7 @@ class PrintRun:
                         # print QC: the last check before the photo is saved or uploaded
                         res = printqc.check(photo, printed, mask, art, self._where, adj, sku,
                                             f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname),
-                                            style=prod.get("style", ""))
+                                            style=prod.get("style", ""), shirt_hex=hex_)
                         if printqc.only_visibility(res):
                             raise PrintError(f"{res['problems'][0]} ({prod['colour']}): left out")
                         qc.append(res)

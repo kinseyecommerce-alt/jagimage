@@ -4,7 +4,7 @@ server from the photo itself (no AI cost), and holds a photo with the reasons in
 - the print shows on the shirt's colour (not black line art on a black tee)
 - the print shop's placement rules (a zip hoodie's print never across the zip): below the collar, above the hem, not too wide or too small, centred,
   not hidden by an arm or hand
-- the print is on the shirt, not on a face, the neck or an arm
+- the print is on the shirt: not on a face, the neck or an arm, not under a hand, and never painted over a hand
 - nothing else in the photo changed (only the print's own box)
 - the artwork is sharp enough for the size it is printed at (not a small file blown up)
 - the SKU and file name are complete (every part of the SKU filled, the photo named as the print)"""
@@ -15,18 +15,22 @@ from typing import List, Optional
 import numpy as np
 from PIL import Image
 
-from .prints import PrintError, _layout, measure, rule_check
+from .prints import MAX_HIDDEN as MAX_HIDDEN_RULE, PrintError, _layout, measure, rule_check
 from .recolor import rgb_to_lab
 
 MIN_WIDTH = 0.22     # a print narrower than this share of the chest looks lost on the shirt
 MAX_UPSCALE = 3.0    # artwork shown this many times its own size looks soft or blocky
 OUTSIDE_DE = 0.04    # OKLab: a pixel outside the print's box this far from the plain photo has changed
 OUTSIDE_MAX = 0.002  # at most this share of the photo outside the print may change
+HAND_MAX = 0.02      # at most this share of a print may go under a hand or arm (the photo shows the shirt, not the hand)
+INK_ON_SKIN_MAX = 0.01  # at most this share of the print's ink may be painted over skin (a hand the shirt mask took in)
+SKIN_FROM_SHIRT = 0.08  # OKLab: skin this far from the shirt's colour is told apart from a pink or beige shirt
 VISIBILITY = "shows"  # the name of the visibility check (a print that doesn't show is left out, not held)
 
 
 def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.Image, place: str,
-          adj: Optional[dict] = None, sku: str = "", file_name: str = "", print_name: str = "", style: str = "") -> dict:
+          adj: Optional[dict] = None, sku: str = "", file_name: str = "", print_name: str = "", style: str = "",
+          shirt_hex: str = "") -> dict:
     """QC of one printed photo: {"ok", "problems": [plain sentences], "failed": [check names], "scores": {...}}."""
     from .printrun import SKIN_MAX, VISIBLE_MIN, on_skin, visible_share
 
@@ -54,6 +58,29 @@ def check(before: Image.Image, after: Image.Image, mask: np.ndarray, art: Image.
         fail("placement", issue)
     if info["width"] < MIN_WIDTH and not str(place).startswith("left_chest"):  # a left-chest logo is small on purpose
         fail("placement", "too small for the chest")
+    if MAX_HIDDEN_RULE >= info["hidden"] > HAND_MAX:
+        fail("hand", f"{round(info['hidden'] * 100)}% of the print goes under a hand or arm")
+    # ink painted over a hand: skin-coloured pixels (not the shirt's own colour) that the print changed
+    x0, y0, x1, y1 = g["x0"], g["y0"], g["x0"] + g["pw"], g["y0"] + g["ph"]
+    a0 = rgb_to_lab(np.asarray(before.convert("RGB").crop((x0, y0, x1, y1))))
+    b0 = rgb_to_lab(np.asarray(after.convert("RGB").crop((x0, y0, x1, y1))))
+    C = np.hypot(a0[..., 1], a0[..., 2])
+    skinish = (a0[..., 1] > 0.015) & (a0[..., 2] > 0.0) & (C > 0.035)
+    if shirt_hex:
+        from .recolor import hex_to_lab
+
+        try:
+            dt = a0 - hex_to_lab(shirt_hex)
+            dt[..., 0] *= 0.35  # a fold's shadow on a pink shirt is darker, not skin
+            skinish &= np.linalg.norm(dt, axis=-1) > SKIN_FROM_SHIRT
+        except (ValueError, TypeError):
+            pass
+    ink = np.asarray(g["art"].resize((g["pw"], g["ph"])).getchannel("A"))[:a0.shape[0], :a0.shape[1]] > 128
+    painted = ink & skinish & (np.linalg.norm(b0 - a0, axis=-1) > OUTSIDE_DE)
+    share = float(painted.sum()) / max(1, int(ink.sum()))
+    scores["ink_on_skin"] = round(share, 3)
+    if share > INK_ON_SKIN_MAX:
+        fail("hand", f"{round(share * 100)}% of the print is painted over skin (a hand or arm)")
     skin = on_skin(before, g, mask)
     scores["on_skin"] = round(skin, 3)
     if skin > SKIN_MAX:

@@ -1038,7 +1038,7 @@ async function initDriveRun() {
   };
   $("drStop").onclick = async () => { if (S.printRun) await api(`/api/printruns/${S.printRun.id}/stop`, {}); driveRunRefresh(); };
 }
-const QC_NAMES = { placement: "placement", on_skin: "on skin", photo: "photo changed", sharpness: "low-res artwork", sku: "SKU", name: "file name", fits: "doesn't fit", shows: "doesn't show" };
+const QC_NAMES = { placement: "placement", on_skin: "on skin", hand: "under or over a hand", photo: "photo changed", sharpness: "low-res artwork", sku: "SKU", name: "file name", fits: "doesn't fit", shows: "doesn't show" };
 async function drApprove(id, sku) {
   try { await api(`/api/printruns/${id}/approve`, { sku }); } catch (e) { $("drErr").textContent = e.message; }
   driveRunRefresh();

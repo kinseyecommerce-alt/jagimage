@@ -499,3 +499,23 @@ def test_print_qc_keeps_zip_hoodie_prints_off_the_zip():
     assert "placement" in centre["failed"]
     left = printqc.check(photo, place_print(photo, mask, art, "left_chest:kids"), mask, art, "left_chest:kids", style="ZipHoodie")
     assert left["ok"], left
+
+
+def test_print_qc_holds_prints_under_or_over_a_hand():
+    from jagimage import printqc
+    from jagimage.prints import place_print
+
+    photo, mask = _qc_shirt()
+    ImageDraw.Draw(photo).ellipse((310, 250, 400, 340), fill=(205, 150, 120))  # a hand on the chest
+    yy, xx = np.mgrid[0:800, 0:600]
+    hand = ((yy - 295) ** 2 + (xx - 355) ** 2) <= 45 ** 2
+    art = _qc_art((250, 250, 250, 255))
+    under = mask.copy()
+    under[hand] = 0  # the shirt mask leaves the hand out: the print goes under it
+    r = printqc.check(photo, place_print(photo, under, art, "chest_large:kids"), under, art, "chest_large:kids",
+                      shirt_hex="#151515")
+    assert "hand" in r["failed"] or "placement" in r["failed"]
+    # the mask took the hand in (a skin-toned shirt): the print is painted over it
+    r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids",
+                      shirt_hex="#151515")
+    assert "hand" in r["failed"], r
