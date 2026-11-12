@@ -563,3 +563,10 @@ def test_sleeveless_prints_are_bigger_and_lower():
     art = _qc_art((250, 250, 250, 255))
     tee, vest = _layout(mask, art, "chest_large:kids"), _layout(mask, art, "chest_large:kids_sleeveless")
     assert vest["pw"] > tee["pw"] and vest["y0"] > tee["y0"]
+
+
+def test_products_read_the_picked_folder_path(tmp_path):
+    run = printrun.PrintRun(None, None, tmp_path, "t", "p", base_path=["Cotton Mix", "Boys", "Red"])
+    prods = run._products([{"id": "1", "name": "m0001_front.jpg", "path": ["Sleeveless"]}])
+    assert prods[0]["colour"] == "Red" and prods[0]["fabric"] and prods[0]["style"] == "SleevelessTee"
+    assert prods[0]["path"] == ["Cotton Mix", "Boys", "Red", "Sleeveless"]

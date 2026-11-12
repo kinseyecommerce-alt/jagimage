@@ -267,7 +267,7 @@ class PrintRun:
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
-                 test: bool = False, per_product: int = 0, local: bool = False):
+                 test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -277,6 +277,9 @@ class PrintRun:
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
         self.one_model, self._turn = one_model, 0
+        # the folders above the tee folder ("Cotton Mix/Boys/Red" when that folder was picked): the products' fabric,
+        # category and colour are read from them too
+        self.base_path = [str(x) for x in (base_path or []) if str(x).strip()]
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
         self.test = test  # nothing goes to Drive or Dropbox: the photos are only looked at
@@ -397,7 +400,8 @@ class PrintRun:
         for f in tees:
             if any(w in p.lower() for p in f["path"] for w in SKIP_FOLDERS):
                 continue
-            g = groups.setdefault(tuple(f["path"]), {"path": f["path"], "files": [], **guess(f["path"])})
+            full = self.base_path + list(f["path"])
+            g = groups.setdefault(tuple(full), {"path": full, "files": [], **guess(full)})
             g["files"].append(f)
         out = []
         for g in groups.values():
