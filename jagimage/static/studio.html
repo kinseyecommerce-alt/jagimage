@@ -358,9 +358,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
   </section>
   <section class="panel" id="whitePanel">
     <h2>Plain photos on white (Amazon, Flipkart)</h2>
-    <p class="hint">Makes a pure white (#FFFFFF) background copy of every plain model photo in a folder of the photos folder, for marketplace main images. The copies go to <b>White background/</b> with the same folders; the originals stay as they are. The model and the clothes are never touched (a cutout model protects them, white and melange clothes too). About 3–5 seconds a photo; a stopped job carries on where it left off.</p>
+    <p class="hint">Makes a pure white (#FFFFFF) background copy of every plain model photo in a folder of the photos folder, for marketplace main images. The copies go to <b>White background/</b> with the same folders; the originals stay as they are. The model and the clothes are never touched (a cutout model protects them, white and melange clothes too). Several folders (separated by ;) are done one after another, and the work carries on by itself after a server restart, skipping the photos already done.</p>
     <div class="row">
-      <label class="field" style="flex:2"><span>Folder (e.g. Cotton Mix/Boys)</span><input type="text" id="whPath" placeholder="Cotton Mix/Boys"></label>
+      <label class="field" style="flex:2"><span>Folders (e.g. Cotton Mix/Boys; several with ;)</span><input type="text" id="whPath" placeholder="Cotton Mix; Pure Cotton"></label>
       <label class="field"><span>Test: stop after (photos, 0 = all)</span><input type="number" id="whLimit" value="0" min="0"></label>
     </div>
     <div class="row"><button class="btn primary" id="whStart" type="button">Make white copies</button><button class="btn hide" id="whStop" type="button">Stop</button></div>
@@ -1059,12 +1059,12 @@ async function initDriveRun() {
 }
 async function whiteRefresh() {
   clearTimeout(S.whTimer);
-  const j = ((await api("/api/white")).jobs || [])[0];
+  const w = await api("/api/white"); const j = (w.jobs || [])[0];
   $("whStop").classList.toggle("hide", !(j && j.running)); $("whStart").disabled = !!(j && j.running);
   if (!j) { $("whStatus").innerHTML = ""; return; }
   S.whiteJob = j; const c = j.counts || {};
   $("whStatus").innerHTML = `<p>${j.running ? status("idle", "Working: " + esc(j.stage || "")) : j.error ? status("bad", esc(j.error)) : status("good", "Done")}
-    ${fmt(c.done || 0)} made · ${fmt(c.skipped || 0)} already white · ${fmt(c.errors || 0)} errors · of ${fmt(c.photos || 0)} photos in ${esc(j.path)} → ${esc(j.to)}</p>`
+    ${fmt(c.done || 0)} made · ${fmt(c.skipped || 0)} already white · ${fmt(c.errors || 0)} errors · of ${fmt(c.photos || 0)} photos in ${esc(j.path)} → ${esc(j.to)}${(w.waiting || []).length > 1 ? " · next: " + w.waiting.slice(1).map(esc).join(", ") : ""}</p>`
     + ((j.log || []).length ? `<p class="e">${j.log.slice(-5).map((l) => esc(l.file + ": " + l.error)).join("<br>")}</p>` : "");
   if (j.running) S.whTimer = setTimeout(whiteRefresh, 5000);
 }

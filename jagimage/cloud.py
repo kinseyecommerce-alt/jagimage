@@ -1087,6 +1087,19 @@ class Cloud:
         self.dropbox = Dropbox(self.data, os.environ.get("DROPBOX_APP_KEY", ""), os.environ.get("DROPBOX_APP_SECRET", ""))
         self.printruns = {}  # id -> PrintRun, this session
         self.white_jobs = {}  # id -> WhiteJob (white-background copies of the plain photos), this session
+        from .whitejob import WhiteQueue
+
+        self.white_queue = WhiteQueue(self.drive, self.data, self.white_jobs)
+        if self.white_queue.paths():  # folders still waiting from before a restart: carry on in a minute
+
+            def later():
+                time.sleep(60)
+                try:
+                    if self.drive.can_read:
+                        self.white_queue.resume()
+                except Exception:
+                    pass
+            threading.Thread(target=later, daemon=True, name="white-resume").start()
         self.listing_jobs = {}  # id -> ListingJob, this session
         self.inventory = {}  # what is in the photos folder on Drive (admin check), filled by POST /api/drive/inventory
         self.oauth_states = {}

@@ -662,8 +662,8 @@ def make_handler(app: Studio):
                 c.dropbox.finish(code, self._origin() + "/dropbox/callback")
                 return self._redirect("/?dropbox=connected#settings")
             if parts == ["api", "white"]:  # the white-background jobs of this session, newest first
-                jobs = sorted((j.status() for j in c.white_jobs.values()), key=lambda j: -j["elapsed"] if j["running"] else j["elapsed"])
-                return self._json({"jobs": jobs})
+                jobs = sorted((j.status() for j in c.white_jobs.values()), key=lambda j: (not j["running"], j["elapsed"]))
+                return self._json({"jobs": jobs, "waiting": c.white_queue.paths()})
             if parts == ["api", "shop"]:
                 return self._json(c.shop())
             if parts == ["api", "printruns"]:
@@ -862,23 +862,17 @@ def make_handler(app: Studio):
                 c.dropbox.disconnect()
                 return self._json(c.dropbox.status())
             if parts == ["api", "white", "start"]:
-                from .whitejob import WhiteJob
-
                 if not c.drive.can_read:
                     raise ValueError("Connect Google Drive with permission to read folders first (Settings → Google Drive)")
-                if any(j.finished is None for j in c.white_jobs.values()):
-                    raise ValueError("A white-background job is already going: wait for it or stop it")
-                path = [x.strip() for x in str(body.get("path") or "").split("/") if x.strip()]
-                if not path:
-                    raise ValueError("Name a folder of the photos folder, e.g. Cotton Mix/Boys")
-                job = WhiteJob(c.drive, path, c.data, limit=body.get("limit") or 0)
-                c.white_jobs[job.id] = job.start()
+                # one folder, or several separated by ";" or new lines: done one after another
+                paths = [p for p in re.split(r"[;\n]+", str(body.get("path") or "")) if p.strip()]
+                job = c.white_queue.start(paths, limit=body.get("limit") or 0)
                 return self._json(job.status())
             if len(parts) == 4 and parts[:2] == ["api", "white"] and parts[3] == "stop":
                 job = c.white_jobs.get(parts[2])
                 if not job:
                     return self._json({"error": "no such job"}, 404)
-                job.stop.set()
+                c.white_queue.stop()  # the folders still waiting are forgotten too
                 return self._json(job.status())
             if parts == ["api", "shop"]:
                 return self._json(c.set_shop(body))

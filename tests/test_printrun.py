@@ -660,3 +660,30 @@ def test_on_white_whitens_a_darker_floor_strip():
     out = np.asarray(on_white(im, person=None))
     assert out[490, 20].min() >= 250 and out[5, 5].min() == 255
     assert out[250, 200].max() <= 25
+
+
+def test_white_queue_does_folders_in_turn_and_survives_a_restart(tmp_path, monkeypatch):
+    from jagimage import whitejob
+
+    started = []
+
+    class FakeJob:
+        def __init__(self, drive, path, data, limit=0, on_done=None):
+            self.path, self.on_done, self.finished, self.stage = path, on_done, None, "starting"
+            self.id = str(len(started))
+            started.append("/".join(path))
+
+        def start(self):
+            return self
+
+    monkeypatch.setattr(whitejob, "WhiteJob", FakeJob)
+    jobs = {}
+    q = whitejob.WhiteQueue(None, tmp_path, jobs)
+    job = q.start(["Cotton Mix", " Pure Cotton "])
+    assert started == ["Cotton Mix"] and q.paths() == ["Cotton Mix", "Pure Cotton"]
+    job.finished, job.stage = 1, "done"
+    q._done(job)
+    assert started == ["Cotton Mix", "Pure Cotton"] and q.paths() == ["Pure Cotton"]
+    # a restart: a new queue on the same folder carries on with what is left
+    jobs2 = {}
+    assert whitejob.WhiteQueue(None, tmp_path, jobs2).resume() is not None and started[-1] == "Pure Cotton"
