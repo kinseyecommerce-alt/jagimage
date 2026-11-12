@@ -228,7 +228,7 @@ class PrintRun:
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
-                 test: bool = False):
+                 test: bool = False, per_product: int = 0):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -238,6 +238,7 @@ class PrintRun:
         self.place, self.per_sku = place, max(1, min(int(per_sku or 5), 12))
         self.brand, self.pattern, self.limit = brand or "SPB", pattern or DEFAULT_PATTERN, max(0, int(limit or 0))
         self.one_model, self._turn = one_model, 0
+        self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
         self.test = test  # nothing goes to Drive or Dropbox: the photos are only looked at
         self._where = f"{place}:kids"  # set per product (who wears it) before printing
         self.label, self.checker = label, checker  # checker: the AI print checker (Agent.check_print), or rules only
@@ -410,9 +411,12 @@ class PrintRun:
             if "colour" not in prod:
                 prod["colour"] = nearest_colour(look.get("colour_hex", "")) or " ".join(str(look.get("colour") or "").title().split())[:30]
             hex_ = colour_hex_for(prod["colour"], prod.get("fabric", "")) or str(look.get("colour_hex") or "#808080")
+            made_here = 0
             for pname, art in arts:
                 if self.stop.is_set() or (self.limit and len(self.skus) >= self.limit):
                     break
+                if self.per_product and made_here >= self.per_product:
+                    break  # this product (a style in a colour) has its prints
                 verdict = self._suits(pname, art, prod["colour"], hex_)
                 if not verdict["ok"]:
                     self.counts["left_out"] += 1
@@ -445,6 +449,7 @@ class PrintRun:
                 if not files:
                     continue
                 self._save_sku(out_root, sku, prod, pname, verdict, hex_, files)
+                made_here += 1
         self.stage = "done"
 
     def _save_sku(self, out_root: Path, sku: str, prod: dict, pname: str, verdict: dict, hex_: str, photos: list):

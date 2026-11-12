@@ -384,3 +384,15 @@ def test_the_placement_agent_never_raises_a_print_onto_the_collar(tmp_path):
     run = printrun.PrintRun(FakeDrive(tees, prints), fake_ask([]), tmp_path, "TEES", "PRINTS", checker=checker, one_model=True)
     run._run()
     assert run.error is None and min(seen) >= seen[0] - 0.021
+
+
+def test_at_most_n_prints_per_product(tmp_path):
+    red = jpg(tee_photo())
+    navy = jpg(tee_photo((12, 35, 64)))
+    tees = [{"id": f"t{i}", "name": f"m000{i}_front.jpg", "path": ["Cotton Mix", "Boys", c, "Half sleeve"], "data": d}
+            for i, c, d in ((1, "Red", red), (2, "Navy", navy))]
+    prints = [{"id": f"p{k}", "name": f"{k}.png", "path": [], "data": art_png((250, 250, 250))} for k in range(5)]
+    run = printrun.PrintRun(FakeDrive(tees, prints), fake_ask([]), tmp_path, "TEES", "PRINTS", one_model=True, test=True,
+                            per_product=2)
+    run._run()
+    assert run.error is None and len(run.skus) == 4  # 2 products x 2 prints each
