@@ -32,9 +32,10 @@ GAP_DL, GAP_DC = 0.08, 0.03  # OKLab: how close a closed-in gap is to the wall's
 WHITE_EDGE = 1.5  # px: the backdrop's edge is softened this much when it turns white, so hair stays natural
 
 
-_CUTOUT = threading.local()  # one cutout session per thread, so photos can be done side by side
+_CUTOUT = {}  # one cutout session (about 1.2 GB) shared by every thread: onnxruntime runs it side by side safely
 CUTOUT_MODEL = "isnet-general-use"  # sharp edges on hair and hands; downloaded once (about 180 MB)
 _CUTOUT_LOCK = threading.Lock()
+_CUTOUT_RUN = threading.Semaphore(1)  # one photo through the model at a time: each run needs about 0.7 GB of its own
 
 
 def person_mask(img: Image.Image) -> Optional[np.ndarray]:
@@ -44,19 +45,21 @@ def person_mask(img: Image.Image) -> Optional[np.ndarray]:
         from rembg import new_session, remove
     except ImportError:
         return None
-    if not hasattr(_CUTOUT, "session"):
-        with _CUTOUT_LOCK:  # the first use downloads the model: once
+    with _CUTOUT_LOCK:  # the first use downloads and loads the model: once
+        if "session" not in _CUTOUT:
             try:
-                _CUTOUT.session = new_session(CUTOUT_MODEL)
+                _CUTOUT["session"] = new_session(CUTOUT_MODEL)
             except Exception:
-                _CUTOUT.session = None
-    if _CUTOUT.session is None:
+                _CUTOUT["session"] = None
+    session = _CUTOUT["session"]
+    if session is None:
         return None
     small = img.convert("RGB")
     if max(small.size) > 1024:  # the model looks at about 1024 px anyway
         small = small.copy()
         small.thumbnail((1024, 1024))
-    m = remove(small, session=_CUTOUT.session, only_mask=True, post_process_mask=False)
+    with _CUTOUT_RUN:
+        m = remove(small, session=session, only_mask=True, post_process_mask=False)
     m = m.convert("L").resize(img.size, Image.BILINEAR)
     return np.asarray(m, np.float32) / 255
 
@@ -65,8 +68,8 @@ def on_white(img: Image.Image, person: Optional[np.ndarray] = None) -> Image.Ima
     """The studio backdrop made pure white (#FFFFFF). Darker spots in it (the contact shadow) keep
     their share of darkness, so the model still stands on the floor instead of floating. Where a cutout
     model is installed, nothing it sees as the person or the clothes is touched."""
-    rgb = np.asarray(img.convert("RGB")).astype(np.float32)
-    lab = rgb_to_lab(rgb.astype(np.uint8))
+    rgb = np.asarray(img.convert("RGB"))
+    lab = rgb_to_lab(rgb).astype(np.float32)  # float32 halves the memory a 2000 px photo needs
     if person is None:
         person = person_mask(img)
     # the studio can have two parts: the wall and a floor strip of another grey (or tint) along the bottom.
