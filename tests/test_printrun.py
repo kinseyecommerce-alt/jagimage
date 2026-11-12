@@ -602,3 +602,49 @@ def test_print_qc_keeps_black_letters_inside_a_white_badge_on_black():
     d.rectangle((90, 90, 310, 150), fill=(15, 15, 15, 255))  # black lettering inside the badge
     r = printqc.check(photo, place_print(photo, mask, art, "chest_large:kids"), mask, art, "chest_large:kids")
     assert r["ok"], r
+
+
+def test_on_white_turns_the_studio_and_floor_white_and_keeps_a_pale_garment():
+    from jagimage.market import on_white
+
+    im = Image.new("RGB", (400, 500), (222, 222, 222))
+    d = ImageDraw.Draw(im)
+    d.rectangle((0, 460, 399, 499), fill=(166, 173, 166))  # a floor strip of another grey
+    d.rectangle((150, 100, 250, 400), fill=(226, 226, 228))  # a pale grey melange tee, almost the wall's grey
+    person = np.zeros((500, 400), np.float32)
+    person[100:401, 150:251] = 1  # what the cutout model sees as the person
+    out = np.asarray(on_white(im, person=person))
+    assert out[5, 5].min() == 255 and out[480, 20].min() >= 250  # wall and floor
+    assert abs(int(out[250, 200, 0]) - 226) <= 2  # the tee is untouched
+
+
+def test_white_job_copies_photos_into_white_background(tmp_path, monkeypatch):
+    from jagimage import market, whitejob
+
+    monkeypatch.setattr(market, "person_mask", lambda img: None)
+    photo = io.BytesIO()
+    Image.new("RGB", (200, 200), (220, 220, 220)).save(photo, "JPEG")
+
+    class Drive:
+        def __init__(self):
+            self.up = []
+
+        def folder_id(self, parts):
+            return "/".join(parts)
+
+        def list_tree(self, folder, depth=7, limit=0):
+            if folder.startswith("White background"):
+                return [{"id": "w", "name": "m0001_front.jpg", "path": ["Red"]}]
+            return [{"id": "a", "name": "m0001_front.jpg", "path": ["Red"]}, {"id": "b", "name": "m0002_front.jpg", "path": ["Red"]}]
+
+        def download(self, fid):
+            return photo.getvalue()
+
+        def upload(self, local, parts, name):
+            self.up.append(("/".join(parts), name))
+
+    d = Drive()
+    job = whitejob.WhiteJob(d, ["Cotton Mix", "Boys"], tmp_path)
+    job._run()
+    assert job.error is None and d.up == [("White background/Cotton Mix/Boys/Red", "m0002_front.jpg")]
+    assert job.counts["skipped"] == 1 and job.counts["done"] == 1

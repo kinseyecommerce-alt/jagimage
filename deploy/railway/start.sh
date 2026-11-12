@@ -12,4 +12,7 @@ if [ "${#JAGIMAGE_PASSWORD}" -lt 8 ]; then
 fi
 mkdir -p "$DATA/studio" "$DATA/jag-data"
 export JAGIMAGE_DATA="$DATA/jag-data"
+# the person-cutout model (white backgrounds) is downloaded once onto the volume, not on every deploy
+mkdir -p "$DATA/models"
+export U2NET_HOME="$DATA/models"
 exec jagimage serve --cloud --host 0.0.0.0 --port "${PORT:-8080}" --out "$DATA/studio" --workers "${JAGIMAGE_WORKERS:-4}"

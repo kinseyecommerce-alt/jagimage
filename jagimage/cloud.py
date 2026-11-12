@@ -1086,6 +1086,7 @@ class Cloud:
 
         self.dropbox = Dropbox(self.data, os.environ.get("DROPBOX_APP_KEY", ""), os.environ.get("DROPBOX_APP_SECRET", ""))
         self.printruns = {}  # id -> PrintRun, this session
+        self.white_jobs = {}  # id -> WhiteJob (white-background copies of the plain photos), this session
         self.listing_jobs = {}  # id -> ListingJob, this session
         self.inventory = {}  # what is in the photos folder on Drive (admin check), filled by POST /api/drive/inventory
         self.oauth_states = {}

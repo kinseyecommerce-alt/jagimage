@@ -72,7 +72,7 @@ STYLE_WORDS = [("zip hood", "ZipHoodie"), ("sweatshirt", "Sweatshirt"), ("hood",
 CATEGORY_WORDS = [("cottonmens", "Men"), ("girl", "Kids_Girls"), ("boy", "Kids_Boys"), ("women", "Women"), ("woman", "Women"), ("ladies", "Women"),
                   ("men", "Men"), ("man", "Men")]
 FABRIC_WORDS = [("pure cotton", "PureCotton"), ("cotton mix", "CottonMix"), ("cottonmens", "PureCotton")]
-SKIP_FOLDERS = ("combo sets", "co-ords", "_bases", "printed")  # set photos (outfits) would repeat the single top's SKU; bases are not finished photos
+SKIP_FOLDERS = ("combo sets", "co-ords", "_bases", "printed", "white background")  # set photos (outfits) would repeat the single top's SKU; bases are not finished photos
 DEFAULT_PATTERN = "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"
 LOW_CONTRAST = 0.12   # OKLab distance under which ink hardly shows on the shirt
 HIDDEN_SHARE = 0.6    # a print with more than this share of its ink in low contrast is left out without asking
@@ -267,7 +267,8 @@ class PrintRun:
     def __init__(self, drive, ask: Callable, data: Path, tees_folder: str, prints_folder: str, dropbox=None,
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
-                 test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None):
+                 test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None,
+                 white: bool = True):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -280,6 +281,7 @@ class PrintRun:
         # the folders above the tee folder ("Cotton Mix/Boys/Red" when that folder was picked): the products' fabric,
         # category and colour are read from them too
         self.base_path = [str(x) for x in (base_path or []) if str(x).strip()]
+        self.white = white  # the studio backdrop made pure white (#FFFFFF), as Amazon and Flipkart want the main image
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
         self.test = test  # nothing goes to Drive or Dropbox: the photos are only looked at
@@ -523,6 +525,10 @@ class PrintRun:
                         if printqc.only_visibility(res):
                             raise PrintError(f"{res['problems'][0]} ({prod['colour']}): left out")
                         qc.append(res)
+                        if self.white:  # after QC: the check compares the printed photo with the plain one
+                            from .market import on_white
+
+                            printed = on_white(printed)
                         files.append(printed)
                     except PrintError as exc:
                         if str(exc).endswith("left out"):  # the print doesn't show on this colour: a pairing, not a fault

@@ -343,6 +343,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field"><span>Print position</span><select id="drPlace"></select></label>
       <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
       <label class="check"><input type="checkbox" id="drLocal" checked> <span>Local checks: whether a print suits a colour (by contrast) and the placement (print-shop rules, never on skin) are checked on the server for free. The AI only finds the shirt, once per model photo.</span></label>
+      <label class="check"><input type="checkbox" id="drWhite" checked> <span>Pure white background (#FFFFFF): the studio backdrop and floor turn white, as Amazon and Flipkart want the main image. The model and the clothes are never touched.</span></label>
       <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (front only, photo named as the print)</span></label>
       <label class="field"><span>Prints per product (0 = all)</span><input type="number" id="drPerProd" value="10" min="0"></label>
@@ -354,6 +355,17 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="row"><button class="btn primary" id="drStart" type="button">Start printing</button><button class="btn hide" id="drStop" type="button">Stop</button></div>
     <p class="e" id="drErr"></p>
     <div id="drStatus" class="hint"></div>
+  </section>
+  <section class="panel" id="whitePanel">
+    <h2>Plain photos on white (Amazon, Flipkart)</h2>
+    <p class="hint">Makes a pure white (#FFFFFF) background copy of every plain model photo in a folder of the photos folder, for marketplace main images. The copies go to <b>White background/</b> with the same folders; the originals stay as they are. The model and the clothes are never touched (a cutout model protects them, white and melange clothes too). About 3–5 seconds a photo; a stopped job carries on where it left off.</p>
+    <div class="row">
+      <label class="field" style="flex:2"><span>Folder (e.g. Cotton Mix/Boys)</span><input type="text" id="whPath" placeholder="Cotton Mix/Boys"></label>
+      <label class="field"><span>Test: stop after (photos, 0 = all)</span><input type="number" id="whLimit" value="0" min="0"></label>
+    </div>
+    <div class="row"><button class="btn primary" id="whStart" type="button">Make white copies</button><button class="btn hide" id="whStop" type="button">Stop</button></div>
+    <p class="e" id="whErr"></p>
+    <div id="whStatus" class="hint"></div>
   </section>
   <section class="panel" id="printRunPanel">
     <h2>Put prints on photos</h2>
@@ -1032,11 +1044,29 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drWhite").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
   $("drStop").onclick = async () => { if (S.printRun) await api(`/api/printruns/${S.printRun.id}/stop`, {}); driveRunRefresh(); };
+  $("whStart").onclick = async () => {
+    $("whErr").textContent = "";
+    try { S.whiteJob = await api("/api/white/start", { path: $("whPath").value, limit: +$("whLimit").value }); whiteRefresh(); }
+    catch (e) { $("whErr").textContent = e.message; }
+  };
+  $("whStop").onclick = async () => { if (S.whiteJob) await api(`/api/white/${S.whiteJob.id}/stop`, {}); whiteRefresh(); };
+  whiteRefresh();
+}
+async function whiteRefresh() {
+  clearTimeout(S.whTimer);
+  const j = ((await api("/api/white")).jobs || [])[0];
+  $("whStop").classList.toggle("hide", !(j && j.running)); $("whStart").disabled = !!(j && j.running);
+  if (!j) { $("whStatus").innerHTML = ""; return; }
+  S.whiteJob = j; const c = j.counts || {};
+  $("whStatus").innerHTML = `<p>${j.running ? status("idle", "Working: " + esc(j.stage || "")) : j.error ? status("bad", esc(j.error)) : status("good", "Done")}
+    ${fmt(c.done || 0)} made · ${fmt(c.skipped || 0)} already white · ${fmt(c.errors || 0)} errors · of ${fmt(c.photos || 0)} photos in ${esc(j.path)} → ${esc(j.to)}</p>`
+    + ((j.log || []).length ? `<p class="e">${j.log.slice(-5).map((l) => esc(l.file + ": " + l.error)).join("<br>")}</p>` : "");
+  if (j.running) S.whTimer = setTimeout(whiteRefresh, 5000);
 }
 const QC_NAMES = { placement: "placement", on_skin: "on skin", hand: "under or over a hand", photo: "photo changed", sharpness: "low-res artwork", sku: "SKU", name: "file name", fits: "doesn't fit", shows: "doesn't show" };
 async function drApprove(id, sku) {

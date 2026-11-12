@@ -661,6 +661,9 @@ def make_handler(app: Studio):
                     return self._redirect("/?dropbox=failed#settings")
                 c.dropbox.finish(code, self._origin() + "/dropbox/callback")
                 return self._redirect("/?dropbox=connected#settings")
+            if parts == ["api", "white"]:  # the white-background jobs of this session, newest first
+                jobs = sorted((j.status() for j in c.white_jobs.values()), key=lambda j: -j["elapsed"] if j["running"] else j["elapsed"])
+                return self._json({"jobs": jobs})
             if parts == ["api", "shop"]:
                 return self._json(c.shop())
             if parts == ["api", "printruns"]:
@@ -858,6 +861,25 @@ def make_handler(app: Studio):
                 self._admin()
                 c.dropbox.disconnect()
                 return self._json(c.dropbox.status())
+            if parts == ["api", "white", "start"]:
+                from .whitejob import WhiteJob
+
+                if not c.drive.can_read:
+                    raise ValueError("Connect Google Drive with permission to read folders first (Settings → Google Drive)")
+                if any(j.finished is None for j in c.white_jobs.values()):
+                    raise ValueError("A white-background job is already going: wait for it or stop it")
+                path = [x.strip() for x in str(body.get("path") or "").split("/") if x.strip()]
+                if not path:
+                    raise ValueError("Name a folder of the photos folder, e.g. Cotton Mix/Boys")
+                job = WhiteJob(c.drive, path, c.data, limit=body.get("limit") or 0)
+                c.white_jobs[job.id] = job.start()
+                return self._json(job.status())
+            if len(parts) == 4 and parts[:2] == ["api", "white"] and parts[3] == "stop":
+                job = c.white_jobs.get(parts[2])
+                if not job:
+                    return self._json({"error": "no such job"}, 404)
+                job.stop.set()
+                return self._json(job.status())
             if parts == ["api", "shop"]:
                 return self._json(c.set_shop(body))
             if parts == ["api", "printruns", "start"]:
@@ -880,7 +902,7 @@ def make_handler(app: Studio):
                                checker=c.agent.check_print if body.get("agent", True) and not body.get("local") else None,
                                one_model=bool(body.get("one_model", True)), test=bool(body.get("test")),
                                per_product=body.get("per_product") or 0, local=bool(body.get("local")),
-                               base_path=tees_path)
+                               base_path=tees_path, white=bool(body.get("white", True)))
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "approve":

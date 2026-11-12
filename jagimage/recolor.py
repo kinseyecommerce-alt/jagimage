@@ -246,12 +246,14 @@ def _cleanup(m, lab, centre):
     return _feather(_fill_holes(m, lab, centre), lab, centre)
 
 
-def backdrop_mask(lab):
+def backdrop_mask(lab, studio=None):
     """The backdrop: pixels joined to the photo's border that keep the border's colour, also when it is
     tinted (a faint mint or lilac cast) or a coloured studio. It spreads only across smooth areas, so it
-    follows the backdrop's soft shading but stops at a garment's edge."""
-    edge = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
-    studio = np.median(edge, axis=0)
+    follows the backdrop's soft shading but stops at a garment's edge. studio: the backdrop colour to
+    follow (default: the border's own)."""
+    if studio is None:
+        edge = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
+        studio = np.median(edge, axis=0)
     tol = 0.012 + 0.6 * float(np.hypot(studio[1], studio[2]))  # a grey studio is tight, a coloured one varies more
     like = (np.hypot(lab[..., 1] - studio[1], lab[..., 2] - studio[2]) < tol) & (np.abs(lab[..., 0] - studio[0]) < 0.12)
     step = np.zeros(lab.shape[:2], np.float32)
