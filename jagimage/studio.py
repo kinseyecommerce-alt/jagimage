@@ -515,7 +515,9 @@ def judge_print(photo, art, mask, place: str, adj: dict, checker=None) -> dict:
 
 
 def backdrop(spec: Spec, pose: str) -> str:
-    if spec.background:  # a marketplace guide's backdrop, for every pose
+    if spec.background:  # a brand's or marketplace's backdrop, for every pose
+        if re.search(r"split|floor|wall|shadow", spec.background, re.I):  # a described set: as the guide puts it
+            return f"Studio background: {spec.background.rstrip('.')}; clean, no props, the whole background the same in every photo."
         return f"Plain seamless {spec.background.rstrip('.')} studio background, soft even shadow-free lighting."
     return L.BACKGROUNDS.get(pose, L.GREY)
 

@@ -709,6 +709,11 @@ never invent rules it does not state.
 - background: the studio backdrop it asks for in the default / list-view photos, in plain words, with the hex code
   if it gives one (e.g. "pure white (#FFFFFF)", "warm beige (#EFE6DA) seamless"). When it allows several, pick
   the first plain one it names. Never a lifestyle, outdoor or room setting. Empty when it says nothing.
+- backgrounds: every studio backdrop it approves for the default photos, one entry each, written for an image
+  generator in under 180 characters: colour (with a hex code that matches it), plain seamless or split (a wall
+  meeting a floor of another shade, with where the floor line sits), and the light (e.g. "warm beige wall
+  (#EFE6DA) meeting a slightly lighter beige floor at knee height, soft neutral light, faint natural shadow").
+  The first is the one it prefers. Never a lifestyle, outdoor or room setting. Empty when it says nothing.
 - framing: "full" when it wants full-length head-to-toe photos, "top" when it wants topwear shot from the head
   to the waist or knee (cropped to the product), empty when it says nothing.
 - poses: every on-model shot it asks for, in its order. name: a short English snake_case name such as front,
@@ -732,7 +737,8 @@ GUIDE_SCHEMA = {
     "type": "object",
     "properties": {
         "marketplace": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
-        "background": {"type": "string"}, "framing": {"type": "string"},
+        "background": {"type": "string"}, "backgrounds": {"type": "array", "items": {"type": "string"}},
+        "framing": {"type": "string"},
         "poses": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string"}, "direction": {"type": "string"}}, "required": ["name", "direction"]}},
         "model": {"type": "string"}, "adult_model": {"type": "string"}, "avoid": {"type": "string"},
@@ -872,7 +878,7 @@ def guide_content(filename: str, data: bytes):
     return text, pics
 
 
-def brand_settings(guide: dict, category: str, kids_smile: bool = True) -> dict:
+def brand_settings(guide: dict, category: str, kids_smile: bool = True, background: str = "") -> dict:
     """A saved brand guide as batch settings for one category: its photo size, backdrop, framing, poses and
     model directions; its adult rules (age, height, build) only for Men and Women."""
     from . import library as L
@@ -883,7 +889,9 @@ def brand_settings(guide: dict, category: str, kids_smile: bool = True) -> dict:
         extra = (extra + ". " if extra else "") + "For this child: a natural, soft cheerful smile is right"
     out = {"poses": list(guide.get("poses") or ["front_main"]), "custom_poses": dict(guide.get("custom_poses") or {}),
            "extra": extra[:1000], "adult_extra": "" if kids else (guide.get("adult_extra") or ""),
-           "background": guide.get("background") or "", "guide": (guide.get("marketplace") or "")[:80]}
+           "background": (background or guide.get("background") or "")[:200], "guide": (guide.get("marketplace") or "")[:80]}
+    if guide.get("relaxed"):  # relaxed poses: a hand may rest in a pocket
+        out["hands_free"] = False
     if guide.get("canvas"):
         out["canvas"] = list(guide["canvas"])
     if guide.get("shot"):
@@ -923,12 +931,26 @@ def clean_guide(ans: dict, filename: str) -> dict:
             poses.append(name)
     if "front_main" not in poses:
         poses.insert(0, "front_main")
+    # a guide that forbids stiff poses (static, straight, hands by the side) gets a relaxed front stance that
+    # still shows the whole front of the garment, and the hands may rest in a pocket
+    said = " ".join(str(ans.get(k) or "") for k in ("avoid", "model")) + " " + " ".join(
+        str(p.get("direction") or "") for p in (ans.get("poses") or []) if isinstance(p, dict))
+    relaxed = bool(re.search(r"static|stiff|straight (front|pose|stance)|hands? (by|at) the side|traditional pose", said, re.I))
+    if relaxed:
+        custom["front_main"] = ("front view, relaxed natural stance: weight on one leg with a gentle hip shift, shoulders "
+                                "and body turned slightly (about 15 degrees) from the camera, face toward the camera, one hand "
+                                "loosely in the side pocket of the bottoms, the other arm relaxed with a soft bend, the whole "
+                                "front of the top fully visible and not covered by the arms; "
+                                + custom.get("front_main", "").split("; ", 1)[-1])
+    backgrounds = [words(b, 200) for b in (ans.get("backgrounds") or []) if isinstance(b, str) and words(b, 200)][:4]
     model, avoid = words(ans.get("model"), 600).rstrip("."), words(ans.get("avoid"), 300).rstrip(".")
     extra = model + (". " if model and avoid else "") + (f"Avoid: {avoid}" if avoid else "")
     if len(extra) > 1000:  # cut at the last whole item, never in the middle of a word
         extra = extra[:1000].rsplit(",", 1)[0]
     return {"marketplace": words(ans.get("marketplace"), 60) or os.path.splitext(filename)[0][:60],
-            "canvas": canvas, "background": words(ans.get("background"), 200),
+            "canvas": canvas, "background": (backgrounds[0] if backgrounds else words(ans.get("background"), 200)),
+            "backgrounds": backgrounds or ([words(ans.get("background"), 200)] if ans.get("background") else []),
+            "relaxed": relaxed,
             "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
             "extra": extra, "adult_extra": words(ans.get("adult_model"), 600).rstrip("."),
             "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),
@@ -1002,7 +1024,8 @@ class Agent:
                     raise
         raise last
 
-    def plan(self, message: str, ledger, base: dict, brand: Optional[dict] = None, kids_smile: bool = True) -> dict:
+    def plan(self, message: str, ledger, base: dict, brand: Optional[dict] = None, kids_smile: bool = True,
+             background: str = "") -> dict:
         """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...).
         brand: a saved brand guide: every batch gets its photo size, backdrop, poses and model directions."""
         from . import library as L
@@ -1039,7 +1062,7 @@ class Agent:
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses, "auto_bottom": auto_bottom}
                 if brand:
-                    body.update(brand_settings(brand, category, kids_smile))
+                    body.update(brand_settings(brand, category, kids_smile, background))
                     poses = body["poses"]
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]

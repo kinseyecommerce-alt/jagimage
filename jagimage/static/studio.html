@@ -445,8 +445,8 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <h2>Brand / marketplace guide <span class="n">optional</span></h2>
       <p class="hint">Upload a brand's image direction or a marketplace's model photo guidelines (e.g. Roadster for Myntra, or Myntra's own) as PDF (up to 30 MB), Word, text or screenshots. The AI reads it, saves it, and sets up the Studio tab with its photo size, background, poses and model directions; you pick the product and colours there, check, and run as usual. The garments stay plain.</p>
       <div class="row">
-        <label class="field"><span>Guide file</span><input type="file" id="guideFile" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
-        <button class="btn primary" id="guideRead">Read guide</button>
+        <label class="field"><span>Guide files (pick one or many brands at once)</span><input type="file" id="guideFile" multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
+        <button class="btn primary" id="guideRead">Read guides</button>
       </div>
       <div class="row" id="guideSaved">
         <label class="field"><span>Saved guides</span><select id="guideSel"></select></label>
@@ -462,6 +462,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field"><span>Brand guide</span><select id="brGuide"></select></label>
       <label class="field"><span>Fabric</span><select id="brFabric"></select></label>
       <label class="field"><span>Models per category</span><input type="number" id="brModels" value="10" min="1" max="300"></label>
+      <label class="field" style="flex:2"><span>Background (from the brand guide)</span><select id="brBg"></select></label>
       <label class="field"><span>AI</span><select id="brProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></label>
     </div>
     <div class="field"><span>Categories</span><div class="chips" id="brCats"></div></div>
@@ -1039,15 +1040,25 @@ function initGuide() {
     $("guideOut").innerHTML = '<p class="hint">Pick a saved guide below. Only an admin can upload or delete guides.</p>';
   }
   $("guideRead").onclick = async () => {
-    const f = $("guideFile").files[0]; if (!f) { $("guideOut").innerHTML = '<p class="e">Choose the guide file first.</p>'; return; }
-    if (f.size > 30e6) { $("guideOut").innerHTML = '<p class="e">That file is too big: keep it under 30 MB (or upload screenshots of the pages).</p>'; return; }
-    $("guideOut").innerHTML = '<p class="hint">Reading the guide… (about half a minute)</p>'; $("guideRead").disabled = true;
-    try {
-      const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
-      const r = await api("/api/guide", { filename: f.name, data });
-      applyGuide(r.guide); await guidesRefresh(r.guide.id);
-      $("guideOut").innerHTML = guideHtml(r.guide) + '<p class="hint">Saved for next time. Studio is set up with it: pick the product and colours there, then run.</p>';
-    } catch (e) { $("guideOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+    const files = [...$("guideFile").files]; if (!files.length) { $("guideOut").innerHTML = '<p class="e">Choose the guide file(s) first.</p>'; return; }
+    $("guideRead").disabled = true;
+    const done = [], failed = [];
+    for (const [i, f] of files.entries()) {  // one at a time: each guide is read by the AI (about half a minute)
+      $("guideOut").innerHTML = `<p class="hint">Reading ${i + 1} of ${files.length}: ${esc(f.name)}… (about half a minute each)</p>`
+        + (done.length ? `<p class="hint">Saved: ${done.map(esc).join(", ")}</p>` : "") + (failed.length ? `<p class="e">${failed.map(esc).join("<br>")}</p>` : "");
+      if (f.size > 30e6) { failed.push(`${f.name}: too big, keep it under 30 MB (or upload screenshots of its pages)`); continue; }
+      try {
+        const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });
+        const r = await api("/api/guide", { filename: f.name, data });
+        done.push(r.guide.marketplace);
+        if (files.length === 1) { applyGuide(r.guide); await guidesRefresh(r.guide.id); $("guideOut").innerHTML = guideHtml(r.guide) + '<p class="hint">Saved for next time. Pick it below under Plain models for this brand.</p>'; }
+      } catch (e) { failed.push(`${f.name}: ${e.message}`); }
+    }
+    if (files.length > 1) {
+      await guidesRefresh();
+      $("guideOut").innerHTML = `<p>${done.length} of ${files.length} brand guides read and saved.</p>` + (done.length ? `<p class="hint">${done.map(esc).join(", ")}</p>` : "")
+        + (failed.length ? `<p class="e">${failed.map(esc).join("<br>")}</p>` : "");
+    } else if (failed.length) $("guideOut").innerHTML = `<p class="e">${failed.map(esc).join("<br>")}</p>`;
     $("guideRead").disabled = false;
   };
   $("guideUse").onclick = () => { const g = (S.guides || []).find((x) => x.id === $("guideSel").value); if (g) { applyGuide(g); $("guideOut").innerHTML = guideHtml(g) + '<p class="hint">Studio is set up with it: pick the product and colours there, then run.</p>'; } };
@@ -1132,7 +1143,8 @@ function brBody(g, cat, tops, cols) {
   return { category: cat, top: tops[0], tops: tops.slice(1), auto_bottom: true, bottom: (S.opts.bottom_defaults || {})[tops[0]] || "Trackpants",
     top_colours: cols, fabric: $("brFabric").value, pairing: "match", models: +$("brModels").value || 1,
     poses: g.poses, custom_poses: g.custom_poses || {}, extra: extra.slice(0, 1000), adult_extra: kids ? "" : (g.adult_extra || ""),
-    canvas: g.canvas || [2000, 2000], background: g.background || "", guide: g.marketplace, ...(g.shot ? { shot: g.shot } : {}),
+    canvas: g.canvas || [2000, 2000], background: $("brBg").value || g.background || "", guide: g.marketplace, ...(g.shot ? { shot: g.shot } : {}),
+    ...(g.relaxed ? { hands_free: false } : {}),
     provider: $("brProvider").value, ...($("brProvider").value === "openai" ? { quality: "medium" } : {}) };
 }
 function brPlan() {
@@ -1145,7 +1157,7 @@ function brRefreshSummary() {
   if (!g) { $("brSummary").textContent = "Upload a brand guide above first."; return; }
   const models = +$("brModels").value || 1, poses = (g.poses || []).length;
   const styles = jobs.reduce((n, [, t]) => n + t.length, 0);
-  $("brSummary").textContent = `${g.marketplace}: ${g.canvas ? g.canvas[0] + " × " + g.canvas[1] + " px, " : ""}${g.background || "studio backdrop"}, ${poses} poses. `
+  $("brSummary").textContent = `${g.marketplace}: ${g.canvas ? g.canvas[0] + " × " + g.canvas[1] + " px, " : ""}${poses} poses${g.relaxed ? ", relaxed stance" : ""}. `
     + `${jobs.length} categories × ${styles ? Math.round(styles / Math.max(1, jobs.length)) : 0} styles on average × ${models} models × ${cols.length} colours `
     + `= about ${fmt(styles * models * poses * cols.length)} photos (colours are recoloured, so only the base photos cost AI images).`;
 }
@@ -1153,6 +1165,10 @@ function brRender() {
   const g = brGuide(); if (!S.opts) return;
   $("brGuide").innerHTML = (S.guides || []).map((x) => `<option value="${esc(x.id)}">${esc(x.marketplace)}</option>`).join("") || '<option value="">No guides yet</option>';
   if (g) $("brGuide").value = g.id;
+  const bgs = g ? [...(g.backgrounds && g.backgrounds.length ? g.backgrounds : [g.background || ""]), "pure white (#FFFFFF)"].filter(Boolean) : [];
+  const was = $("brBg").value;
+  $("brBg").innerHTML = [...new Set(bgs)].map((b) => `<option value="${esc(b)}">${esc(b.length > 90 ? b.slice(0, 88) + "…" : b)}</option>`).join("");
+  if (bgs.includes(was)) $("brBg").value = was;
   if (!$("brFabric").options.length) $("brFabric").innerHTML = Object.keys(S.opts.palettes).map((f) => `<option value="${esc(f)}">${esc(f.replace(/([a-z])([A-Z])/g, "$1 $2"))}</option>`).join("");
   if (!$("brCats").children.length) brChips("#brCats", S.opts.categories.map((c) => [c, CAT_NAMES[c] || c]), S.opts.categories);
   if (!$("brTops").children.length) brChips("#brTops", S.opts.tops.map((t) => [t, nice(t)]), ["HalfSleeveTee"]);
@@ -1200,7 +1216,7 @@ async function brAskPlan() {
   $("brPlanOut").innerHTML = '<p class="hint">Planning…</p>';
   try {
     const prov = $("brProvider").value;
-    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked,
+    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked, background: $("brBg").value,
       provider: prov, ...(prov === "openai" ? { quality: "medium" } : {}) });
     const rows = p.batches.map((b) => `<tr><td>${esc(CAT_NAMES[b.category] || b.category)}</td><td>${b.styles.map(nice).map(esc).join(", ")}</td><td class="r">${fmt(b.models)}</td><td class="r">${b.colours}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
     $("brPlanOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<div class="tablewrap"><table class="agenttab"><tr><th>Category</th><th>Styles</th><th class="r">Models</th><th class="r">Colours</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
@@ -1216,7 +1232,7 @@ async function brAskPlan() {
 function initBrandShoot() {
   $("brPlanBtn").onclick = brAskPlan;
   ["#brCats", "#brTops", "#brCols"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
-  $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRefreshSummary; $("brFabric").onchange = brRender;
+  $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRender; $("brFabric").onchange = brRender;
   $("brTest").onclick = brTestRun; $("brRun").onclick = brStartRun;
   if (!isAdmin()) $("brRun").classList.add("hide");
 }

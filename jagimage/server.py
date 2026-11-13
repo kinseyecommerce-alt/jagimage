@@ -971,7 +971,8 @@ def make_handler(app: Studio):
                     brand = next((g for g in c.guides() if g.get("id") == body["brand"]), None)
                     if not brand:
                         raise ValueError("That brand guide is gone: upload it again")
-                plan = c.agent.plan(message, studio.ModelLedger(app.out), base, brand, bool(body.get("kids_smile", True)))
+                plan = c.agent.plan(message, studio.ModelLedger(app.out), base, brand, bool(body.get("kids_smile", True)),
+                                    " ".join(str(body.get("background") or "").split())[:200])
                 if note:
                     plan["reply"] = (plan["reply"] + " " + note).strip()
                 plan_id = uuid.uuid4().hex[:10]

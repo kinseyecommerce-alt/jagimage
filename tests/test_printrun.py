@@ -712,3 +712,18 @@ def test_brand_settings_and_brand_folder():
     kid, man = brand_settings(g, "Kids_Girls"), brand_settings(g, "Men")
     assert kid["adult_extra"] == "" and "smile" in kid["extra"] and man["adult_extra"] == "under 25"
     assert man["canvas"] == [1080, 1440] and man["guide"] == "Roadster (Myntra)"
+
+
+def test_brand_guide_backgrounds_and_relaxed_front():
+    from jagimage import studio
+    from jagimage.cloud import brand_settings, clean_guide
+
+    g = clean_guide({"marketplace": "Roadster (Myntra)", "poses": [{"name": "front", "direction": "pleasant expression"}],
+                     "backgrounds": ["warm beige wall (#EFE6DA) meeting a lighter beige floor at knee height, soft neutral light",
+                                     "white seamless (#FFFFFF)"], "avoid": "static straight front poses, hands by the side",
+                     "summary": "x"}, "r.pdf")
+    assert g["relaxed"] and "pocket" in g["custom_poses"]["front_main"] and g["background"].startswith("warm beige")
+    b = brand_settings(g, "Men", background=g["backgrounds"][1])
+    assert b["background"].startswith("white") and b["hands_free"] is False
+    sp = studio.Spec(category="Men", top="HalfSleeveTee", top_colours=["Black"], background=g["background"])
+    assert "Studio background: warm beige wall" in studio.backdrop(sp, "front_main")
