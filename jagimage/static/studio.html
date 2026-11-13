@@ -334,7 +334,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <div id="printTab" class="hide tabpage">
   <section class="panel" id="driveRunPanel">
     <h2>Print from Google Drive links</h2>
-    <p class="hint">Paste a Drive folder of plain T-shirt photos (your model photos, flat lays or hanger shots, in subfolders by colour and style is best) and a Drive folder of prints. The AI finds the shirt in every front photo, prints each artwork on it exactly as drawn, and puts each print only on the shirt colours it suits. Every print × product is one SKU, saved as <b>Printed/&lt;SKU&gt;</b> in Google Drive and in Dropbox, ready for the Listings tab. About ₹0.3 of AI per photo looked at.</p>
+    <p class="hint">Paste a Drive folder of plain T-shirt photos (your model photos, flat lays or hanger shots, in subfolders by colour and style is best) and a Drive folder of prints. The AI finds the shirt in every front photo, prints each artwork on it exactly as drawn, and puts each print only on the shirt colours it suits. Every print × product is one SKU, saved as <b>Printed/&lt;SKU&gt;</b> in Google Drive and in Dropbox, ready for the Listings tab (or in the Drive folder you choose below). About ₹0.3 of AI per photo looked at.</p>
     <div class="row">
       <label class="field" style="flex:3"><span>Plain T-shirts folder link</span><input type="text" id="drTees" placeholder="https://drive.google.com/drive/folders/…"></label>
       <label class="field" style="flex:3"><span>Prints folder link</span><input type="text" id="drPrints" placeholder="https://drive.google.com/drive/folders/…"></label>
@@ -343,6 +343,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field"><span>Print position</span><select id="drPlace"></select></label>
       <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
       <label class="check"><input type="checkbox" id="drLocal" checked> <span>Local checks: whether a print suits a colour (by contrast) and the placement (print-shop rules, never on skin) are checked on the server for free. The AI only finds the shirt, once per model photo.</span></label>
+      <label class="field" style="flex:1 1 100%"><span>Save printed photos to (Google Drive): paste a folder link, or a folder name in your photos folder. Each SKU gets its own folder inside it</span><input type="text" id="drSaveTo" placeholder="Printed   (or https://drive.google.com/drive/folders/...)"></label>
       <label class="check"><input type="checkbox" id="drWhite" checked> <span>Pure white background (#FFFFFF): the studio backdrop and floor turn white, as Amazon and Flipkart want the main image. The model and the clothes are never touched.</span></label>
       <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (front only, photo named as the print)</span></label>
@@ -1131,7 +1132,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drWhite").checked });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drWhite").checked, save_to: $("drSaveTo").value.trim() });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };

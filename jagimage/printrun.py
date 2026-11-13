@@ -210,6 +210,17 @@ PRINT_CATEGORY = [("women", "Women"), ("ladies", "Women"), ("girl", "Kids_Girls"
                   ("gents", "Men"), ("kid", "Kids")]
 
 
+def save_target(save_to: str):
+    """(root folder id, folders) for printed photos: a pasted Drive folder link puts them right in that folder
+    (<link>/<SKU>/...); a name like "Printed" or "Roadster/Printed" is a folder in the photos folder."""
+    text = str(save_to or "").strip()
+    m = re.search(r"/folders/([A-Za-z0-9_-]{10,})", text) or re.fullmatch(r"([A-Za-z0-9_-]{25,})", text)
+    if m:
+        return m.group(1), []
+    parts = [p.strip() for p in re.split(r"[/\\]+", text) if p.strip()]
+    return "", parts or ["Printed"]
+
+
 def print_code(print_name: str) -> str:
     """A print's code in the SKU: its design number when the file name has one
     ("SK_VN_MENS_HS_319_YLW_Final" -> 319), else its name in letters and digits."""
@@ -324,7 +335,7 @@ class PrintRun:
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
                  test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None,
-                 white: bool = True):
+                 white: bool = True, save_to: str = ""):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -337,6 +348,8 @@ class PrintRun:
         # the folders above the tee folder ("Cotton Mix/Boys/Red" when that folder was picked): the products' fabric,
         # category and colour are read from them too
         self.base_path = [str(x) for x in (base_path or []) if str(x).strip()]
+        # where the printed photos go on Drive: a folder link (its id), or folders in the photos folder ("Printed")
+        self.save_root, self.save_parts = save_target(save_to)
         self.white = white  # the studio backdrop made pure white (#FFFFFF), as Amazon and Flipkart want the main image
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
@@ -651,7 +664,7 @@ class PrintRun:
         """One finished photo to Drive (Printed/<SKU>) and Dropbox; the server keeps only a small first photo."""
         local = folder / name
         try:
-            self.drive.upload(local, ["Printed", sku], name)
+            self.drive.upload(local, self.save_parts + [sku], name, root=self.save_root)
             row["drive"] = True
         except Exception as exc:
             self._note("error", sku=sku, error=f"Drive: {exc}"[:200])

@@ -80,8 +80,8 @@ class FakeDrive:
     def download(self, fid):
         return self.files[fid]
 
-    def upload(self, local, parts, name):
-        self.uploaded["/".join(parts + [name])] = local.read_bytes()
+    def upload(self, local, parts, name, root=""):
+        self.uploaded["/".join(([f"<{root}>"] if root else []) + parts + [name])] = local.read_bytes()
 
 
 class FakeDropbox:
@@ -832,3 +832,12 @@ def test_library_prints_go_on_the_sleeve_their_name_says():
     assert print_fits(path, vest, "INK_MEN_SLS_423_BLUE_final") and not print_fits(path, half, "INK_MEN_SLS_423_BLUE_final")
     assert print_fits(path, full, "RTT_SS_MENS_FS_409_Final")  # the maker's "SS" is not a sleeve
     assert print_fits(path, {**half, "style": "Hoodie"}, "Unicorn 02")  # no sleeve in the name: any style
+
+
+def test_printed_photos_go_to_the_chosen_drive_folder():
+    from jagimage.printrun import save_target
+
+    assert save_target("") == ("", ["Printed"])
+    assert save_target("Roadster / Printed") == ("", ["Roadster", "Printed"])
+    assert save_target("https://drive.google.com/drive/folders/1i-iH1cjB3RnxQkIOsI8so6zcAVzo7egm?usp=sharing") == \
+        ("1i-iH1cjB3RnxQkIOsI8so6zcAVzo7egm", [])

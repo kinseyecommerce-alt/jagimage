@@ -353,18 +353,22 @@ class Drive:
             exc.msg = f"{exc.msg}: {why} [{method} {url.split('?')[0][-80:]}]" if why else exc.msg
             raise
 
-    def folder_id(self, parts: list) -> str:
+    def folder_id(self, parts: list, root: str = "") -> str:
         """The Drive folder for a path such as [batch, "Navy__Navy"] under the photos folder, made
-        once and remembered."""
-        path = [self.folder] + list(parts)
-        key = "/".join(path)
+        once and remembered. root: start instead in the Drive folder with this id (a folder link the
+        shop pasted)."""
+        path = ([] if root else [self.folder]) + list(parts)
+        if root and not path:
+            return root
+        pre = f"id:{root}/" if root else ""
+        key = pre + "/".join(path)
         with self.lock:
             known = self.state.setdefault("folders", {})
             if key in known:
                 return known[key]
-            parent = "root"
+            parent = root or "root"
             for i in range(len(path)):
-                sub = "/".join(path[:i + 1])
+                sub = pre + "/".join(path[:i + 1])
                 if sub not in known:
                     name = path[i].replace("'", "\\'")
                     q = f"name = '{name}' and mimeType = '{FOLDER_MIME}' and '{parent}' in parents and trashed = false"
@@ -437,9 +441,10 @@ class Drive:
             self._save()
         return done
 
-    def upload(self, local: Path, parts: list, name: str) -> str:
-        """Upload a photo into its folder; a photo of the same name there (an earlier recolour) is replaced."""
-        parent = self.folder_id(parts)
+    def upload(self, local: Path, parts: list, name: str, root: str = "") -> str:
+        """Upload a photo into its folder; a photo of the same name there (an earlier recolour) is replaced.
+        root: the folders start in this Drive folder (by id) instead of the photos folder."""
+        parent = self.folder_id(parts, root)
         q = f"name = '{name.replace(chr(39), chr(92) + chr(39))}' and mimeType != '{FOLDER_MIME}' and '{parent}' in parents and trashed = false"
         found = self._call("GET", "https://www.googleapis.com/drive/v3/files?" + urllib.parse.urlencode(
             {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files") or []
