@@ -638,8 +638,8 @@ class PrintRun:
         images = []
         for i, im in enumerate(photos, 1):
             # one model per print: the photo is named as the print file (223.png -> 223.jpg)
-            # one model per print: the front is named as the print file (223.png -> 223.jpg), its back 223_back.jpg
-            name = (f"{_file_name(pname)}.jpg" if i == 1 else f"{_file_name(pname)}_back.jpg") if self.one_model else f"{sku}_{i}.jpg"
+            # one model per print: the front is named as the print file (223.png -> 223.jpg), its back 223-back.jpg
+            name = (f"{_file_name(pname)}.jpg" if i == 1 else f"{_file_name(pname)}-back.jpg") if self.one_model else f"{sku}_{i}.jpg"
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}

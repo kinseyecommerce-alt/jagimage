@@ -283,9 +283,9 @@ def test_one_print_one_model_named_as_the_print_with_its_plain_back(tmp_path):
     run._run()
     assert run.error is None
     # the prints take models in turn: m0001 (with a back photo), m0002 (none), m0001 again
-    assert sorted(drive.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-223/223_back.jpg",
-                                      "Printed/SPB-KB-FS-RED-225/225.jpg",
-                                      "Printed/SPB-KB-FS-RED-229/229.jpg", "Printed/SPB-KB-FS-RED-229/229_back.jpg"]
+    assert sorted(drive.uploaded) == sorted(["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-223/223-back.jpg",
+                                             "Printed/SPB-KB-FS-RED-225/225.jpg",
+                                             "Printed/SPB-KB-FS-RED-229/229.jpg", "Printed/SPB-KB-FS-RED-229/229-back.jpg"])
     assert [s["photos"] for s in run.skus] == [2, 1, 2]
     tees = [{"id": f"t{i}", "name": f"m000{i}_front.jpg", "path": path, "data": red} for i in (1, 2)] + \
            [{"id": "b1", "name": "m0001_back.jpg", "path": path, "data": red}]
