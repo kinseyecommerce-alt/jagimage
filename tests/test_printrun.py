@@ -804,3 +804,17 @@ def test_guide_back_pose_keeps_the_studio_rear_view_only():
     g = clean_guide({"marketplace": "X", "summary": "x", "poses": [
         {"name": "back", "direction": "confident natural pose, pleasant expression"}]}, "x.pdf")
     assert "back" in g["poses"] and "back" not in g["custom_poses"] and "TRUE rear view" in L.POSES["back"]
+
+
+def test_a_sorted_print_library_puts_each_print_on_its_own_category_and_colour():
+    from jagimage.printrun import print_code, print_fits
+
+    men_black = {"category": "Men", "colour": "Black"}
+    assert print_fits(["MENS", "TOP WEAR", "Black"], men_black)
+    assert not print_fits(["MENS", "TOP WEAR", "Red"], men_black)
+    assert not print_fits(["WOMENS", "TOP WEAR", "Black"], men_black)  # "WOMENS" is not "MENS"
+    assert not print_fits(["MENS", "BOTTOM WEAR", "Black"], men_black)
+    assert print_fits(["MENS", "TOP WEAR", "Grey Melange"], {"category": "Men", "colour": "Melange"})
+    assert print_fits(["BOYS", "TOP WEAR", "Black"], {"category": "Kids_Boys", "colour": "Black"})
+    assert print_fits([], men_black)  # a flat prints folder: every print may go on every product
+    assert print_code("SK_VN_MENS_HS_319_YLW_Final") == "319" and print_code("MENS_FULL SLEEVE_96_YELLOW_Final") == "96"

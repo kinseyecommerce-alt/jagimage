@@ -206,12 +206,53 @@ def make_sku(pattern: str, fields: dict) -> str:
     return sku[:60]
 
 
+PRINT_CATEGORY = [("women", "Women"), ("ladies", "Women"), ("girl", "Kids_Girls"), ("boy", "Kids_Boys"), ("men", "Men"),
+                  ("gents", "Men"), ("kid", "Kids")]
+
+
+def print_code(print_name: str) -> str:
+    """A print's code in the SKU: its design number when the file name has one
+    ("SK_VN_MENS_HS_319_YLW_Final" -> 319), else its name in letters and digits."""
+    name = str(print_name)
+    m = re.search(r"(?<![0-9A-Za-z])(\d{1,6})(?![0-9])", name)
+    # a library file name (parts joined by "_": maker, category, style, number, ink) is known by its number;
+    # a plain name ("Unicorn 02") stays whole
+    return m.group(1) if m and "_" in name else code(name, 16)
+
+
+def _colour_key(name: str) -> str:
+    return re.sub(r"[^a-z]", "", str(name).lower())
+
+
+def print_fits(path: List[str], product: dict) -> bool:
+    """Whether a print filed at `path` in the print library (e.g. MENS / TOP WEAR / Black) belongs on this product:
+    the same category (Men, Women, Boys, Girls), top wear only, and the same shirt colour ("Grey Melange" matches
+    Melange). A print with no such folders fits every product."""
+    parts = [str(x).strip() for x in path if str(x).strip()]
+    if not parts:
+        return True
+    low = [p.lower() for p in parts]
+    if any("bottom" in p for p in low):
+        return False
+    cat = next((c for p in low for w, c in PRINT_CATEGORY if re.search(r"\b" + w, p)), None)
+    want = str(product.get("category") or "")
+    if cat and want and not (want == cat or (cat == "Kids" and want.startswith("Kids"))):
+        return False
+    rest = [p for p, l in zip(parts, low) if "wear" not in l and not any(re.search(r"\b" + w, l) for w, _ in PRINT_CATEGORY)]
+    colour = _colour_key(product.get("colour") or "")
+    if rest and colour:
+        folder = _colour_key(rest[-1])
+        if folder and not (folder == colour or folder in colour or colour in folder):
+            return False
+    return True
+
+
 def sku_fields(brand: str, product: dict, print_name: str, n: int) -> dict:
     return {"BRAND": code(brand) or "SPB", "CAT": CATEGORY_CODES.get(product.get("category", ""), "U"),
             "CATEGORY": code(product.get("category", "")), "STYLE": STYLE_CODES.get(product.get("style", ""), "TS"),
             "STYLE_NAME": code(product.get("style", "")), "FABRIC": FABRIC_CODES.get(product.get("fabric", ""), ""),
             "COLOUR": code(product.get("colour", "")), "COL3": code(product.get("colour", ""), 3),
-            "PRINT": code(print_name, 16), "N": f"{n:04d}"}
+            "PRINT": print_code(print_name), "N": f"{n:04d}"}
 
 
 def ink_hidden_share(art: Image.Image, shirt_hex: str) -> float:
@@ -434,7 +475,9 @@ class PrintRun:
     def _go(self):
         self.stage = "reading Drive"
         tees = self.drive.list_tree(self.tees_folder)
-        prints = [f for f in self.drive.list_tree(self.prints_folder, depth=2)]
+        # a print library may be sorted <category>/<TOP WEAR>/<shirt colour>/: each print then goes only on its own
+        # category's tees in its own colour
+        prints = [f for f in self.drive.list_tree(self.prints_folder, depth=4)]
         self.counts["tee_photos"], self.counts["prints"] = len(tees), len(prints)
         if not tees:
             raise RuntimeError("No pictures in the T-shirt folder (or the app can't see it: share it with the connected Google account)")
@@ -448,7 +491,7 @@ class PrintRun:
             if not local.exists():
                 local.write_bytes(self.drive.download(p["id"]))
             try:
-                arts.append((Path(p["name"]).stem, open_image(str(local))))
+                arts.append((Path(p["name"]).stem, open_image(str(local)), list(p.get("path") or [])))
             except PrintError as exc:
                 self._note("error", file=p["name"], error=str(exc))
                 self.counts["errors"] += 1
@@ -490,9 +533,11 @@ class PrintRun:
                 prod["colour"] = nearest_colour(look.get("colour_hex", "")) or " ".join(str(look.get("colour") or "").title().split())[:30]
             hex_ = colour_hex_for(prod["colour"], prod.get("fabric", "")) or str(look.get("colour_hex") or "#808080")
             made_here = 0
-            for pname, art in arts:
+            for pname, art, ppath in arts:
                 if self.stop.is_set() or (self.limit and len(self.skus) >= self.limit):
                     break
+                if not print_fits(ppath, prod):  # filed for another category or shirt colour
+                    continue
                 if self.per_product and made_here >= self.per_product:
                     break  # this product (a style in a colour) has its prints
                 verdict = self._suits(pname, art, prod["colour"], hex_)
