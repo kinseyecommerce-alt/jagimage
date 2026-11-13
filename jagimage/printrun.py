@@ -343,7 +343,8 @@ class PrintRun:
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
                  test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None,
-                 white: bool = False, save_to: str = "", with_back: bool = True, white_copy: bool = True):
+                 white: bool = False, save_to: str = "", with_back: bool = True, white_copy: bool = True,
+                 white_to: str = ""):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -361,6 +362,11 @@ class PrintRun:
         self.with_back = with_back  # 1 print = 1 model: the model's plain back photo goes in the SKU folder too
         # every photo also on pure white (#FFFFFF) for Amazon and Flipkart, same name, in "White background/..."
         self.white_copy = white_copy and not white
+        # where the white copies go: their own folder (a link or a name), else White background/<save folders>
+        if str(white_to or "").strip():
+            self.white_root, self.white_parts = save_target(white_to)
+        else:
+            self.white_root, self.white_parts = self.save_root, [WHITE_FOLDER] + self.save_parts
         self.white = white  # the studio backdrop made pure white (#FFFFFF), as Amazon and Flipkart want the main image
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
@@ -707,7 +713,7 @@ class PrintRun:
         wlocal = white_path(local)
         if wlocal.exists():  # the pure white copy: same name, under "White background/" (Drive and Dropbox)
             try:
-                self.drive.upload(wlocal, [WHITE_FOLDER] + self.save_parts + [sku], name, root=self.save_root)
+                self.drive.upload(wlocal, self.white_parts + [sku], name, root=self.white_root)
                 row["white_drive"] = True
             except Exception as exc:
                 self._note("error", sku=sku, error=f"Drive (white copy): {exc}"[:200])

@@ -872,3 +872,17 @@ def test_every_printed_photo_also_gets_a_pure_white_copy_with_the_same_name(tmp_
         "White background/Roadster/Printed/SPB-KB-HS-RED-319/319-back.jpg"])
     white = Image.open(io.BytesIO(drive.uploaded["White background/Roadster/Printed/SPB-KB-HS-RED-319/319.jpg"]))
     assert min(white.convert("RGB").getpixel((3, 3))) >= 250  # the studio grey turned white
+
+
+def test_white_copies_can_go_to_their_own_folder(tmp_path, monkeypatch):
+    from jagimage import market
+
+    monkeypatch.setattr(market, "person_mask", lambda img: None)
+    red = jpg(tee_photo())
+    tees = [{"id": "t1", "name": "m0001_front.jpg", "path": ["Cotton Mix", "Boys", "Red", "Half sleeve"], "data": red}]
+    prints = [{"id": "p1", "name": "319.png", "path": [], "data": art_png((250, 250, 250))}]
+    drive = FakeDrive(tees, prints)
+    run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", one_model=True, save_to="Printed",
+                            white_to="https://drive.google.com/drive/folders/1AmazonWhiteFolderIdXYZ123")
+    run._run()
+    assert sorted(drive.uploaded) == ["<1AmazonWhiteFolderIdXYZ123>/SPB-KB-HS-RED-319/319.jpg", "Printed/SPB-KB-HS-RED-319/319.jpg"]

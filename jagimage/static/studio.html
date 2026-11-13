@@ -345,9 +345,10 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="check"><input type="checkbox" id="drLocal" checked> <span>Local checks: whether a print suits a colour (by contrast) and the placement (print-shop rules, never on skin) are checked on the server for free. The AI only finds the shirt, once per model photo.</span></label>
       <label class="field" style="flex:1 1 100%"><span>Save printed photos to (Google Drive): paste a folder link, or a folder name in your photos folder. Each SKU gets its own folder inside it</span><input type="text" id="drSaveTo" placeholder="Printed   (or https://drive.google.com/drive/folders/...)"></label>
       <label class="field" style="flex:1 1 100%"><span>Background of the saved photos</span><select id="drBgMode">
-        <option value="both" selected>Both: as photographed + a pure white copy for Amazon/Flipkart (same names, in "White background/")</option>
+        <option value="both" selected>Both: as photographed + a pure white copy for Amazon/Flipkart (same names, in a separate folder)</option>
         <option value="white">Pure white only (#FFFFFF)</option>
         <option value="original">As photographed only</option></select></label>
+      <label class="field" style="flex:1 1 100%"><span>Save pure-white (Amazon) copies to (Google Drive): its own folder link or name; empty = "White background/" + the folder above</span><input type="text" id="drWhiteTo" placeholder="Amazon white   (or https://drive.google.com/drive/folders/...)"></label>
       <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (print on the front, photo named as the print)</span></label>
       <label class="check"><input type="checkbox" id="drBack" checked> <span>Also save the model's plain back photo in each SKU folder (named &lt;print&gt;-back.jpg, e.g. 319-back.jpg)</span></label>
@@ -1136,7 +1137,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drBgMode").value === "white", white_copy: $("drBgMode").value === "both", save_to: $("drSaveTo").value.trim(), with_back: $("drBack").checked });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drBgMode").value === "white", white_copy: $("drBgMode").value === "both", white_to: $("drWhiteTo").value.trim(), save_to: $("drSaveTo").value.trim(), with_back: $("drBack").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
