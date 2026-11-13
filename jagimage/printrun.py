@@ -17,6 +17,7 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -82,6 +83,7 @@ MIN_BOX_SHARE = 0.3   # the shirt found covers at least this share of the AI's b
 
 LOCAL_HIDDEN_SHARE = 0.35  # local checks: a print with more than this share of its ink in low contrast is left out
 SKIN_MAX = 0.03           # at most this share of the print's box may lie on skin
+ARTS_IN_MEMORY = 6         # print artworks kept open at once (a library has hundreds; each can take ~100 MB decoded)
 VISIBLE_DE = 0.18         # OKLab: printed ink this far from the shirt's colour under it shows clearly (teal on bottle green, 0.16, is too faint)
 VISIBLE_MIN = 0.55        # at least this share of a print's ink must show, or it is left out
 
@@ -532,16 +534,31 @@ class PrintRun:
             raise RuntimeError("No pictures in the prints folder")
         cache = self.data / "print_cache"
         cache.mkdir(parents=True, exist_ok=True)
-        arts = []
-        for p in prints:
+        # a library can hold hundreds of big artworks: each is downloaded and opened only when a product needs it,
+        # and only the last few stay in memory (opening them all at once ran the server out of memory)
+        arts = [(Path(p["name"]).stem, p, list(p.get("path") or [])) for p in prints]
+        opened, bad = OrderedDict(), set()
+
+        def load(p):
+            if p["id"] in opened:
+                opened.move_to_end(p["id"])
+                return opened[p["id"]]
+            if p["id"] in bad:
+                return None
             local = cache / f"{p['id']}_{re.sub(r'[^0-9A-Za-z]', '', p.get('modifiedTime', ''))[:14]}{Path(p['name']).suffix.lower() or '.png'}"
-            if not local.exists():
-                local.write_bytes(self.drive.download(p["id"]))
             try:
-                arts.append((Path(p["name"]).stem, open_image(str(local)), list(p.get("path") or [])))
+                if not local.exists():
+                    local.write_bytes(self.drive.download(p["id"]))
+                art = open_image(str(local))
             except PrintError as exc:
+                bad.add(p["id"])
                 self._note("error", file=p["name"], error=str(exc))
                 self.counts["errors"] += 1
+                return None
+            opened[p["id"]] = art
+            while len(opened) > ARTS_IN_MEMORY:
+                opened.popitem(last=False)
+            return art
         products = self._products(tees)
         self.counts["products"] = len(products)
         out_root = self.data / "printed" / self.id
@@ -580,13 +597,16 @@ class PrintRun:
                 prod["colour"] = nearest_colour(look.get("colour_hex", "")) or " ".join(str(look.get("colour") or "").title().split())[:30]
             hex_ = colour_hex_for(prod["colour"], prod.get("fabric", "")) or str(look.get("colour_hex") or "#808080")
             made_here = 0
-            for pname, art, ppath in arts:
+            for pname, pfile, ppath in arts:
                 if self.stop.is_set() or (self.limit and len(self.skus) >= self.limit):
                     break
                 if not print_fits(ppath, prod, pname):  # filed for another category, colour or sleeve
                     continue
                 if self.per_product and made_here >= self.per_product:
                     break  # this product (a style in a colour) has its prints
+                art = load(pfile)
+                if art is None:
+                    continue
                 verdict = self._suits(pname, art, prod["colour"], hex_)
                 if not verdict["ok"]:
                     self.counts["left_out"] += 1
