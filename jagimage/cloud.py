@@ -872,6 +872,25 @@ def guide_content(filename: str, data: bytes):
     return text, pics
 
 
+def brand_settings(guide: dict, category: str, kids_smile: bool = True) -> dict:
+    """A saved brand guide as batch settings for one category: its photo size, backdrop, framing, poses and
+    model directions; its adult rules (age, height, build) only for Men and Women."""
+    from . import library as L
+
+    kids = L.is_kids(category)
+    extra = guide.get("extra") or ""
+    if kids and kids_smile:  # brand expression rules are written for adults
+        extra = (extra + ". " if extra else "") + "For this child: a natural, soft cheerful smile is right"
+    out = {"poses": list(guide.get("poses") or ["front_main"]), "custom_poses": dict(guide.get("custom_poses") or {}),
+           "extra": extra[:1000], "adult_extra": "" if kids else (guide.get("adult_extra") or ""),
+           "background": guide.get("background") or "", "guide": (guide.get("marketplace") or "")[:80]}
+    if guide.get("canvas"):
+        out["canvas"] = list(guide["canvas"])
+    if guide.get("shot"):
+        out["shot"] = guide["shot"]
+    return out
+
+
 def clean_guide(ans: dict, filename: str) -> dict:
     """The AI's reading of a guide as Studio settings, every value checked."""
     from . import library as L
@@ -983,8 +1002,9 @@ class Agent:
                     raise
         raise last
 
-    def plan(self, message: str, ledger, base: dict) -> dict:
-        """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...)."""
+    def plan(self, message: str, ledger, base: dict, brand: Optional[dict] = None, kids_smile: bool = True) -> dict:
+        """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...).
+        brand: a saved brand guide: every batch gets its photo size, backdrop, poses and model directions."""
         from . import library as L
         from . import pricing, studio
 
@@ -1018,6 +1038,9 @@ class Agent:
                         "top_colours": colours, "pairing": b.get("pairing") if b.get("pairing") in ("match", "each") else "match",
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses, "auto_bottom": auto_bottom}
+                if brand:
+                    body.update(brand_settings(brand, category, kids_smile))
+                    poses = body["poses"]
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]
                 cost = pricing.sum_estimates([pricing.estimate(sp) for sp in specs], sum(p["recoloured_images"] for p in plans))

@@ -23,6 +23,7 @@ CATEGORY_FOLDER = {"Kids_Boys": "Boys", "Kids_Girls": "Girls", "Men": "Men", "Wo
 STYLE_FOLDER = {"HalfSleeveTee": "Half sleeve", "SleevelessTee": "Sleeveless", "FullSleeveTee": "Full sleeve",
                 "Hoodie": "Hoodies", "Sweatshirt": "Sweatshirt", "OversizedTee": "Oversized", "ZipHoodie": "Zip hoodies"}
 POSE_NAME = {"front_main": "front", "back": "back"}
+BRANDS_FOLDER = "Brands"  # a brand guide's shoots: Brands/<brand>/<fabric>/<category>/...
 JPG = re.compile(r"^(?P<pose>[a-z_]+)_(?P<w>\d+)x(?P<h>\d+)\.jpg$")
 KNEE_MARGIN = 0.03  # of the photo height: a single top is cut this far below the shorts' hem
 
@@ -36,6 +37,8 @@ def files(batch: "studio.Batch") -> List[dict]:
     fab = FABRIC_FOLDER.get(spec.fabric, spec.fabric)
     cat = CATEGORY_FOLDER_BY_FABRIC.get((spec.fabric, spec.category)) or CATEGORY_FOLDER.get(spec.category, spec.category)
     style = STYLE_FOLDER.get(spec.top, spec.top)
+    # a brand's shoot (its own look) goes to its own folder, never among the regular catalogue's photos
+    brand = [BRANDS_FOLDER, re.sub(r'[\\/:*?"<>|]+', "-", spec.guide).strip(" .")] if getattr(spec, "guide", "") else []
     rows = []
     for jpg in sorted(batch.root.glob("m[0-9][0-9][0-9][0-9]/*/*.jpg")):
         m = JPG.match(jpg.name)
@@ -55,16 +58,16 @@ def files(batch: "studio.Batch") -> List[dict]:
         t, b = r["top"], r["bottom"]
         name = f"{r['model']}_{POSE_NAME.get(r['pose'], r['pose'])}.jpg"
         if b is None:  # a top-only shot is the single top itself
-            out.append({**r, "key": r["rel"] + "#set", "parts": [fab, cat, t, style], "name": name, "crop": False})
+            out.append({**r, "key": r["rel"] + "#set", "parts": brand + [fab, cat, t, style], "name": name, "crop": False})
             continue
-        sets = [fab, cat, t, "Co-ords", f"{style} set"] if t == b else [fab, cat, t, "Combo sets", f"{t}-{b}", f"{style} set"]
+        sets = brand + ([fab, cat, t, "Co-ords", f"{style} set"] if t == b else [fab, cat, t, "Combo sets", f"{t}-{b}", f"{style} set"])
         # keys differ from the batch layout's (the bare path), so photos sent there before are filed here too
         out.append({**r, "key": r["rel"] + "#set", "parts": sets, "name": name, "crop": False})
         base_png = batch.base_path(int(r["model"][1:]), spec.base_key(t, b), r["pose"])
         mask_png = base_png.with_name(f"{r['pose']}_bottom_mask.png")
         # the cut needs the base's size and bottom mask (the mask alone will do once the base is archived to Drive)
         if (t == b or single_from.get(t) == b) and (base_png.exists() or mask_png.exists()):
-            out.append({**r, "key": r["rel"] + "#single", "parts": [fab, cat, t, style], "name": name, "crop": True})
+            out.append({**r, "key": r["rel"] + "#single", "parts": brand + [fab, cat, t, style], "name": name, "crop": True})
     return out
 
 

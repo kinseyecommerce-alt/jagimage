@@ -25,7 +25,7 @@ PHOTO = re.compile(r"\.(jpe?g|png|webp)$", re.I)
 
 
 class WhiteJob:
-    def __init__(self, drive, path: List[str], data: Path, limit: int = 0, skip=("white background", "printed", "_bases"),
+    def __init__(self, drive, path: List[str], data: Path, limit: int = 0, skip=("white background", "printed", "_bases", "brands"),
                  workers: int = WORKERS, on_done=None):
         self.id = uuid.uuid4().hex[:8]
         self.drive, self.path, self.data = drive, [p for p in path if p], Path(data)

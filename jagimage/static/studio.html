@@ -472,6 +472,11 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="row"><button class="btn" id="brTest" type="button">Test: one model per category</button><button class="btn primary" id="brRun" type="button">Run the brand shoot</button></div>
     <p class="e" id="brErr"></p>
     <div id="brOut"></div>
+    <h3 style="margin-top:18px">Or ask in plain words</h3>
+    <p class="hint">For example: <i>create 10 models each category in Black, White and Navy half sleeve and hoodies</i>. The agent plans the batches with this brand's look, shows the photos and cost, and after you press Start makes them and saves them to Google Drive.</p>
+    <textarea id="brAsk" rows="2" style="width:100%" placeholder="create 10 models each category"></textarea>
+    <div class="row"><button class="btn" id="brPlanBtn" type="button">Plan</button></div>
+    <div id="brPlanOut"></div>
   </section>
 </div>
 <main id="studioTab" class="studio">
@@ -1171,7 +1176,7 @@ async function brTestRun() {
       // each test replaces the last one on the server: the photos are kept here in the page
       for (const [rel, what] of [[st.result.replace(/[^/]+\.png$/, "front_main.png"), "front"], [st.result, label(pose)]]) {
         if (what === "front" && pose === "front_main") continue;
-        const blob = await (await fetch("/files/" + rel.split("/").map(encodeURIComponent).join("/"))).blob();
+        const blob = await (await fetch("/files/_previews/" + rel.split("/").map(encodeURIComponent).join("/"))).blob();
         $("brGal").insertAdjacentHTML("beforeend", `<a class="card" href="${URL.createObjectURL(blob)}" target="_blank" rel="noopener"><img src="${URL.createObjectURL(blob)}" alt=""><span class="cap"><b>${esc(CAT_NAMES[cat])}</b> · ${esc(what)}</span></a>`);
       }
     }
@@ -1188,7 +1193,28 @@ async function brStartRun() {
     $("brOut").innerHTML = `<p class="hint">Started (${r.batches} batches, one after another). Follow it on the Dashboard; photos upload to Drive as they pass QC.</p>`;
   } catch (e) { $("brErr").textContent = e.message; }
 }
+async function brAskPlan() {
+  const g = brGuide(), msg = $("brAsk").value.trim();
+  if (!g) { $("brPlanOut").innerHTML = '<p class="e">Upload or pick a brand guide first.</p>'; return; }
+  if (!msg) return;
+  $("brPlanOut").innerHTML = '<p class="hint">Planning…</p>';
+  try {
+    const prov = $("brProvider").value;
+    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked,
+      provider: prov, ...(prov === "openai" ? { quality: "medium" } : {}) });
+    const rows = p.batches.map((b) => `<tr><td>${esc(CAT_NAMES[b.category] || b.category)}</td><td>${b.styles.map(nice).map(esc).join(", ")}</td><td class="r">${fmt(b.models)}</td><td class="r">${b.colours}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
+    $("brPlanOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<div class="tablewrap"><table class="agenttab"><tr><th>Category</th><th>Styles</th><th class="r">Models</th><th class="r">Colours</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
+      <tr><th colspan="4">Total: ${fmt(p.total.ai_images)} AI images, ${esc(g.marketplace)} look</th><th class="r">${fmt(p.total.photos)}</th><th class="r">₹${fmt(p.total.cost_inr)}</th></tr></table></div>
+      <div class="row"><button class="btn primary" id="brPlanGo">Start: ${fmt(p.total.photos)} photos, saved to Google Drive</button></div>` : "")
+      + (p.problems.length ? `<p class="hint">Notes:<br>${p.problems.map(esc).join("<br>")}</p>` : "");
+    if (p.batches.length) $("brPlanGo").onclick = async () => {
+      try { await api("/api/agent/start", { plan_id: p.plan_id }); $("brPlanOut").innerHTML = '<p class="hint">Started: the batches run one after another on the server and upload to Google Drive as photos pass QC. Follow them on the Dashboard.</p>'; }
+      catch (e) { $("brPlanOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+    };
+  } catch (e) { $("brPlanOut").innerHTML = `<p class="e">${esc(e.message)}</p>`; }
+}
 function initBrandShoot() {
+  $("brPlanBtn").onclick = brAskPlan;
   ["#brCats", "#brTops", "#brCols"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
   $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRefreshSummary; $("brFabric").onchange = brRender;
   $("brTest").onclick = brTestRun; $("brRun").onclick = brStartRun;

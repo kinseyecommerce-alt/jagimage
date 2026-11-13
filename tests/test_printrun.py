@@ -702,3 +702,13 @@ def test_brand_guide_adult_rules_never_reach_kids():
     kid_text = studio.prompt(kid, 1, kid.bases()[0], "front_main", "none")
     assert "under 25" not in kid_text and "attitude" in kid_text
     assert "under 25" in studio.prompt(man, 1, man.bases()[0], "front_main", "none")
+
+
+def test_brand_settings_and_brand_folder():
+    from jagimage.cloud import brand_settings
+
+    g = {"marketplace": "Roadster (Myntra)", "poses": ["front_main", "side"], "custom_poses": {"side": "relaxed"},
+         "extra": "pleasant with attitude", "adult_extra": "under 25", "canvas": [1080, 1440], "background": "white"}
+    kid, man = brand_settings(g, "Kids_Girls"), brand_settings(g, "Men")
+    assert kid["adult_extra"] == "" and "smile" in kid["extra"] and man["adult_extra"] == "under 25"
+    assert man["canvas"] == [1080, 1440] and man["guide"] == "Roadster (Myntra)"

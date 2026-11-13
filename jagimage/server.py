@@ -966,7 +966,12 @@ def make_handler(app: Studio):
                     base.update(provider=other, batch=bool(base.get("batch")) and other in ("gemini", "openai"))
                     if other == "openai":
                         base["quality"] = base.get("quality") if base.get("quality") in ("medium", "high") else "medium"
-                plan = c.agent.plan(message, studio.ModelLedger(app.out), base)
+                brand = None
+                if body.get("brand"):  # a saved brand guide (Brand shoots tab): its look for every batch
+                    brand = next((g for g in c.guides() if g.get("id") == body["brand"]), None)
+                    if not brand:
+                        raise ValueError("That brand guide is gone: upload it again")
+                plan = c.agent.plan(message, studio.ModelLedger(app.out), base, brand, bool(body.get("kids_smile", True)))
                 if note:
                     plan["reply"] = (plan["reply"] + " " + note).strip()
                 plan_id = uuid.uuid4().hex[:10]
