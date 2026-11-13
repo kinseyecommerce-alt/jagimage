@@ -288,6 +288,7 @@ class Spec:
     custom_poses: Dict[str, str] = field(default_factory=dict)
     extra: str = ""          # extra instructions added to every photo's prompt
     adult_extra: str = ""    # a brand guide's rules for adult models only (age, height, measurements): not for kids
+    looks: List[str] = field(default_factory=list)  # a brand's sample model looks: model n gets look n (in turn)
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 2000x2000 JPG
@@ -349,6 +350,7 @@ class Spec:
             raise ValueError("each custom pose needs a name and a description")
         self.extra = " ".join(str(self.extra or "").split())
         self.adult_extra = " ".join(str(self.adult_extra or "").split())
+        self.looks = [" ".join(str(x).split())[:300] for x in (self.looks or []) if str(x).strip()][:8]
         self.background, self.guide = " ".join(str(self.background).split()), " ".join(str(self.guide).split())
         from .prints import PLACES
 
@@ -522,6 +524,18 @@ def backdrop(spec: Spec, pose: str) -> str:
     return L.BACKGROUNDS.get(pose, L.GREY)
 
 
+def describe_model(spec: Spec, model_no: int, hair: bool = True) -> str:
+    """Who model n is. With a brand's sample looks (adults), model n takes look n in turn (skin, hair, age and
+    manner as the brand shows them) and keeps its own face shape, eyes, nose and lips, so no two are the same."""
+    if not spec.looks or L.is_kids(spec.category):
+        return faces.describe(spec.category, model_no, hair=hair)
+    f = faces.look(spec.category, model_no)
+    own = ", ".join(f[k] for k in ("face", "eyes", "nose", "lips", "brows", "beard") if k in f)
+    who = "a young man" if spec.category == "Men" else "a young woman"
+    look = spec.looks[(model_no - 1) % len(spec.looks)]
+    return f"{who}, {look}, {own}" + ("" if hair else ", hairstyle exactly as in the reference photo")
+
+
 def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     """reference: 'none' (first base front: new face from the text), 'face' (other base fronts:
     image 1 is the model's first front), 'front' (poses of the first base: image 1 is this base's
@@ -554,7 +568,7 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
         lines = {k: v.replace("Create a new full-body photo. ", TOP_ONLY_NEW_PHOTO) for k, v in lines.items()}
         pose_text = pose_text.replace("weight slightly on one leg", "relaxed natural posture")
     text = (f"{lines[reference]}Real photograph of a real, living human model (not a mannequin, dummy, doll or 3D figure): "
-            f"{faces.describe(spec.category, model_no, hair=reference == 'none')}, {pose_text}. "
+            f"{describe_model(spec, model_no, hair=reference == 'none')}, {pose_text}. "
             f"Wearing {top_text}, fabric: {L.FABRIC_TEXT[spec.fabric][L.FABRIC_KIND[spec.top]]}; "
             f"with {bottom_text}" + (f", fabric: {L.FABRIC_TEXT[spec.fabric]['bottom']}" if bcol else "") +
             ("" if top_only else f"; and {shoes}") +
@@ -962,7 +976,7 @@ class Batch:
         md = self.model_dir(m)
         md.mkdir(parents=True, exist_ok=True)
         (md / "model.json").write_text(json.dumps({"model": m, "look": faces.look(spec.category, m),
-                                                    "description": faces.describe(spec.category, m)}, indent=2))
+                                                    "description": describe_model(spec, m)}, indent=2))
         bases = spec.bases(m)
         first_front = self.identity_front(m, bases)
         poses = ["front_main"] + [p for p in spec.poses if p != "front_main"]

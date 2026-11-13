@@ -723,6 +723,11 @@ never invent rules it does not state.
   (flat lay, ghost mannequin, fabric swatch on its own, size chart): name those in not_applied.
 - model: its directions about the model's look and manner that suit a model of any age (expression, attitude,
   makeup, hair, grooming, skin tone, accessories, footwear, body language, styling), as one short paragraph.
+- model_looks: the brand's sample models (its example model photos and any written model prompts or
+  descriptions), one entry each, so new AI models can share the brand's look without copying anyone: gender
+  ("male" or "female") and look: one line for an image generator (apparent age, skin tone and undertone, hair
+  colour, texture, length and style, face character, makeup or grooming, build, expression), never a name or a
+  copy of one real person's exact features. Up to 8, men and women as the guide shows them. Empty when it has none.
 - adult_model: its rules that only fit adult models (age limits such as "under 25", height, shoulder, chest,
   waist and hip measurements, body type such as lean and athletic), one short paragraph, for men and women
   separately when it gives both (e.g. "Men: ... Women: ..."). Empty when it says nothing. These are never
@@ -742,6 +747,8 @@ GUIDE_SCHEMA = {
         "poses": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string"}, "direction": {"type": "string"}}, "required": ["name", "direction"]}},
         "model": {"type": "string"}, "adult_model": {"type": "string"}, "avoid": {"type": "string"},
+        "model_looks": {"type": "array", "items": {"type": "object", "properties": {
+            "gender": {"type": "string"}, "look": {"type": "string"}}, "required": ["gender", "look"]}},
         "not_applied": {"type": "string"},
         "summary": {"type": "string"},
     },
@@ -846,8 +853,8 @@ def guide_content(filename: str, data: bytes):
 
             reader = PdfReader(io.BytesIO(data))
             text = "\n".join((page.extract_text() or "") for page in reader.pages[:40])[:400_000]
-            for page in reader.pages[:12]:
-                for img in getattr(page, "images", [])[:3]:
+            for page in reader.pages[:30]:  # brand decks show their sample models further in
+                for img in getattr(page, "images", [])[:2]:
                     pics.append(picture(img.data))
         elif ext == ".docx":
             with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -872,7 +879,7 @@ def guide_content(filename: str, data: bytes):
     except Exception as exc:  # a damaged PDF or Word file
         raise ValueError(f"That file can't be read ({type(exc).__name__}): is it a damaged {ext or 'file'}?") from exc
     text = re.sub(r"[ \t]+", " ", text).strip()[:40000]
-    pics = [p for p in pics if p][:6]
+    pics = [p for p in pics if p][:10]
     if not text and not pics:
         raise ValueError("Nothing readable in that file. If it is a scanned PDF, upload screenshots of its pages instead.")
     return text, pics
@@ -890,6 +897,8 @@ def brand_settings(guide: dict, category: str, kids_smile: bool = True, backgrou
     out = {"poses": list(guide.get("poses") or ["front_main"]), "custom_poses": dict(guide.get("custom_poses") or {}),
            "extra": extra[:1000], "adult_extra": "" if kids else (guide.get("adult_extra") or ""),
            "background": (background or guide.get("background") or "")[:200], "guide": (guide.get("marketplace") or "")[:80]}
+    if not kids and (guide.get("looks") or {}).get(category):  # the brand's sample models: adults only
+        out["looks"] = list(guide["looks"][category])
     if guide.get("relaxed"):  # relaxed poses: a hand may rest in a pocket
         out["hands_free"] = False
     if guide.get("canvas"):
@@ -943,6 +952,11 @@ def clean_guide(ans: dict, filename: str) -> dict:
                                 "front of the top fully visible and not covered by the arms; "
                                 + custom.get("front_main", "").split("; ", 1)[-1])
     backgrounds = [words(b, 200) for b in (ans.get("backgrounds") or []) if isinstance(b, str) and words(b, 200)][:4]
+    looks = {"Men": [], "Women": []}
+    for x in (ans.get("model_looks") or [])[:8]:
+        if isinstance(x, dict) and words(x.get("look"), 300):
+            who = "Women" if str(x.get("gender") or "").lower().startswith(("f", "w")) else "Men"
+            looks[who].append(words(x.get("look"), 300).rstrip("."))
     model, avoid = words(ans.get("model"), 600).rstrip("."), words(ans.get("avoid"), 300).rstrip(".")
     extra = model + (". " if model and avoid else "") + (f"Avoid: {avoid}" if avoid else "")
     if len(extra) > 1000:  # cut at the last whole item, never in the middle of a word
@@ -950,7 +964,7 @@ def clean_guide(ans: dict, filename: str) -> dict:
     return {"marketplace": words(ans.get("marketplace"), 60) or os.path.splitext(filename)[0][:60],
             "canvas": canvas, "background": (backgrounds[0] if backgrounds else words(ans.get("background"), 200)),
             "backgrounds": backgrounds or ([words(ans.get("background"), 200)] if ans.get("background") else []),
-            "relaxed": relaxed,
+            "relaxed": relaxed, "looks": {k: v for k, v in looks.items() if v},
             "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
             "extra": extra, "adult_extra": words(ans.get("adult_model"), 600).rstrip("."),
             "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),

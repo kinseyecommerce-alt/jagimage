@@ -1007,6 +1007,7 @@ function guideHtml(g) {
     + li("Framing", g.shot === "top" ? "Top only (head to above the knee)" : g.shot === "outfit" ? "Full length (head to shoes)" : "")
     + li("Poses", g.poses.map(label).join(", ")) + li("Model directions", g.extra)
     + li("Adult models only (never for kids)", g.adult_extra)
+    + li("Sample model looks", Object.entries(g.looks || {}).map(([k, v]) => `${k}: ${v.length}`).join(", "))
     + `</ul>` + (g.not_applied ? `<p class="hint">Not done by the app (do these yourself): ${esc(g.not_applied)}</p>` : "");
 }
 function applyGuide(g) {
@@ -1144,7 +1145,7 @@ function brBody(g, cat, tops, cols) {
     top_colours: cols, fabric: $("brFabric").value, pairing: "match", models: +$("brModels").value || 1,
     poses: g.poses, custom_poses: g.custom_poses || {}, extra: extra.slice(0, 1000), adult_extra: kids ? "" : (g.adult_extra || ""),
     canvas: g.canvas || [2000, 2000], background: $("brBg").value || g.background || "", guide: g.marketplace, ...(g.shot ? { shot: g.shot } : {}),
-    ...(g.relaxed ? { hands_free: false } : {}),
+    ...(g.relaxed ? { hands_free: false } : {}), looks: kids ? [] : ((g.looks || {})[cat] || []),
     provider: $("brProvider").value, ...($("brProvider").value === "openai" ? { quality: "medium" } : {}) };
 }
 function brPlan() {

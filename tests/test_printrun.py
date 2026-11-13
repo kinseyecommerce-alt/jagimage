@@ -727,3 +727,18 @@ def test_brand_guide_backgrounds_and_relaxed_front():
     assert b["background"].startswith("white") and b["hands_free"] is False
     sp = studio.Spec(category="Men", top="HalfSleeveTee", top_colours=["Black"], background=g["background"])
     assert "Studio background: warm beige wall" in studio.backdrop(sp, "front_main")
+
+
+def test_brand_sample_looks_go_to_adult_models_in_turn():
+    from jagimage import studio
+    from jagimage.cloud import brand_settings, clean_guide
+
+    g = clean_guide({"marketplace": "Roadster (Myntra)", "poses": [], "summary": "x", "model_looks": [
+        {"gender": "female", "look": "early 20s, warm golden-brown skin, dark curly hair in a messy high bun"},
+        {"gender": "female", "look": "early 20s, sun-kissed olive skin, shoulder-length curly golden-brown hair"},
+        {"gender": "male", "look": "early 20s, medium brown skin, short textured dark hair"}]}, "r.pdf")
+    assert len(g["looks"]["Women"]) == 2 and len(g["looks"]["Men"]) == 1
+    assert "looks" not in brand_settings(g, "Kids_Girls")
+    w = studio.Spec(category="Women", top="HalfSleeveTee", top_colours=["Black"], looks=brand_settings(g, "Women")["looks"])
+    assert "messy high bun" in studio.describe_model(w, 1) and "olive" in studio.describe_model(w, 2)
+    assert studio.describe_model(w, 1) != studio.describe_model(w, 3)  # same look, own face
