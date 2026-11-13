@@ -351,7 +351,16 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field" style="flex:2"><span>SKU pattern</span><input type="text" id="drPattern" placeholder="{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"></label>
       <label class="field"><span>Brand</span><input type="text" id="drBrand" placeholder="SPB"></label>
     </div>
-    <p class="hint">SKU pattern fields: {BRAND} {CAT} (M, W, KB, KG) {CATEGORY} {STYLE} (HS, FS, SL, OS, SW, HD, ZH) {STYLE_NAME} {FABRIC} (CM, PC) {COLOUR} {COL3} {PRINT} (the print's file name) {N} (running number). Example: <span id="drExample"></span></p>
+    <div class="field"><span>SKU builder: pick each part in order (the pattern box above fills itself)</span>
+      <div id="skuParts" style="display:flex;flex-wrap:wrap"></div>
+      <div class="row" style="gap:10px;align-items:end">
+        <label class="field"><span>Between parts</span><select id="skuSep"><option value="-">- (dash)</option><option value="_">_ (underscore)</option><option value="">nothing</option></select></label>
+        <button class="btn" id="skuAdd" type="button">+ Add a part</button>
+        <button class="btn primary" id="skuSave" type="button">Save SKU format</button>
+        <span class="hint" id="skuSaved"></span>
+      </div>
+    </div>
+    <p class="hint">Your SKU will look like: <b id="drExample"></b> · Parts: Brand, Category code (M, W, KB, KG), Style code (HS, FS, SL, OS, SW, HD, ZH), Fabric code (CM, PC), Colour, Colour first 3 letters, Print number (the design number in the print's file name), Running number (0001…), or your own fixed text.</p>
     <div class="row"><button class="btn primary" id="drStart" type="button">Start printing</button><button class="btn hide" id="drStop" type="button">Stop</button></div>
     <p class="e" id="drErr"></p>
     <div id="drStatus" class="hint"></div>
@@ -1070,7 +1079,38 @@ function initGuide() {
 }
 
 // ---------- print from Drive links: a print run on the server (jagimage.printrun)
-const SKU_DEMO = { BRAND: "SPB", CAT: "KB", CATEGORY: "KIDSBOYS", STYLE: "HS", STYLE_NAME: "HALFSLEEVETEE", FABRIC: "PC", COLOUR: "RED", COL3: "RED", PRINT: "DINO01", N: "0001" };
+const SKU_DEMO = { BRAND: "SPB", CAT: "M", CATEGORY: "MEN", STYLE: "HS", STYLE_NAME: "HALFSLEEVETEE", FABRIC: "CM", COLOUR: "BLACK", COL3: "BLA", PRINT: "319", N: "0001" };
+const SKU_PARTS = [["BRAND", "Brand"], ["CAT", "Category code"], ["CATEGORY", "Category name"], ["STYLE", "Style code"],
+  ["STYLE_NAME", "Style name"], ["FABRIC", "Fabric code"], ["COLOUR", "Colour"], ["COL3", "Colour (3 letters)"],
+  ["PRINT", "Print number"], ["N", "Running number"], ["TEXT", "Your own text…"]];
+function skuSlot(v = "BRAND", text = "") {
+  const d = document.createElement("span"); d.style.cssText = "display:inline-flex;flex-wrap:nowrap;gap:4px;align-items:center;margin:0 6px 6px 0";
+  d.innerHTML = `<select class="skuPart">${SKU_PARTS.map(([k, t]) => `<option value="${k}"${k === v ? " selected" : ""}>${t}</option>`).join("")}</select>`
+    + `<input type="text" class="skuText${v === "TEXT" ? "" : " hide"}" placeholder="e.g. SS26" value="${esc(text)}" style="width:90px">`
+    + `<button type="button" class="btn small skuDel" title="Remove this part">×</button>`;
+  d.querySelector(".skuPart").onchange = (e) => { d.querySelector(".skuText").classList.toggle("hide", e.target.value !== "TEXT"); skuCompose(); };
+  d.querySelector(".skuText").oninput = skuCompose;
+  d.querySelector(".skuDel").onclick = () => { d.remove(); skuCompose(); };
+  $("skuParts").appendChild(d);
+}
+function skuCompose() {  // the parts picked, in order -> the pattern
+  const sep = $("skuSep").value;
+  $("drPattern").value = [...$("skuParts").children].map((d) => {
+    const k = d.querySelector(".skuPart").value;
+    return k === "TEXT" ? d.querySelector(".skuText").value.replace(/[^A-Za-z0-9]/g, "").toUpperCase() : `{${k}}`;
+  }).filter(Boolean).join(sep);
+  skuExample();
+}
+function skuLoad(pattern) {  // a saved pattern -> the builder's parts
+  $("skuParts").innerHTML = "";
+  const sep = (pattern.match(/\}([-_])\{/) || [])[1];
+  $("skuSep").value = sep !== undefined ? sep : (/\}\{/.test(pattern) ? "" : "-");
+  const bits = pattern.split(/(\{[A-Za-z_0-9]+\})/).filter((b) => b && !/^[-_]+$/.test(b));
+  for (const b of bits) {
+    const m = b.match(/^\{([A-Za-z_0-9]+)\}$/);
+    if (m) skuSlot(m[1].toUpperCase()); else skuSlot("TEXT", b.replace(/[-_]/g, ""));
+  }
+}
 function skuExample() {
   const pat = $("drPattern").value || "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}", brand = ($("drBrand").value || "SPB").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   $("drExample").textContent = pat.replace(/\{([A-Za-z_0-9]+)\}/g, (m, k) => k.toUpperCase() === "BRAND" ? brand : (SKU_DEMO[k.toUpperCase()] ?? "")).replace(/[^A-Za-z0-9_-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
@@ -1078,8 +1118,14 @@ function skuExample() {
 async function initDriveRun() {
   const places = (await api("/api/prints")).places || {};
   $("drPlace").innerHTML = Object.entries(places).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
-  const shop = await api("/api/shop"); $("drPattern").value = shop.sku_pattern; $("drBrand").value = shop.brand; skuExample();
-  $("drPattern").oninput = skuExample; $("drBrand").oninput = skuExample;
+  const shop = await api("/api/shop"); $("drPattern").value = shop.sku_pattern; $("drBrand").value = shop.brand;
+  skuLoad(shop.sku_pattern || "{BRAND}-{CAT}-{STYLE}-{COL3}-{PRINT}"); skuExample();
+  $("drPattern").oninput = () => { skuLoad($("drPattern").value); skuExample(); }; $("drBrand").oninput = skuExample;
+  $("skuSep").onchange = skuCompose; $("skuAdd").onclick = () => { skuSlot("N"); skuCompose(); };
+  $("skuSave").onclick = async () => {
+    try { await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value }); $("skuSaved").textContent = "Saved: " + $("drExample").textContent; }
+    catch (e) { $("skuSaved").textContent = e.message; }
+  };
   $("drStart").onclick = async () => {
     $("drErr").textContent = "";
     try {
