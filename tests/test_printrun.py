@@ -687,3 +687,18 @@ def test_white_queue_does_folders_in_turn_and_survives_a_restart(tmp_path, monke
     # a restart: a new queue on the same folder carries on with what is left
     jobs2 = {}
     assert whitejob.WhiteQueue(None, tmp_path, jobs2).resume() is not None and started[-1] == "Pure Cotton"
+
+
+def test_brand_guide_adult_rules_never_reach_kids():
+    from jagimage import studio
+    from jagimage.cloud import clean_guide
+
+    g = clean_guide({"marketplace": "Roadster (Myntra)", "poses": [{"name": "front", "direction": "relaxed, candid"}],
+                     "model": "pleasant expression with attitude", "adult_model": "under 25, lean and athletic, men 5'11\" to 6'1\"",
+                     "summary": "x", "width": 1080, "height": 1440}, "roadster.pdf")
+    assert g["adult_extra"].startswith("under 25") and g["canvas"] == [1080, 1440]
+    kid = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", top_colours=["Black"], extra=g["extra"], adult_extra=g["adult_extra"])
+    man = studio.Spec(category="Men", top="HalfSleeveTee", top_colours=["Black"], extra=g["extra"], adult_extra=g["adult_extra"])
+    kid_text = studio.prompt(kid, 1, kid.bases()[0], "front_main", "none")
+    assert "under 25" not in kid_text and "attitude" in kid_text
+    assert "under 25" in studio.prompt(man, 1, man.bases()[0], "front_main", "none")

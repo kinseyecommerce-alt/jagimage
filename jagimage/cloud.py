@@ -698,26 +698,34 @@ AGENT_SCHEMA = {
 }
 
 
-GUIDE_SYSTEM = """You read a clothing marketplace's guidelines for on-model catalogue photos (for example Myntra's
-model photography guide) for SPB Textile's Jag Studio. The studio makes AI photos of a real-looking live model
-wearing a plain, solid-colour garment (no print) on a plain studio backdrop; each photo is later recoloured to
-the exact shade. Pull out only what the guide itself says; never invent rules it does not state.
+GUIDE_SYSTEM = """You read a brand's or a clothing marketplace's guidelines for on-model catalogue photos (for example a
+brand's image direction deck for Myntra, or Myntra's or Amazon's own model photography guide) for SPB Textile's Jag
+Studio. The studio makes AI photos of a real-looking live model wearing a plain, solid-colour garment (no print) on
+a plain studio backdrop; each photo is later recoloured to the exact shade. These are the default (list view)
+catalogue photos: lifestyle, outdoor or location shots are not made here. Pull out only what the guide itself says;
+never invent rules it does not state.
 - width, height: the final photo size in pixels it asks for (its stated size, or its minimum). If it gives
   only an aspect ratio, use 1500 px on the long side (e.g. 3:4 -> 1125 x 1500). 0 when it says nothing.
-- background: the backdrop it asks for in plain words, with the hex code if it gives one (e.g. "pure white
-  (#FFFFFF)", "light grey (#F2F2F2)"). Empty when it says nothing.
+- background: the studio backdrop it asks for in the default / list-view photos, in plain words, with the hex code
+  if it gives one (e.g. "pure white (#FFFFFF)", "warm beige (#EFE6DA) seamless"). When it allows several, pick
+  the first plain one it names. Never a lifestyle, outdoor or room setting. Empty when it says nothing.
 - framing: "full" when it wants full-length head-to-toe photos, "top" when it wants topwear shot from the head
-  to the waist or knee, empty when it says nothing.
+  to the waist or knee (cropped to the product), empty when it says nothing.
 - poses: every on-model shot it asks for, in its order. name: a short English snake_case name such as front,
-  back, side, three_quarter, walking, detail_closeup. direction: one plain sentence for the model and camera
-  (body angle, head, arms, hands, expression) using only what the guide says. Leave out shots without a
-  model (flat lay, ghost mannequin, fabric swatch, size chart): name those in not_applied.
-- model: its directions about the model's look and manner (expression, makeup, hair, grooming, accessories,
-  footwear, body language), as one short paragraph.
+  back, side, three_quarter, walking, look_shot, detail_closeup. direction: one plain sentence for the model and
+  camera (body angle, head, arms, hands, expression) using only what the guide says, including its pose and
+  expression rules (e.g. relaxed and candid, not stiff, not smiling widely). Leave out shots without a model
+  (flat lay, ghost mannequin, fabric swatch on its own, size chart): name those in not_applied.
+- model: its directions about the model's look and manner that suit a model of any age (expression, attitude,
+  makeup, hair, grooming, skin tone, accessories, footwear, body language, styling), as one short paragraph.
+- adult_model: its rules that only fit adult models (age limits such as "under 25", height, shoulder, chest,
+  waist and hip measurements, body type such as lean and athletic), one short paragraph, for men and women
+  separately when it gives both (e.g. "Men: ... Women: ..."). Empty when it says nothing. These are never
+  applied to kids.
 - avoid: what it forbids for the photo or the model, as a short comma-separated list.
-- not_applied: its rules this app cannot follow by itself (file naming, file size, number of images,
-  product-only shots, size charts, text overlays it allows, ...), briefly.
-- marketplace: the marketplace's name, e.g. Myntra.
+- not_applied: its rules this app cannot follow by itself (file naming, file size, number of images, lifestyle
+  or outdoor shots, product-only shots, size charts, approved studios, text overlays it allows, ...), briefly.
+- marketplace: the brand's name and the marketplace, e.g. "Roadster (Myntra)", or the marketplace alone.
 - summary: two to four short plain sentences for the shop owner saying what will be used."""
 
 GUIDE_SCHEMA = {
@@ -727,7 +735,8 @@ GUIDE_SCHEMA = {
         "background": {"type": "string"}, "framing": {"type": "string"},
         "poses": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string"}, "direction": {"type": "string"}}, "required": ["name", "direction"]}},
-        "model": {"type": "string"}, "avoid": {"type": "string"}, "not_applied": {"type": "string"},
+        "model": {"type": "string"}, "adult_model": {"type": "string"}, "avoid": {"type": "string"},
+        "not_applied": {"type": "string"},
         "summary": {"type": "string"},
     },
     "required": ["marketplace", "poses", "summary"],
@@ -897,7 +906,8 @@ def clean_guide(ans: dict, filename: str) -> dict:
     return {"marketplace": words(ans.get("marketplace"), 60) or os.path.splitext(filename)[0][:60],
             "canvas": canvas, "background": words(ans.get("background"), 200),
             "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
-            "extra": extra, "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),
+            "extra": extra, "adult_extra": words(ans.get("adult_model"), 600).rstrip("."),
+            "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),
             "file": filename[:120]}
 
 

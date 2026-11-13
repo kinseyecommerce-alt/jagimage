@@ -442,8 +442,8 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 </div>
 <div id="marketTab" class="hide tabpage">
   <section class="panel" id="guidePanel">
-      <h2>Marketplace guide <span class="n">optional</span></h2>
-      <p class="hint">Upload a marketplace's model photo guidelines (e.g. Myntra) as PDF, Word, text or screenshots. The AI reads it, saves it, and sets up the Studio tab with its photo size, background, poses and model directions; you pick the product and colours there, check, and run as usual. The garments stay plain.</p>
+      <h2>Brand / marketplace guide <span class="n">optional</span></h2>
+      <p class="hint">Upload a brand's image direction or a marketplace's model photo guidelines (e.g. Roadster for Myntra, or Myntra's own) as PDF (up to 30 MB), Word, text or screenshots. The AI reads it, saves it, and sets up the Studio tab with its photo size, background, poses and model directions; you pick the product and colours there, check, and run as usual. The garments stay plain.</p>
       <div class="row">
         <label class="field"><span>Guide file</span><input type="file" id="guideFile" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"></label>
         <button class="btn primary" id="guideRead">Read guide</button>
@@ -747,7 +747,7 @@ function spec() {
   return { category: S.category, top: $("top").value, bottom: $("bottom").value, fabric: S.fabric(),
     top_colours: [...S.top], bottom_colours: fixed || S.pairing === "match" ? [] : [...S.bottom], pairing: fixed ? "match" : S.pairing,
     models: +$("models").value || 1, first_model: +$("firstModel").value || 0, poses: [...S.poses],
-    custom_poses: S.customPoses, extra: $("extra").value, hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
+    custom_poses: S.customPoses, extra: $("extra").value, adult_extra: S.guideAdult || "", hands_free: $("handsFree").checked, shot: S.shot, bottom_colour: $("bottomColour").value || "Navy",
     provider: S.provider, gemini_model: $("geminiModel").value, image_size: $("imageSize").value, quality: $("quality").value,
     batch: !["runpod", "meta"].includes(S.provider) && $("batchMode").checked, keep_png: $("keepPng").checked,
     tops: [...S.moreTops].filter((t) => t !== $("top").value), same_models: $("sameModels").checked,
@@ -982,6 +982,7 @@ function guideHtml(g) {
     + li("Photo size", g.canvas ? `${g.canvas[0]} × ${g.canvas[1]} px` : "") + li("Background", g.background)
     + li("Framing", g.shot === "top" ? "Top only (head to above the knee)" : g.shot === "outfit" ? "Full length (head to shoes)" : "")
     + li("Poses", g.poses.map(label).join(", ")) + li("Model directions", g.extra)
+    + li("Adult models only (never for kids)", g.adult_extra)
     + `</ul>` + (g.not_applied ? `<p class="hint">Not done by the app (do these yourself): ${esc(g.not_applied)}</p>` : "");
 }
 function applyGuide(g) {
@@ -989,7 +990,7 @@ function applyGuide(g) {
   $("background").value = g.background || "";
   if (g.shot) { S.shot = g.shot; S.shotPicked = true; [...$("shot").children].forEach((b) => b.classList.toggle("on", b.dataset.v === S.shot)); }
   S.customPoses = { ...S.customPoses, ...g.custom_poses }; S.poses = new Set(g.poses);
-  $("extra").value = g.extra || ""; S.guide = g.marketplace;
+  $("extra").value = g.extra || ""; S.guide = g.marketplace; S.guideAdult = g.adult_extra || "";
   $("guideNote").textContent = `Settings from the ${g.marketplace} guide: check them in steps 3 and 5 before you run.`;
   $("guideBanner").innerHTML = `Marketplace guide: <b>${esc(g.marketplace)}</b> (photo size, background, poses and model directions set below) · <a href="#" id="guideClear">Clear it</a>`;
   $("guideBanner").classList.remove("hide"); $("guideGoRow").classList.remove("hide");
@@ -997,7 +998,7 @@ function applyGuide(g) {
   renderPoses(); syncBottom(); refreshPlan();
 }
 function clearGuide() {  // back to the regular studio look
-  $("photoW").value = 2000; $("photoH").value = 2000; $("background").value = ""; $("extra").value = "";
+  $("photoW").value = 2000; $("photoH").value = 2000; $("background").value = ""; $("extra").value = ""; S.guideAdult = "";
   S.guide = ""; $("guideNote").textContent = ""; $("guideBanner").classList.add("hide"); refreshPlan();
 }
 async function guidesRefresh(pick) {
@@ -1014,7 +1015,7 @@ function initGuide() {
   }
   $("guideRead").onclick = async () => {
     const f = $("guideFile").files[0]; if (!f) { $("guideOut").innerHTML = '<p class="e">Choose the guide file first.</p>'; return; }
-    if (f.size > 15e6) { $("guideOut").innerHTML = '<p class="e">That file is too big: keep it under 15 MB (or upload screenshots of the pages).</p>'; return; }
+    if (f.size > 30e6) { $("guideOut").innerHTML = '<p class="e">That file is too big: keep it under 30 MB (or upload screenshots of the pages).</p>'; return; }
     $("guideOut").innerHTML = '<p class="hint">Reading the guide… (about half a minute)</p>'; $("guideRead").disabled = true;
     try {
       const data = await new Promise((ok, bad) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result).split(",")[1] || ""); rd.onerror = bad; rd.readAsDataURL(f); });

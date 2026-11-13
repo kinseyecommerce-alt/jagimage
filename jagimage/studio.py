@@ -287,6 +287,7 @@ class Spec:
     # Your own poses (name -> description), or new wording for a library pose such as front_main.
     custom_poses: Dict[str, str] = field(default_factory=dict)
     extra: str = ""          # extra instructions added to every photo's prompt
+    adult_extra: str = ""    # a brand guide's rules for adult models only (age, height, measurements): not for kids
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 2000x2000 JPG
@@ -347,6 +348,7 @@ class Spec:
         if empty:
             raise ValueError("each custom pose needs a name and a description")
         self.extra = " ".join(str(self.extra or "").split())
+        self.adult_extra = " ".join(str(self.adult_extra or "").split())
         self.background, self.guide = " ".join(str(self.background).split()), " ".join(str(self.guide).split())
         from .prints import PLACES
 
@@ -360,7 +362,7 @@ class Spec:
         self.print_dx, self.print_dy, self.print_scale = a["dx"], a["dy"], a["scale"]
         if len(self.background) > 200 or len(self.guide) > 80:
             raise ValueError("background must be at most 200 characters and guide at most 80")
-        if len(self.extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
+        if len(self.extra) > 1000 or len(self.adult_extra) > 1000 or any(len(v) > 1000 for v in self.custom_poses.values()):
             raise ValueError("keep pose descriptions and extra instructions under 1000 characters")
         bad = [p for p in self.poses if p not in self.pose_texts()]
         if bad or "front_main" not in self.poses:
@@ -562,6 +564,8 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     text += f" {ONE_IMAGE}"
     if spec.extra:
         text += f" Also: {spec.extra.rstrip('.')}."
+    if spec.adult_extra and not kids:  # a brand's adult model rules (age, height, build) never reach a child
+        text += f" The model: {spec.adult_extra.rstrip('.')}."
     if kids:
         text += L.KIDS_RULE
     text += HAIR_RULE

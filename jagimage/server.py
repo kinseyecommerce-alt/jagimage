@@ -88,7 +88,7 @@ def load_keys(path: Path):
             os.environ[env] = value
 
 
-GUIDE_LIMIT = 21_000_000  # a guide upload: about 15 MB of file once base64-encoded
+GUIDE_LIMIT = 42_000_000  # a guide upload: about 30 MB of file once base64-encoded (brand decks full of photos)
 
 def market_options():
     from .market import MARKETS
