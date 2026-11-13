@@ -335,7 +335,7 @@ class PrintRun:
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
                  test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None,
-                 white: bool = True, save_to: str = ""):
+                 white: bool = True, save_to: str = "", with_back: bool = True):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -350,6 +350,7 @@ class PrintRun:
         self.base_path = [str(x) for x in (base_path or []) if str(x).strip()]
         # where the printed photos go on Drive: a folder link (its id), or folders in the photos folder ("Printed")
         self.save_root, self.save_parts = save_target(save_to)
+        self.with_back = with_back  # 1 print = 1 model: the model's plain back photo goes in the SKU folder too
         self.white = white  # the studio backdrop made pure white (#FFFFFF), as Amazon and Flipkart want the main image
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
@@ -611,9 +612,15 @@ class PrintRun:
                             self._note("error", sku=sku, error=str(exc))
                             self.counts["errors"] += 1
                         continue
-                    if m["back"] and not self.one_model and len(files) < self.per_sku * 2:
+                    # the same model's plain back (prints go on the front only): saved beside the printed front
+                    if m["back"] and (self.with_back or not self.one_model) and len(files) < self.per_sku * 2:
                         try:
-                            files.append(open_image(self.drive.download(m["back"]["id"])).convert("RGB"))
+                            back = open_image(self.drive.download(m["back"]["id"])).convert("RGB")
+                            if self.white:
+                                from .market import on_white
+
+                                back = on_white(back)
+                            files.append(back)
                         except PrintError:
                             pass
                 if not files:
@@ -631,7 +638,8 @@ class PrintRun:
         images = []
         for i, im in enumerate(photos, 1):
             # one model per print: the photo is named as the print file (223.png -> 223.jpg)
-            name = f"{_file_name(pname)}.jpg" if self.one_model else f"{sku}_{i}.jpg"
+            # one model per print: the front is named as the print file (223.png -> 223.jpg), its back 223_back.jpg
+            name = (f"{_file_name(pname)}.jpg" if i == 1 else f"{_file_name(pname)}_back.jpg") if self.one_model else f"{sku}_{i}.jpg"
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}

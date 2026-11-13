@@ -272,7 +272,7 @@ def test_the_print_placement_agent_moves_the_first_photo_and_the_sku_follows(tmp
     assert run.counts["fixed"] == 1 and run.skus[0]["photos"] == 3  # one look per SKU, all photos placed alike
 
 
-def test_one_print_one_model_front_only_named_as_the_print(tmp_path):
+def test_one_print_one_model_named_as_the_print_with_its_plain_back(tmp_path):
     red = jpg(tee_photo())
     path = ["Cotton Mix", "Boys", "Red", "Full sleeve"]
     tees = [{"id": f"t{i}", "name": f"m000{i}_front.jpg", "path": path, "data": red} for i in (1, 2)] + \
@@ -282,9 +282,19 @@ def test_one_print_one_model_front_only_named_as_the_print(tmp_path):
     run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True)
     run._run()
     assert run.error is None
-    assert sorted(drive.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-225/225.jpg",
-                                      "Printed/SPB-KB-FS-RED-229/229.jpg"]
-    assert all(s["photos"] == 1 for s in run.skus)
+    # the prints take models in turn: m0001 (with a back photo), m0002 (none), m0001 again
+    assert sorted(drive.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-223/223_back.jpg",
+                                      "Printed/SPB-KB-FS-RED-225/225.jpg",
+                                      "Printed/SPB-KB-FS-RED-229/229.jpg", "Printed/SPB-KB-FS-RED-229/229_back.jpg"]
+    assert [s["photos"] for s in run.skus] == [2, 1, 2]
+    tees = [{"id": f"t{i}", "name": f"m000{i}_front.jpg", "path": path, "data": red} for i in (1, 2)] + \
+           [{"id": "b1", "name": "m0001_back.jpg", "path": path, "data": red}]
+    prints = [{"id": f"p{k}", "name": f"{k}.png", "path": [], "data": art_png((250, 250, 250))} for k in (223, 225, 229)]
+    drive2 = FakeDrive(tees, prints)  # the back left out on request: fronts only
+    run2 = printrun.PrintRun(drive2, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True, with_back=False)
+    run2._run()
+    assert sorted(drive2.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-225/225.jpg",
+                                       "Printed/SPB-KB-FS-RED-229/229.jpg"]
 
 
 def test_a_test_run_uploads_nothing_and_keeps_its_photos_to_look_at(tmp_path):

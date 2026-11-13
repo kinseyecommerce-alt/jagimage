@@ -897,7 +897,8 @@ def make_handler(app: Studio):
                                one_model=bool(body.get("one_model", True)), test=bool(body.get("test")),
                                per_product=body.get("per_product") or 0, local=bool(body.get("local")),
                                base_path=tees_path, white=bool(body.get("white", True)),
-                               save_to=" ".join(str(body.get("save_to") or "").split())[:300])
+                               save_to=" ".join(str(body.get("save_to") or "").split())[:300],
+                               with_back=bool(body.get("with_back", True)))
                 c.printruns[run.id] = run.start()
                 return self._json(run.status())
             if len(parts) == 4 and parts[:2] == ["api", "printruns"] and parts[3] == "approve":
