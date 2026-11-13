@@ -772,3 +772,11 @@ def test_lifestyle_shots_are_extra_location_photos():
     import re
     from jagimage.catalogue import JPG
     assert JPG.match("lifestyle_a_1080x1440.jpg")["pose"] == "lifestyle_a"
+
+
+def test_brand_shoot_poses_can_leave_out_the_side_view():
+    from jagimage.cloud import brand_settings
+
+    g = {"marketplace": "Roadster (Myntra)", "poses": ["front_main", "side", "back", "look_shot"], "custom_poses": {}}
+    assert brand_settings(g, "Men", poses=["back"])["poses"] == ["front_main", "back"]
+    assert brand_settings(g, "Men")["poses"] == ["front_main", "side", "back", "look_shot"]

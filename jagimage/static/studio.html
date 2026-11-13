@@ -468,6 +468,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="field"><span>Categories</span><div class="chips" id="brCats"></div></div>
     <div class="field"><span>Styles</span><div class="chips" id="brTops"></div></div>
     <div class="field"><span>Colours</span><div class="chips" id="brCols"></div></div>
+    <div class="field"><span>Poses (from the brand guide; front is always made)</span><div class="chips" id="brPoses"></div></div>
     <div class="field"><span>Lifestyle shots from the guide (extra photos per model, after the studio ones; never the main photo)</span><div class="chips" id="brLife"></div></div>
     <label class="check"><input type="checkbox" id="brKidSmile" checked> <span>Kids keep a natural cheerful smile (brand expression rules are written for adults)</span></label>
     <p class="hint" id="brSummary"></p>
@@ -1143,7 +1144,7 @@ const brPicked = (id) => [...$(id).querySelectorAll("input:checked")].map((i) =>
 function brGuide() { return (S.guides || []).find((g) => g.id === $("brGuide").value); }
 function brBody(g, cat, tops, cols) {
   const kids = cat.startsWith("Kids");
-  const life = brPicked("#brLife"), poses = [...(g.poses || [])], custom = { ...(g.custom_poses || {}) }, scenes = {};
+  const life = brPicked("#brLife"), poses = ["front_main", ...brPicked("#brPoses").filter((p) => p !== "front_main")], custom = { ...(g.custom_poses || {}) }, scenes = {};
   life.forEach((scene, i) => { const p = "lifestyle_" + "abcdef"[i]; poses.push(p); custom[p] = LIFESTYLE_POSE; scenes[p] = scene; });
   const extra = [g.extra || "", kids && $("brKidSmile").checked ? "For this child: a natural, soft cheerful smile is right" : ""].filter(Boolean).join(". ");
   return { category: cat, top: tops[0], tops: tops.slice(1), auto_bottom: true, bottom: (S.opts.bottom_defaults || {})[tops[0]] || "Trackpants",
@@ -1161,7 +1162,7 @@ function brPlan() {
 function brRefreshSummary() {
   const { g, jobs, cols } = brPlan();
   if (!g) { $("brSummary").textContent = "Upload a brand guide above first."; return; }
-  const models = +$("brModels").value || 1, poses = (g.poses || []).length + brPicked("#brLife").length;
+  const models = +$("brModels").value || 1, poses = 1 + brPicked("#brPoses").length + brPicked("#brLife").length;
   const styles = jobs.reduce((n, [, t]) => n + t.length, 0);
   $("brSummary").textContent = `${g.marketplace}: ${g.canvas ? g.canvas[0] + " × " + g.canvas[1] + " px, " : ""}${poses} poses${g.relaxed ? ", relaxed stance" : ""}. `
     + `${jobs.length} categories × ${styles ? Math.round(styles / Math.max(1, jobs.length)) : 0} styles on average × ${models} models × ${cols.length} colours `
@@ -1175,6 +1176,9 @@ function brRender() {
   const was = $("brBg").value;
   $("brBg").innerHTML = [...new Set(bgs)].map((b) => `<option value="${esc(b)}">${esc(b.length > 90 ? b.slice(0, 88) + "…" : b)}</option>`).join("");
   if (bgs.includes(was)) $("brBg").value = was;
+  const posesWas = brPicked("#brPoses"), guidePoses = ((g && g.poses) || []).filter((p) => p !== "front_main");
+  const keepPoses = posesWas.filter((p) => guidePoses.includes(p));
+  brChips("#brPoses", guidePoses.map((p) => [p, label(p)]), keepPoses.length ? keepPoses : guidePoses.filter((p) => p !== "side"));
   const lifeWas = brPicked("#brLife");
   brChips("#brLife", ((g && g.lifestyle) || []).map((x) => [x, x.length > 70 ? x.slice(0, 68) + "…" : x]), lifeWas);
   if (g && !(g.lifestyle || []).length) $("brLife").innerHTML = '<span class="hint">This guide shows no lifestyle backgrounds.</span>';
@@ -1188,7 +1192,7 @@ function brRender() {
 async function brTestRun() {
   const { g, jobs, cols } = brPlan(); $("brErr").textContent = "";
   if (!g || !jobs.length || !cols.length) { $("brErr").textContent = "Pick a brand, at least one category, style and colour."; return; }
-  const pose = (g.poses || []).find((p) => p !== "front_main") || "front_main";
+  const pose = brPicked("#brPoses").includes("back") ? "back" : (brPicked("#brPoses")[0] || brPicked("#brLife").length && "lifestyle_a" || "front_main");
   $("brTest").disabled = $("brRun").disabled = true;
   $("brOut").innerHTML = `<p class="hint">Making one test model per category in ${esc(nice(jobs[0][1][0]))}, ${esc(cols[0])}: front and ${esc(label(pose))}…</p><div class="gallery" id="brGal"></div>`;
   try {
@@ -1225,7 +1229,7 @@ async function brAskPlan() {
   $("brPlanOut").innerHTML = '<p class="hint">Planning…</p>';
   try {
     const prov = $("brProvider").value;
-    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked, background: $("brBg").value, lifestyle: brPicked("#brLife"),
+    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked, background: $("brBg").value, lifestyle: brPicked("#brLife"), poses: ["front_main", ...brPicked("#brPoses")],
       provider: prov, ...(prov === "openai" ? { quality: "medium" } : {}) });
     const rows = p.batches.map((b) => `<tr><td>${esc(CAT_NAMES[b.category] || b.category)}</td><td>${b.styles.map(nice).map(esc).join(", ")}</td><td class="r">${fmt(b.models)}</td><td class="r">${b.colours}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
     $("brPlanOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<div class="tablewrap"><table class="agenttab"><tr><th>Category</th><th>Styles</th><th class="r">Models</th><th class="r">Colours</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
@@ -1240,7 +1244,7 @@ async function brAskPlan() {
 }
 function initBrandShoot() {
   $("brPlanBtn").onclick = brAskPlan;
-  ["#brCats", "#brTops", "#brCols", "#brLife"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
+  ["#brCats", "#brTops", "#brCols", "#brLife", "#brPoses"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
   $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRender; $("brFabric").onchange = brRender;
   $("brTest").onclick = brTestRun; $("brRun").onclick = brStartRun;
   if (!isAdmin()) $("brRun").classList.add("hide");

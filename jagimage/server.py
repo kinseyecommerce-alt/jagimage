@@ -973,7 +973,8 @@ def make_handler(app: Studio):
                         raise ValueError("That brand guide is gone: upload it again")
                 plan = c.agent.plan(message, studio.ModelLedger(app.out), base, brand, bool(body.get("kids_smile", True)),
                                     " ".join(str(body.get("background") or "").split())[:200],
-                                    [str(x)[:250] for x in (body.get("lifestyle") or []) if isinstance(x, str)][:6])
+                                    [str(x)[:250] for x in (body.get("lifestyle") or []) if isinstance(x, str)][:6],
+                                    [str(x)[:40] for x in (body.get("poses") or []) if isinstance(x, str)][:12])
                 if note:
                     plan["reply"] = (plan["reply"] + " " + note).strip()
                 plan_id = uuid.uuid4().hex[:10]

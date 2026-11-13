@@ -895,7 +895,7 @@ LIFESTYLE_POSE = ("lifestyle shot: a relaxed, candid full-body pose that suits t
 
 
 def brand_settings(guide: dict, category: str, kids_smile: bool = True, background: str = "",
-                   lifestyle: Optional[list] = None) -> dict:
+                   lifestyle: Optional[list] = None, poses: Optional[list] = None) -> dict:
     """A saved brand guide as batch settings for one category: its photo size, backdrop, framing, poses and
     model directions; its adult rules (age, height, build) only for Men and Women."""
     from . import library as L
@@ -904,7 +904,10 @@ def brand_settings(guide: dict, category: str, kids_smile: bool = True, backgrou
     extra = guide.get("extra") or ""
     if kids and kids_smile:  # brand expression rules are written for adults
         extra = (extra + ". " if extra else "") + "For this child: a natural, soft cheerful smile is right"
-    out = {"poses": list(guide.get("poses") or ["front_main"]), "custom_poses": dict(guide.get("custom_poses") or {}),
+    chosen = list(guide.get("poses") or ["front_main"])
+    if poses:  # the shop's pick of the brand's poses (e.g. no side view); the front is always made
+        chosen = ["front_main"] + [p for p in chosen if p in poses and p != "front_main"]
+    out = {"poses": chosen, "custom_poses": dict(guide.get("custom_poses") or {}),
            "extra": extra[:1000], "adult_extra": "" if kids else (guide.get("adult_extra") or ""),
            "background": (background or guide.get("background") or "")[:200], "guide": (guide.get("marketplace") or "")[:80]}
     scenes = [str(x) for x in (lifestyle or []) if str(x).strip()][:6]  # extra lifestyle photos, after the studio ones
@@ -1058,7 +1061,7 @@ class Agent:
         raise last
 
     def plan(self, message: str, ledger, base: dict, brand: Optional[dict] = None, kids_smile: bool = True,
-             background: str = "", lifestyle: Optional[list] = None) -> dict:
+             background: str = "", lifestyle: Optional[list] = None, poses: Optional[list] = None) -> dict:
         """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...).
         brand: a saved brand guide: every batch gets its photo size, backdrop, poses and model directions."""
         from . import library as L
@@ -1095,7 +1098,7 @@ class Agent:
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses, "auto_bottom": auto_bottom}
                 if brand:
-                    body.update(brand_settings(brand, category, kids_smile, background, lifestyle))
+                    body.update(brand_settings(brand, category, kids_smile, background, lifestyle, poses))
                     poses = body["poses"]
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]
