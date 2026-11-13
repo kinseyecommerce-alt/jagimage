@@ -818,3 +818,17 @@ def test_a_sorted_print_library_puts_each_print_on_its_own_category_and_colour()
     assert print_fits(["BOYS", "TOP WEAR", "Black"], {"category": "Kids_Boys", "colour": "Black"})
     assert print_fits([], men_black)  # a flat prints folder: every print may go on every product
     assert print_code("SK_VN_MENS_HS_319_YLW_Final") == "319" and print_code("MENS_FULL SLEEVE_96_YELLOW_Final") == "96"
+
+
+def test_library_prints_go_on_the_sleeve_their_name_says():
+    from jagimage.printrun import print_fits
+
+    half = {"category": "Men", "colour": "Black", "style": "HalfSleeveTee"}
+    full = {**half, "style": "FullSleeveTee"}
+    vest = {**half, "style": "SleevelessTee"}
+    path = ["MENS", "TOP WEAR", "Black"]
+    assert print_fits(path, half, "SK_VN_MENS_HS_319_YLW_Final") and not print_fits(path, full, "SK_VN_MENS_HS_319_YLW_Final")
+    assert print_fits(path, full, "MENS_FULL SLEEVE_96_YELLOW_Final") and not print_fits(path, half, "MENS_FULL SLEEVE_96_YELLOW_Final")
+    assert print_fits(path, vest, "INK_MEN_SLS_423_BLUE_final") and not print_fits(path, half, "INK_MEN_SLS_423_BLUE_final")
+    assert print_fits(path, full, "RTT_SS_MENS_FS_409_Final")  # the maker's "SS" is not a sleeve
+    assert print_fits(path, {**half, "style": "Hoodie"}, "Unicorn 02")  # no sleeve in the name: any style

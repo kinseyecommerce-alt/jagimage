@@ -224,10 +224,25 @@ def _colour_key(name: str) -> str:
     return re.sub(r"[^a-z]", "", str(name).lower())
 
 
-def print_fits(path: List[str], product: dict) -> bool:
+PRINT_STYLES = [(r"half[ _-]*sleeve|(?<![a-z])hs(?![a-z])", "HalfSleeveTee"),
+                (r"full[ _-]*sleeve|(?<![a-z])fs(?![a-z])", "FullSleeveTee"),
+                (r"sleeveless|(?<![a-z])sls(?![a-z])", "SleevelessTee")]
+
+
+def print_style(print_name: str) -> str:
+    """The sleeve a library print is made for, from its file name (HS / HALF SLEEVE, FS / FULL SLEEVE,
+    SLS / SLEEVELESS); "" when the name doesn't say."""
+    name = str(print_name).lower().replace("_", " ")
+    return next((style for rx, style in PRINT_STYLES if re.search(rx, name)), "")
+
+
+def print_fits(path: List[str], product: dict, print_name: str = "") -> bool:
     """Whether a print filed at `path` in the print library (e.g. MENS / TOP WEAR / Black) belongs on this product:
     the same category (Men, Women, Boys, Girls), top wear only, and the same shirt colour ("Grey Melange" matches
     Melange). A print with no such folders fits every product."""
+    style = print_style(print_name)  # a print made for one sleeve goes only on that style
+    if style and product.get("style") and product["style"] != style:
+        return False
     parts = [str(x).strip() for x in path if str(x).strip()]
     if not parts:
         return True
@@ -536,7 +551,7 @@ class PrintRun:
             for pname, art, ppath in arts:
                 if self.stop.is_set() or (self.limit and len(self.skus) >= self.limit):
                     break
-                if not print_fits(ppath, prod):  # filed for another category or shirt colour
+                if not print_fits(ppath, prod, pname):  # filed for another category, colour or sleeve
                     continue
                 if self.per_product and made_here >= self.per_product:
                     break  # this product (a style in a colour) has its prints
