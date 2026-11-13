@@ -210,6 +210,14 @@ PRINT_CATEGORY = [("women", "Women"), ("ladies", "Women"), ("girl", "Kids_Girls"
                   ("gents", "Men"), ("kid", "Kids")]
 
 
+WHITE_FOLDER = "White background"  # the pure white copies: White background/<save folders>/<SKU>/<same name>
+
+
+def white_path(local: Path) -> Path:
+    """Where a photo's pure white copy waits on the server: 319.jpg -> 319.white.jpg."""
+    return local.with_name(local.stem + ".white.jpg")
+
+
 def save_target(save_to: str):
     """(root folder id, folders) for printed photos: a pasted Drive folder link puts them right in that folder
     (<link>/<SKU>/...); a name like "Printed" or "Roadster/Printed" is a folder in the photos folder."""
@@ -335,7 +343,7 @@ class PrintRun:
                  place: str = "chest_large", per_sku: int = 5, brand: str = "SPB", pattern: str = DEFAULT_PATTERN,
                  limit: int = 0, label: str = "", checker: Optional[Callable] = None, one_model: bool = False,
                  test: bool = False, per_product: int = 0, local: bool = False, base_path: Optional[List[str]] = None,
-                 white: bool = True, save_to: str = "", with_back: bool = True):
+                 white: bool = False, save_to: str = "", with_back: bool = True, white_copy: bool = True):
         if place not in PLACES:
             raise ValueError(f"place must be one of {', '.join(PLACES)}")
         self.id = uuid.uuid4().hex[:8]
@@ -351,6 +359,8 @@ class PrintRun:
         # where the printed photos go on Drive: a folder link (its id), or folders in the photos folder ("Printed")
         self.save_root, self.save_parts = save_target(save_to)
         self.with_back = with_back  # 1 print = 1 model: the model's plain back photo goes in the SKU folder too
+        # every photo also on pure white (#FFFFFF) for Amazon and Flipkart, same name, in "White background/..."
+        self.white_copy = white_copy and not white
         self.white = white  # the studio backdrop made pure white (#FFFFFF), as Amazon and Flipkart want the main image
         self.local = local  # local checks: suitability and placement on the server (no AI cost per SKU)
         self.per_product = max(0, int(per_product or 0))  # at most this many prints on each product (0: all that suit it)
@@ -376,7 +386,9 @@ class PrintRun:
         return {"id": self.id, "live": True, "label": self.label, "stage": self.stage, "counts": dict(self.counts), "error": self.error,
                 "running": self.finished is None, "elapsed": round((self.finished or time.time()) - self.started),
                 "skus": [{**{k: s[k] for k in ("sku", "category", "style", "colour", "print", "photos")},
-                          "view": next((i["view"] for i in s.get("images", []) if i.get("view")), None)} for s in self.skus[-200:]],
+                          "view": next((i["view"] for i in s.get("images", []) if i.get("view")), None),
+                          "white_view": next((i["white_view"] for i in s.get("images", []) if i.get("white_view")), None)}
+                         for s in self.skus[-200:]],
                 "held": [{**{k: h[k] for k in ("sku", "colour", "print", "problems")},
                           "view": next((i["view"] for i in h.get("images", []) if i.get("view")), None)} for h in self.held[-200:]],
                 "qc": printqc.summary_rows(self.qc),
@@ -643,8 +655,14 @@ class PrintRun:
             local = folder / name
             im.save(local, "JPEG", quality=95)
             row = {"name": name}
+            if self.white_copy:  # the same photo on pure white, kept beside it until it is uploaded
+                from .market import on_white
+
+                on_white(im).save(white_path(local), "JPEG", quality=95)
             if self.test or held:  # a test, or held by print QC: the photo stays on the server to look at
                 row["view"] = f"/api/printruns/{self.id}/photo/{sku}/{name}"
+                if self.white_copy:
+                    row["white_view"] = f"/api/printruns/{self.id}/photo/{sku}/{white_path(local).name}"
                 images.append(row)
                 if not held:
                     self.counts["photos"] += 1
@@ -686,6 +704,23 @@ class PrintRun:
             except Exception as exc:
                 self._note("error", sku=sku, error=f"Dropbox: {exc}"[:600])
                 self.counts["errors"] += 1
+        wlocal = white_path(local)
+        if wlocal.exists():  # the pure white copy: same name, under "White background/" (Drive and Dropbox)
+            try:
+                self.drive.upload(wlocal, [WHITE_FOLDER] + self.save_parts + [sku], name, root=self.save_root)
+                row["white_drive"] = True
+            except Exception as exc:
+                self._note("error", sku=sku, error=f"Drive (white copy): {exc}"[:200])
+                self.counts["errors"] += 1
+            if self.dropbox is not None and self.dropbox.connected:
+                try:
+                    wpath = self.dropbox.upload(wlocal.read_bytes(), WHITE_FOLDER, sku, name)
+                    row["white_dropbox"] = wpath
+                    row["white_url"] = self.dropbox.link(wpath)
+                except Exception as exc:
+                    self._note("error", sku=sku, error=f"Dropbox (white copy): {exc}"[:600])
+                    self.counts["errors"] += 1
+            wlocal.unlink(missing_ok=True)
         if first:  # the server keeps only a small first photo, for the Listing tab's AI to look at
             small = (im or Image.open(local)).convert("RGB")
             small.thumbnail((1024, 1024))

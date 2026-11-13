@@ -344,7 +344,10 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
       <label class="field"><span>Models to choose from</span><input type="number" id="drPer" value="5" min="1" max="12"></label>
       <label class="check"><input type="checkbox" id="drLocal" checked> <span>Local checks: whether a print suits a colour (by contrast) and the placement (print-shop rules, never on skin) are checked on the server for free. The AI only finds the shirt, once per model photo.</span></label>
       <label class="field" style="flex:1 1 100%"><span>Save printed photos to (Google Drive): paste a folder link, or a folder name in your photos folder. Each SKU gets its own folder inside it</span><input type="text" id="drSaveTo" placeholder="Printed   (or https://drive.google.com/drive/folders/...)"></label>
-      <label class="check"><input type="checkbox" id="drWhite" checked> <span>Pure white background (#FFFFFF): the studio backdrop and floor turn white, as Amazon and Flipkart want the main image. The model and the clothes are never touched.</span></label>
+      <label class="field" style="flex:1 1 100%"><span>Background of the saved photos</span><select id="drBgMode">
+        <option value="both" selected>Both: as photographed + a pure white copy for Amazon/Flipkart (same names, in "White background/")</option>
+        <option value="white">Pure white only (#FFFFFF)</option>
+        <option value="original">As photographed only</option></select></label>
       <label class="check"><input type="checkbox" id="drTest" checked> <span>Test only: show the photos here, upload nothing</span></label>
       <label class="check"><input type="checkbox" id="drOne" checked> <span>1 print = 1 model (print on the front, photo named as the print)</span></label>
       <label class="check"><input type="checkbox" id="drBack" checked> <span>Also save the model's plain back photo in each SKU folder (named &lt;print&gt;-back.jpg, e.g. 319-back.jpg)</span></label>
@@ -1133,7 +1136,7 @@ async function initDriveRun() {
     try {
       await api("/api/shop", { sku_pattern: $("drPattern").value, brand: $("drBrand").value });
       S.printRun = await api("/api/printruns/start", { tees: $("drTees").value, prints: $("drPrints").value, place: $("drPlace").value,
-        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drWhite").checked, save_to: $("drSaveTo").value.trim(), with_back: $("drBack").checked });
+        per_sku: +$("drPer").value, limit: +$("drLimit").value, one_model: $("drOne").checked, test: $("drTest").checked, per_product: +$("drPerProd").value, local: $("drLocal").checked, white: $("drBgMode").value === "white", white_copy: $("drBgMode").value === "both", save_to: $("drSaveTo").value.trim(), with_back: $("drBack").checked });
       driveRunRefresh();
     } catch (e) { $("drErr").textContent = e.message; }
   };
@@ -1174,7 +1177,8 @@ async function driveRunRefresh() {
     + ((r.held || []).length ? `<h4>Held by print QC (not uploaded)</h4><div class="gallery">${r.held.slice(-60).reverse().map((x) => `<div class="card"><a href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""></a><span class="cap"><b>${esc(x.sku)}</b><br>${x.problems.map(esc).join("<br>")}</span>${!r.live ? "" : `<button class="small" onclick="drApprove('${esc(r.id)}','${esc(x.sku)}')">Approve</button>`}</div>`).join("")}</div>` : "")
     + ((r.skus || []).length ? `<div class="tablewrap"><table class="agenttab"><tr><th>SKU</th><th>Category</th><th>Style</th><th>Colour</th><th>Print</th><th class="r">Photos</th></tr>`
       + r.skus.slice(-60).reverse().map((x) => `<tr><td>${esc(x.sku)}</td><td>${esc(label(x.category || ""))}</td><td>${esc(nice(x.style || ""))}</td><td>${esc(x.colour)}</td><td>${esc(x.print)}</td><td class="r">${x.photos}</td></tr>`).join("") + `</table></div>` : "")
-    + ((r.skus || []).filter((x) => x.view).length ? `<div class="gallery">${r.skus.filter((x) => x.view).slice(-60).reverse().map((x) => `<a class="card" href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""><span class="cap"><b>${esc(x.sku)}</b></span></a>`).join("")}</div>` : "");
+    + ((r.skus || []).filter((x) => x.view).length ? `<div class="gallery">${r.skus.filter((x) => x.view).slice(-60).reverse().map((x) => `<a class="card" href="${x.view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.view}" alt=""><span class="cap"><b>${esc(x.sku)}</b></span></a>`
+      + (x.white_view ? `<a class="card" href="${x.white_view}" target="_blank" rel="noopener"><img loading="lazy" src="${x.white_view}" alt=""><span class="cap"><b>${esc(x.sku)}</b> · white</span></a>` : "")).join("")}</div>` : "");
   if (r.running) S.drTimer = setTimeout(driveRunRefresh, 5000);
 }
 // ---------- listing creator (jagimage.listing)

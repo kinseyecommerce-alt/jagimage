@@ -119,7 +119,7 @@ def test_a_print_run_makes_one_sku_per_print_and_product_and_leaves_out_prints_t
     prints = [{"id": "p1", "name": "Moon.png", "path": [], "data": art_png((250, 250, 250))},
               {"id": "p2", "name": "Ruby.png", "path": [], "data": art_png((200, 32, 42))}]  # red ink on a red tee
     drive, box, asked = FakeDrive(tees, prints), FakeDropbox(), []
-    run = printrun.PrintRun(drive, fake_ask(asked), tmp_path, "TEES", "PRINTS", dropbox=box, per_sku=5, brand="SPB")
+    run = printrun.PrintRun(drive, fake_ask(asked), tmp_path, "TEES", "PRINTS", dropbox=box, per_sku=5, brand="SPB", white_copy=False)  # the white copies have their own test
     run._run()
     assert run.error is None, run.error
     assert [s["sku"] for s in run.skus] == ["SPB-KB-HS-RED-MOON"]
@@ -279,7 +279,7 @@ def test_one_print_one_model_named_as_the_print_with_its_plain_back(tmp_path):
            [{"id": "b1", "name": "m0001_back.jpg", "path": path, "data": red}]
     prints = [{"id": f"p{k}", "name": f"{k}.png", "path": [], "data": art_png((250, 250, 250))} for k in (223, 225, 229)]
     drive = FakeDrive(tees, prints)
-    run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True)
+    run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True, white_copy=False)
     run._run()
     assert run.error is None
     # the prints take models in turn: m0001 (with a back photo), m0002 (none), m0001 again
@@ -291,7 +291,7 @@ def test_one_print_one_model_named_as_the_print_with_its_plain_back(tmp_path):
            [{"id": "b1", "name": "m0001_back.jpg", "path": path, "data": red}]
     prints = [{"id": f"p{k}", "name": f"{k}.png", "path": [], "data": art_png((250, 250, 250))} for k in (223, 225, 229)]
     drive2 = FakeDrive(tees, prints)  # the back left out on request: fronts only
-    run2 = printrun.PrintRun(drive2, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True, with_back=False)
+    run2 = printrun.PrintRun(drive2, fake_ask([]), tmp_path, "TEES", "PRINTS", per_sku=5, one_model=True, with_back=False, white_copy=False)
     run2._run()
     assert sorted(drive2.uploaded) == ["Printed/SPB-KB-FS-RED-223/223.jpg", "Printed/SPB-KB-FS-RED-225/225.jpg",
                                        "Printed/SPB-KB-FS-RED-229/229.jpg"]
@@ -851,3 +851,24 @@ def test_printed_photos_go_to_the_chosen_drive_folder():
     assert save_target("Roadster / Printed") == ("", ["Roadster", "Printed"])
     assert save_target("https://drive.google.com/drive/folders/1i-iH1cjB3RnxQkIOsI8so6zcAVzo7egm?usp=sharing") == \
         ("1i-iH1cjB3RnxQkIOsI8so6zcAVzo7egm", [])
+
+
+def test_every_printed_photo_also_gets_a_pure_white_copy_with_the_same_name(tmp_path, monkeypatch):
+    from jagimage import market
+
+    monkeypatch.setattr(market, "person_mask", lambda img: None)
+    red = jpg(tee_photo())
+    path = ["Cotton Mix", "Boys", "Red", "Half sleeve"]
+    tees = [{"id": "t1", "name": "m0001_front.jpg", "path": path, "data": red},
+            {"id": "b1", "name": "m0001_back.jpg", "path": path, "data": red}]
+    prints = [{"id": "p1", "name": "319.png", "path": [], "data": art_png((250, 250, 250))}]
+    drive = FakeDrive(tees, prints)
+    run = printrun.PrintRun(drive, fake_ask([]), tmp_path, "TEES", "PRINTS", one_model=True, save_to="Roadster/Printed")
+    run._run()
+    assert run.error is None
+    assert sorted(drive.uploaded) == sorted([
+        "Roadster/Printed/SPB-KB-HS-RED-319/319.jpg", "Roadster/Printed/SPB-KB-HS-RED-319/319-back.jpg",
+        "White background/Roadster/Printed/SPB-KB-HS-RED-319/319.jpg",
+        "White background/Roadster/Printed/SPB-KB-HS-RED-319/319-back.jpg"])
+    white = Image.open(io.BytesIO(drive.uploaded["White background/Roadster/Printed/SPB-KB-HS-RED-319/319.jpg"]))
+    assert min(white.convert("RGB").getpixel((3, 3))) >= 250  # the studio grey turned white
