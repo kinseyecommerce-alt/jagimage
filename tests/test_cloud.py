@@ -376,7 +376,8 @@ def test_guide_answer_becomes_checked_studio_settings():
     g = clean_guide(MYNTRA, "myntra.pdf")
     assert g["canvas"] == [1080, 1440] and g["shot"] == "outfit" and g["background"] == "light grey (#F2F2F2)"
     assert g["poses"] == ["front_main", "back", "walking"]  # the second front shot is the same pose
-    assert g["custom_poses"]["back"].startswith(L.POSES["back"]) and "head straight" in g["custom_poses"]["back"]
+    # the back keeps the Studio's own true rear view: a guide's added words made AIs draw a second, front-facing figure
+    assert "back" not in g["custom_poses"] and L.POSES["back"].startswith("TRUE rear view")
     assert g["custom_poses"]["walking"] == "Mid-stride walking towards the camera"
     assert g["extra"] == "Natural makeup, hair tied back, no jewellery. Avoid: props, sunglasses"
     bad = clean_guide({"marketplace": "", "width": 99999, "height": 5, "framing": "sideways", "poses": "x", "summary": ""}, "x.txt")

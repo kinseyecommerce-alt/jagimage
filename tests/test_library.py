@@ -38,7 +38,7 @@ def test_kids_fullsleeve_set_drops_contradictory_shorts():
 
 def test_negatives():
     assert L.build_negative("Kids_Boys", "FullSleeveTee", "front_main") == BOYS_FULL_NEGATIVE
-    assert L.build_negative("Men", "Hoodie", "back").endswith("CGI, visible face, looking over shoulder, face in back view, different hairstyle")
+    assert L.build_negative("Men", "Hoodie", "back").endswith("CGI, visible face, looking over shoulder, face in back view, different hairstyle, two people, second figure, front and back view side by side")
 
 
 def test_colour_fill_and_girls_hairstyle():

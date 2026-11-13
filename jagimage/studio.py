@@ -46,6 +46,9 @@ HANDS_FREE = ("Hands free: both hands relaxed and open, never touching the cloth
               "including its side seams and hem")
 HANDS_FREE_AVOID = "hands on the clothes, hands in pockets, hands tucked in, arms covering the garment, holding an object"
 # Flash sometimes returns several images in one response (2 to 35 seen); each is billed, one is used.
+TWO_FIGURE_MIN = 0.1  # a torso block at least this share of the photo's width counts as a figure
+BACK_ONE_FIGURE = (" Exactly one person in the photo, seen only from behind: never a second figure, never the front and the back "
+                   "of the model side by side; the reference photo is only for the model's identity and clothes.")
 ONE_IMAGE = "Output exactly one image: a single photograph of this one model, not a sequence, grid, collage or set of variations."
 NO_HANDS_FREE = {"handpocket"}  # poses that need the hands on the clothes
 NOT_MANNEQUIN = "mannequin, dummy, doll, ghost mannequin, faceless figure, plastic or wax figure, CGI character"
@@ -580,6 +583,8 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
             ("" if top_only else f"; and {shoes}") +
             (". The top and the bottom are two clearly different colours, exactly as stated. " if bcol else ". ") +
             f"{backdrop(spec, pose)} {rules}")
+    if pose == "back":  # with the front as a reference, an AI may draw the front and the back side by side
+        text += BACK_ONE_FIGURE
     hands = spec.hands_free and pose not in NO_HANDS_FREE
     if hands:
         text += f" {HANDS_FREE}."
@@ -703,6 +708,25 @@ def backdrop_problem(lab, max_chroma: float = 0.0) -> Optional[str]:
     return None
 
 
+def two_figures(top) -> bool:
+    """Two tops side by side, even touching (an AI that drew the front and the back view of the same model
+    together): across the photo, the columns where the top is tall form two separate wide blocks. One model's
+    torso is one block; its short sleeves are much lower and fall out at half height."""
+    import numpy as np
+
+    cols = top.sum(axis=0).astype(float)
+    if cols.max() <= 0:
+        return False
+    tall = cols > 0.5 * cols.max()
+    # a zip or placket splits one torso by a few pixels: gaps that narrow are closed first
+    from scipy import ndimage
+
+    tall = ndimage.binary_closing(tall, structure=np.ones(max(3, int(0.03 * top.shape[1])), bool))
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], tall.astype(int), [0]])))
+    blocks = [(a, b) for a, b in zip(edges[::2], edges[1::2]) if b - a >= TWO_FIGURE_MIN * top.shape[1]]
+    return len(blocks) >= 2
+
+
 def garment_problem(lab, masks: dict, base) -> Optional[str]:
     """Why the garments in an AI base photo can't be recoloured cleanly, or None.
     - More than one figure (Flash once drew a 4-panel product infographic): the top's mask then
@@ -722,6 +746,8 @@ def garment_problem(lab, masks: dict, base) -> Optional[str]:
         sizes = np.sort(ndimage.sum(top, pieces, index=np.arange(1, n + 1)))[::-1]
         if (sizes >= 0.3 * sizes[0]).sum() > 1:
             return "the photo shows more than one figure (a collage or several views), not one model"
+    if two_figures(top):
+        return "the photo shows two figures side by side (e.g. a front and a back view), not one model"
     chroma = np.hypot(lab[..., 1], lab[..., 2])
     for part, key, bases in (("top", base[0], TOP_BASES), ("bottom", base[1], BOTTOM_BASES)):
         if part not in masks or not key:

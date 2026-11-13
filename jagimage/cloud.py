@@ -953,6 +953,8 @@ def clean_guide(ans: dict, filename: str) -> dict:
         if ours == "front_main":  # the guide's own front pose (e.g. relaxed, not a stiff straight stance) replaces ours
             custom[ours] = f"front view, body and face toward the camera, the whole front of the garment visible; {direction}"
             poses.append(ours)
+        elif ours in ("back", "side"):  # the Studio's own wording keeps a true rear view or profile; a guide's
+            poses.append(ours)        # added words (expression, "dynamic") made AIs draw a second, front-facing figure
         elif ours:  # the Studio's own wording stays (it keeps e.g. a true rear view), the guide's direction is added
             custom[ours] = f"{L.POSES[ours]}; {direction}"
             poses.append(ours)

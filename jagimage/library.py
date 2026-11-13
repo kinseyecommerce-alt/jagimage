@@ -226,7 +226,7 @@ NEGATIVE_KIDS = "adult face, teenager, older child, mature proportions, long leg
 NEGATIVE_JOGGERS = "ribbed cuffs on joggers, elastic ankle cuffs"
 NEGATIVE_POSE = {
     "side": "face looking at camera, frontal face on side pose, head twisted toward camera",
-    "back": "visible face, looking over shoulder, face in back view, different hairstyle",
+    "back": "visible face, looking over shoulder, face in back view, different hairstyle, two people, second figure, front and back view side by side",
 }
 
 

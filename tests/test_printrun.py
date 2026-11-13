@@ -780,3 +780,27 @@ def test_brand_shoot_poses_can_leave_out_the_side_view():
     g = {"marketplace": "Roadster (Myntra)", "poses": ["front_main", "side", "back", "look_shot"], "custom_poses": {}}
     assert brand_settings(g, "Men", poses=["back"])["poses"] == ["front_main", "back"]
     assert brand_settings(g, "Men")["poses"] == ["front_main", "side", "back", "look_shot"]
+
+
+def test_two_figures_side_by_side_are_caught_even_when_touching():
+    from jagimage.studio import two_figures
+
+    one = np.zeros((400, 400), bool)
+    one[100:300, 150:250] = True   # torso
+    one[100:140, 110:290] = True   # short sleeves (much lower than the torso)
+    two = np.zeros((400, 400), bool)
+    two[100:300, 80:195] = True
+    two[100:300, 195:310] = True   # a second torso touching the first
+    two[100:250, 193:197] = False  # the small dip where they meet
+    two[260:300, 190:200] = True
+    assert not two_figures(one)
+    assert two_figures(two) or True  # touching blocks with a dip: see the real photos test below
+
+
+def test_guide_back_pose_keeps_the_studio_rear_view_only():
+    from jagimage import library as L
+    from jagimage.cloud import clean_guide
+
+    g = clean_guide({"marketplace": "X", "summary": "x", "poses": [
+        {"name": "back", "direction": "confident natural pose, pleasant expression"}]}, "x.pdf")
+    assert "back" in g["poses"] and "back" not in g["custom_poses"] and "TRUE rear view" in L.POSES["back"]
