@@ -714,6 +714,10 @@ never invent rules it does not state.
   meeting a floor of another shade, with where the floor line sits), and the light (e.g. "warm beige wall
   (#EFE6DA) meeting a slightly lighter beige floor at knee height, soft neutral light, faint natural shadow").
   The first is the one it prefers. Never a lifestyle, outdoor or room setting. Empty when it says nothing.
+- lifestyle: every lifestyle or location background it approves (with the prompt it gives, if any), one entry
+  each in under 250 characters, written for an image generator (e.g. "industrial interior, grey and white walls,
+  polished concrete floor, no elements, neutral light"). These are extra mood photos, never the default photo.
+  Leave out settings it forbids (cafes, beaches, homes, hotels). Empty when it has none.
 - framing: "full" when it wants full-length head-to-toe photos, "top" when it wants topwear shot from the head
   to the waist or knee (cropped to the product), empty when it says nothing.
 - poses: every on-model shot it asks for, in its order. name: a short English snake_case name such as front,
@@ -743,6 +747,7 @@ GUIDE_SCHEMA = {
     "properties": {
         "marketplace": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
         "background": {"type": "string"}, "backgrounds": {"type": "array", "items": {"type": "string"}},
+        "lifestyle": {"type": "array", "items": {"type": "string"}},
         "framing": {"type": "string"},
         "poses": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string"}, "direction": {"type": "string"}}, "required": ["name", "direction"]}},
@@ -885,7 +890,12 @@ def guide_content(filename: str, data: bytes):
     return text, pics
 
 
-def brand_settings(guide: dict, category: str, kids_smile: bool = True, background: str = "") -> dict:
+LIFESTYLE_POSE = ("lifestyle shot: a relaxed, candid full-body pose that suits the place, confident and natural (never "
+                  "dramatic), face visible, the whole garment clearly visible and not covered by the arms")
+
+
+def brand_settings(guide: dict, category: str, kids_smile: bool = True, background: str = "",
+                   lifestyle: Optional[list] = None) -> dict:
     """A saved brand guide as batch settings for one category: its photo size, backdrop, framing, poses and
     model directions; its adult rules (age, height, build) only for Men and Women."""
     from . import library as L
@@ -897,6 +907,14 @@ def brand_settings(guide: dict, category: str, kids_smile: bool = True, backgrou
     out = {"poses": list(guide.get("poses") or ["front_main"]), "custom_poses": dict(guide.get("custom_poses") or {}),
            "extra": extra[:1000], "adult_extra": "" if kids else (guide.get("adult_extra") or ""),
            "background": (background or guide.get("background") or "")[:200], "guide": (guide.get("marketplace") or "")[:80]}
+    scenes = [str(x) for x in (lifestyle or []) if str(x).strip()][:6]  # extra lifestyle photos, after the studio ones
+    if scenes:
+        out["scenes"] = {}
+        for i, scene in enumerate(scenes):
+            pose = f"lifestyle_{'abcdef'[i]}"  # letters: photo files are named <pose>_<w>x<h>.jpg
+            out["poses"].append(pose)
+            out["custom_poses"][pose] = LIFESTYLE_POSE
+            out["scenes"][pose] = scene[:300]
     if not kids and (guide.get("looks") or {}).get(category):  # the brand's sample models: adults only
         out["looks"] = list(guide["looks"][category])
     if guide.get("relaxed"):  # relaxed poses: a hand may rest in a pocket
@@ -965,6 +983,7 @@ def clean_guide(ans: dict, filename: str) -> dict:
             "canvas": canvas, "background": (backgrounds[0] if backgrounds else words(ans.get("background"), 200)),
             "backgrounds": backgrounds or ([words(ans.get("background"), 200)] if ans.get("background") else []),
             "relaxed": relaxed, "looks": {k: v for k, v in looks.items() if v},
+            "lifestyle": [words(x, 250) for x in (ans.get("lifestyle") or []) if isinstance(x, str) and words(x, 250)][:6],
             "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
             "extra": extra, "adult_extra": words(ans.get("adult_model"), 600).rstrip("."),
             "not_applied": words(ans.get("not_applied"), 600), "summary": words(ans.get("summary"), 800),
@@ -1039,7 +1058,7 @@ class Agent:
         raise last
 
     def plan(self, message: str, ledger, base: dict, brand: Optional[dict] = None, kids_smile: bool = True,
-             background: str = "") -> dict:
+             background: str = "", lifestyle: Optional[list] = None) -> dict:
         """base: the engine settings to use (provider, gemini_model, image_size, batch, one_base ...).
         brand: a saved brand guide: every batch gets its photo size, backdrop, poses and model directions."""
         from . import library as L
@@ -1076,7 +1095,7 @@ class Agent:
                         "shot": b.get("shot") if b.get("shot") in studio.SHOTS else studio.default_shot(tops[0]),
                         "models": max(1, min(5000, int(b.get("models") or 1))), "poses": poses, "auto_bottom": auto_bottom}
                 if brand:
-                    body.update(brand_settings(brand, category, kids_smile, background))
+                    body.update(brand_settings(brand, category, kids_smile, background, lifestyle))
                     poses = body["poses"]
                 specs = _specs(dict(body), ledger)
                 plans = [sp.plan() for sp in specs]

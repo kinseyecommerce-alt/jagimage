@@ -289,6 +289,7 @@ class Spec:
     extra: str = ""          # extra instructions added to every photo's prompt
     adult_extra: str = ""    # a brand guide's rules for adult models only (age, height, measurements): not for kids
     looks: List[str] = field(default_factory=list)  # a brand's sample model looks: model n gets look n (in turn)
+    scenes: Dict[str, str] = field(default_factory=dict)  # lifestyle poses (e.g. lifestyle_a) -> the brand's location
     hands_free: bool = True  # hands never touch the clothes (every pose except handpocket)
     batch: bool = False      # Gemini batch mode: half price, results within 24 hours
     keep_png: bool = True    # also keep a full-size PNG of every photo (4 MB each), besides the 2000x2000 JPG
@@ -351,6 +352,7 @@ class Spec:
         self.extra = " ".join(str(self.extra or "").split())
         self.adult_extra = " ".join(str(self.adult_extra or "").split())
         self.looks = [" ".join(str(x).split())[:300] for x in (self.looks or []) if str(x).strip()][:8]
+        self.scenes = {slug(k).lower(): " ".join(str(v).split())[:300] for k, v in (self.scenes or {}).items() if str(v).strip()}
         self.background, self.guide = " ".join(str(self.background).split()), " ".join(str(self.guide).split())
         from .prints import PLACES
 
@@ -517,6 +519,10 @@ def judge_print(photo, art, mask, place: str, adj: dict, checker=None) -> dict:
 
 
 def backdrop(spec: Spec, pose: str) -> str:
+    if pose in spec.scenes:  # a brand's lifestyle shot: its location, as the brand's prompt puts it
+        return (f"Lifestyle location photograph: {spec.scenes[pose].rstrip('.')}. Natural light that matches the place, "
+                "the model standing naturally in it with real contact shadows (never a cut-out pasted on a scene), "
+                "the model in sharp focus, the whole garment clearly visible, the place uncluttered.")
     if spec.background:  # a brand's or marketplace's backdrop, for every pose
         if re.search(r"split|floor|wall|shadow", spec.background, re.I):  # a described set: as the guide puts it
             return f"Studio background: {spec.background.rstrip('.')}; clean, no props, the whole background the same in every photo."
@@ -587,6 +593,9 @@ def prompt(spec: Spec, model_no: int, base, pose: str, reference: str) -> str:
     text += HAIR_RULE
     product = "Trackpants" if spec.bottom == "Trackpants" else spec.top
     negative = L.build_negative(spec.category, product, pose)
+    if pose in spec.scenes:  # a location is not a studio: only clutter and fakery stay forbidden there
+        negative = negative.replace("busy background, ", "").replace("props, ", "").replace("gradient background, ", "")
+        negative += ", cut-out look, pasted on background, mismatched lighting between model and scene"
     if not top_only:  # the top's hem over the waistband in every pose, as the shop sells them
         text += UNTUCKED_RULE
         negative += ", top tucked into the pants or shorts, waistband over the top"
@@ -1199,7 +1208,8 @@ class Batch:
         from .recolor import MASK_VERSION, MaskError, garment_mask, rgb_to_lab, save_mask, split_outfit
 
         lab = rgb_to_lab(np.asarray(Image.open(path).convert("RGB")))
-        why = backdrop_problem(lab, backdrop_chroma(self.spec.background))
+        pose = Path(path).name.split(".")[0]
+        why = None if pose in self.spec.scenes else backdrop_problem(lab, backdrop_chroma(self.spec.background))
         if why:
             raise MaskError(why)
         top, _ = garment_mask(lab, TOP_BASES[base[0]][1])

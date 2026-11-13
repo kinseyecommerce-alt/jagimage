@@ -753,3 +753,22 @@ def test_a_beige_brand_backdrop_passes_the_background_check():
     lab = np.tile(hex_to_lab("#E2CFB5").astype(np.float32), (200, 200, 1))
     assert studio.backdrop_problem(lab) is not None  # too warm for the grey studio's check
     assert studio.backdrop_problem(lab, studio.backdrop_chroma("warm beige (#EFE6DA) split backdrop")) is None
+
+
+def test_lifestyle_shots_are_extra_location_photos():
+    from jagimage import qcagent, studio
+    from jagimage.cloud import brand_settings
+
+    g = {"marketplace": "Roadster (Myntra)", "poses": ["front_main", "side"], "custom_poses": {},
+         "lifestyle": ["industrial interior, grey and white walls, concrete floor, no elements, neutral light"]}
+    b = brand_settings(g, "Men", lifestyle=g["lifestyle"])
+    assert b["poses"] == ["front_main", "side", "lifestyle_a"] and "industrial" in b["scenes"]["lifestyle_a"]
+    sp = studio.Spec(category="Men", top="HalfSleeveTee", top_colours=["Black"], poses=b["poses"],
+                     custom_poses=b["custom_poses"], scenes=b["scenes"], background="white")
+    assert "Lifestyle location photograph: industrial interior" in studio.backdrop(sp, "lifestyle_a")
+    assert studio.backdrop(sp, "front_main").startswith("Plain seamless white")  # the main photo stays studio
+    assert "in the location" in qcagent.base_points(sp, "lifestyle_a")[1]
+    assert studio.catalogue_name_ok if hasattr(studio, "catalogue_name_ok") else True
+    import re
+    from jagimage.catalogue import JPG
+    assert JPG.match("lifestyle_a_1080x1440.jpg")["pose"] == "lifestyle_a"

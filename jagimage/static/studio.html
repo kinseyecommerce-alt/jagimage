@@ -468,6 +468,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
     <div class="field"><span>Categories</span><div class="chips" id="brCats"></div></div>
     <div class="field"><span>Styles</span><div class="chips" id="brTops"></div></div>
     <div class="field"><span>Colours</span><div class="chips" id="brCols"></div></div>
+    <div class="field"><span>Lifestyle shots from the guide (extra photos per model, after the studio ones; never the main photo)</span><div class="chips" id="brLife"></div></div>
     <label class="check"><input type="checkbox" id="brKidSmile" checked> <span>Kids keep a natural cheerful smile (brand expression rules are written for adults)</span></label>
     <p class="hint" id="brSummary"></p>
     <div class="row"><button class="btn" id="brTest" type="button">Test: one model per category</button><button class="btn primary" id="brRun" type="button">Run the brand shoot</button></div>
@@ -1007,6 +1008,7 @@ function guideHtml(g) {
     + li("Framing", g.shot === "top" ? "Top only (head to above the knee)" : g.shot === "outfit" ? "Full length (head to shoes)" : "")
     + li("Poses", g.poses.map(label).join(", ")) + li("Model directions", g.extra)
     + li("Adult models only (never for kids)", g.adult_extra)
+    + li("Lifestyle backgrounds", (g.lifestyle || []).length ? `${g.lifestyle.length} (extra photos, picked under Plain models for this brand)` : "")
     + li("Sample model looks", Object.entries(g.looks || {}).map(([k, v]) => `${k}: ${v.length}`).join(", "))
     + `</ul>` + (g.not_applied ? `<p class="hint">Not done by the app (do these yourself): ${esc(g.not_applied)}</p>` : "");
 }
@@ -1133,6 +1135,7 @@ const FACTS = [["brand", "Brand"], ["sizes", "Sizes (comma separated)"], ["mrp",
   ["origin", "Country of origin"], ["manufacturer", "Manufacturer name & address"], ["packer", "Packer name & address"], ["stock", "Stock per size"]];
 // ---------- Brand shoots: plain models made to a brand's image direction (its saved guide)
 const CAT_NAMES = { Men: "Men", Women: "Women", Kids_Boys: "Boys", Kids_Girls: "Girls" };
+const LIFESTYLE_POSE = "lifestyle shot: a relaxed, candid full-body pose that suits the place, confident and natural (never dramatic), face visible, the whole garment clearly visible and not covered by the arms";
 function brChips(id, items, picked) {
   $(id).innerHTML = items.map(([v, t]) => `<label class="check"><input type="checkbox" value="${esc(v)}"${picked.includes(v) ? " checked" : ""}> <span>${esc(t)}</span></label>`).join("");
 }
@@ -1140,10 +1143,12 @@ const brPicked = (id) => [...$(id).querySelectorAll("input:checked")].map((i) =>
 function brGuide() { return (S.guides || []).find((g) => g.id === $("brGuide").value); }
 function brBody(g, cat, tops, cols) {
   const kids = cat.startsWith("Kids");
+  const life = brPicked("#brLife"), poses = [...(g.poses || [])], custom = { ...(g.custom_poses || {}) }, scenes = {};
+  life.forEach((scene, i) => { const p = "lifestyle_" + "abcdef"[i]; poses.push(p); custom[p] = LIFESTYLE_POSE; scenes[p] = scene; });
   const extra = [g.extra || "", kids && $("brKidSmile").checked ? "For this child: a natural, soft cheerful smile is right" : ""].filter(Boolean).join(". ");
   return { category: cat, top: tops[0], tops: tops.slice(1), auto_bottom: true, bottom: (S.opts.bottom_defaults || {})[tops[0]] || "Trackpants",
     top_colours: cols, fabric: $("brFabric").value, pairing: "match", models: +$("brModels").value || 1,
-    poses: g.poses, custom_poses: g.custom_poses || {}, extra: extra.slice(0, 1000), adult_extra: kids ? "" : (g.adult_extra || ""),
+    poses, custom_poses: custom, scenes, extra: extra.slice(0, 1000), adult_extra: kids ? "" : (g.adult_extra || ""),
     canvas: g.canvas || [2000, 2000], background: $("brBg").value || g.background || "", guide: g.marketplace, ...(g.shot ? { shot: g.shot } : {}),
     ...(g.relaxed ? { hands_free: false } : {}), looks: kids ? [] : ((g.looks || {})[cat] || []),
     provider: $("brProvider").value, ...($("brProvider").value === "openai" ? { quality: "medium" } : {}) };
@@ -1156,7 +1161,7 @@ function brPlan() {
 function brRefreshSummary() {
   const { g, jobs, cols } = brPlan();
   if (!g) { $("brSummary").textContent = "Upload a brand guide above first."; return; }
-  const models = +$("brModels").value || 1, poses = (g.poses || []).length;
+  const models = +$("brModels").value || 1, poses = (g.poses || []).length + brPicked("#brLife").length;
   const styles = jobs.reduce((n, [, t]) => n + t.length, 0);
   $("brSummary").textContent = `${g.marketplace}: ${g.canvas ? g.canvas[0] + " × " + g.canvas[1] + " px, " : ""}${poses} poses${g.relaxed ? ", relaxed stance" : ""}. `
     + `${jobs.length} categories × ${styles ? Math.round(styles / Math.max(1, jobs.length)) : 0} styles on average × ${models} models × ${cols.length} colours `
@@ -1170,6 +1175,9 @@ function brRender() {
   const was = $("brBg").value;
   $("brBg").innerHTML = [...new Set(bgs)].map((b) => `<option value="${esc(b)}">${esc(b.length > 90 ? b.slice(0, 88) + "…" : b)}</option>`).join("");
   if (bgs.includes(was)) $("brBg").value = was;
+  const lifeWas = brPicked("#brLife");
+  brChips("#brLife", ((g && g.lifestyle) || []).map((x) => [x, x.length > 70 ? x.slice(0, 68) + "…" : x]), lifeWas);
+  if (g && !(g.lifestyle || []).length) $("brLife").innerHTML = '<span class="hint">This guide shows no lifestyle backgrounds.</span>';
   if (!$("brFabric").options.length) $("brFabric").innerHTML = Object.keys(S.opts.palettes).map((f) => `<option value="${esc(f)}">${esc(f.replace(/([a-z])([A-Z])/g, "$1 $2"))}</option>`).join("");
   if (!$("brCats").children.length) brChips("#brCats", S.opts.categories.map((c) => [c, CAT_NAMES[c] || c]), S.opts.categories);
   if (!$("brTops").children.length) brChips("#brTops", S.opts.tops.map((t) => [t, nice(t)]), ["HalfSleeveTee"]);
@@ -1217,7 +1225,7 @@ async function brAskPlan() {
   $("brPlanOut").innerHTML = '<p class="hint">Planning…</p>';
   try {
     const prov = $("brProvider").value;
-    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked, background: $("brBg").value,
+    const p = await api("/api/agent", { message: `${msg} (fabric: ${$("brFabric").value})`, brand: g.id, kids_smile: $("brKidSmile").checked, background: $("brBg").value, lifestyle: brPicked("#brLife"),
       provider: prov, ...(prov === "openai" ? { quality: "medium" } : {}) });
     const rows = p.batches.map((b) => `<tr><td>${esc(CAT_NAMES[b.category] || b.category)}</td><td>${b.styles.map(nice).map(esc).join(", ")}</td><td class="r">${fmt(b.models)}</td><td class="r">${b.colours}</td><td class="r">${fmt(b.photos)}</td><td class="r">₹${fmt(b.cost_inr)}</td></tr>`).join("");
     $("brPlanOut").innerHTML = `<p>${esc(p.reply)}</p>` + (p.batches.length ? `<div class="tablewrap"><table class="agenttab"><tr><th>Category</th><th>Styles</th><th class="r">Models</th><th class="r">Colours</th><th class="r">Photos</th><th class="r">AI cost</th></tr>${rows}
@@ -1232,7 +1240,7 @@ async function brAskPlan() {
 }
 function initBrandShoot() {
   $("brPlanBtn").onclick = brAskPlan;
-  ["#brCats", "#brTops", "#brCols"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
+  ["#brCats", "#brTops", "#brCols", "#brLife"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
   $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRender; $("brFabric").onchange = brRender;
   $("brTest").onclick = brTestRun; $("brRun").onclick = brStartRun;
   if (!isAdmin()) $("brRun").classList.add("hide");

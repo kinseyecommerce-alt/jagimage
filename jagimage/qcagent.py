@@ -68,7 +68,10 @@ def base_points(spec, pose: str) -> List[str]:
     """What a base photo must get right, for this batch and pose."""
     from . import library as L
 
+    lifestyle = pose in (getattr(spec, "scenes", None) or {})
     points = [STYLE_POINTS.get(spec.top, "The top is the right garment type."),
+              ("The model stands in the location naturally (not a cut-out pasted on a scene). FAIL if there is a second "
+               "figure, a separate garment or product photo, or the garment is hidden or out of focus.") if lifestyle else
               "Only the model is in the photo, on a plain studio backdrop. FAIL if there is anything else: a separate "
               "garment, shorts, pants or a product photo beside or behind the model, a box, a floor panel or a second figure."]
     if pose == "back":
