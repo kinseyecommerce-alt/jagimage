@@ -537,13 +537,13 @@ class PrintRun:
         # a library can hold hundreds of big artworks: each is downloaded and opened only when a product needs it,
         # and only the last few stay in memory (opening them all at once ran the server out of memory)
         arts = [(Path(p["name"]).stem, p, list(p.get("path") or [])) for p in prints]
-        opened, bad = OrderedDict(), set()
+        opened, unreadable = OrderedDict(), set()
 
         def load(p):
             if p["id"] in opened:
                 opened.move_to_end(p["id"])
                 return opened[p["id"]]
-            if p["id"] in bad:
+            if p["id"] in unreadable:
                 return None
             local = cache / f"{p['id']}_{re.sub(r'[^0-9A-Za-z]', '', p.get('modifiedTime', ''))[:14]}{Path(p['name']).suffix.lower() or '.png'}"
             try:
@@ -551,7 +551,7 @@ class PrintRun:
                     local.write_bytes(self.drive.download(p["id"]))
                 art = open_image(str(local))
             except PrintError as exc:
-                bad.add(p["id"])
+                unreadable.add(p["id"])
                 self._note("error", file=p["name"], error=str(exc))
                 self.counts["errors"] += 1
                 return None
