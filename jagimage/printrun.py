@@ -319,8 +319,13 @@ def _art_jpeg(art: Image.Image, side: int = 512) -> tuple:
 
 
 def _file_name(print_name: str) -> str:
-    """A print's name as a safe file name (the photo carries the print's own name)."""
-    return re.sub(r'[\\/:*?"<>|]+', "-", str(print_name)).strip(" .") or "print"
+    """A print's name as a safe file name: a library file ("SK_VN_MENS_HS_319_YLW_Final") by its design number
+    (319, so the photos are 319.jpg and 319-back.jpg), any other print by its own name."""
+    name = str(print_name)
+    m = re.search(r"(?<![0-9A-Za-z])(\d{1,6})(?![0-9])", name)
+    if m and "_" in name:
+        return m.group(1)
+    return re.sub(r'[\\/:*?"<>|]+', "-", name).strip(" .") or "print"
 
 
 def stem_of(name: str) -> str:
@@ -632,7 +637,7 @@ class PrintRun:
                         printed = self._place(photo, mask, art, adj)
                         # print QC: the last check before the photo is saved or uploaded
                         res = printqc.check(photo, printed, mask, art, self._where, adj, sku,
-                                            f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname),
+                                            f"{_file_name(pname)}.jpg" if self.one_model else "", _file_name(pname),  # named as the print (its number)
                                             style=prod.get("style", ""), shirt_hex=hex_)
                         if printqc.only_visibility(res):
                             raise PrintError(f"{res['problems'][0]} ({prod['colour']}): left out")

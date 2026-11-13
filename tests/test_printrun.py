@@ -886,3 +886,10 @@ def test_white_copies_can_go_to_their_own_folder(tmp_path, monkeypatch):
                             white_to="https://drive.google.com/drive/folders/1AmazonWhiteFolderIdXYZ123")
     run._run()
     assert sorted(drive.uploaded) == ["<1AmazonWhiteFolderIdXYZ123>/SPB-KB-HS-RED-319/319.jpg", "Printed/SPB-KB-HS-RED-319/319.jpg"]
+
+
+def test_library_prints_name_the_photos_by_their_design_number():
+    assert printrun._file_name("SK_VN_MENS_HS_319_YLW_Final") == "319"
+    assert printrun._file_name("MENS_FULL SLEEVE_4_GREY_ Fianl") == "4"
+    assert printrun._file_name("Unicorn 02") == "Unicorn 02"  # a plain name stays as it is
+    assert printrun._file_name("a/b") == "a-b"
