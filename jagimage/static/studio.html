@@ -189,7 +189,7 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
 <header>
   <h1>Jag Studio</h1>
   <span class="sub">AI base photos in batch, recoloured to exact colours</span>
-  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Marketplace</a><a href="#listings" role="tab" data-tab="listings" class="hide" id="tabListings">Listings</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
+  <nav class="cloudnav" id="tabs" role="tablist"><a href="#dashboard" role="tab" data-tab="dashboard" class="on">Dashboard</a><a href="#studio" role="tab" data-tab="studio">Studio</a><a href="#recolor" role="tab" data-tab="recolor">Recolor</a><a href="#prints" role="tab" data-tab="prints" class="hide" id="tabPrints">Print placement</a><a href="#market" role="tab" data-tab="market" class="hide" id="tabMarket">Brand shoots</a><a href="#listings" role="tab" data-tab="listings" class="hide" id="tabListings">Listings</a><a href="#settings" role="tab" data-tab="settings">Settings</a><a href="/logout" class="hide" id="signOut">Sign out</a></nav>
   <div class="keys"><span><span class="dot" id="dot-gemini"></span>Gemini</span><span><span class="dot" id="dot-openai"></span>OpenAI</span><span><span class="dot" id="dot-meta"></span>Meta</span><span><span class="dot" id="dot-runpod"></span>RunPod</span></div>
 </header>
 <iframe id="recolorTab" class="hide" title="Jag Recolor" style="display:block;width:100%;height:calc(100vh - 60px);border:0;background:#fff"></iframe>
@@ -453,8 +453,26 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; background: var(--so
         <button class="btn" id="guideUse">Use this guide</button><button class="btn" id="guideDel">Delete</button>
       </div>
       <div class="guideout" id="guideOut"></div>
-      <div class="row hide" id="guideGoRow"><a class="btn primary" id="guideGo" href="#studio">Make photos with this guide →</a></div>
+      <div class="row hide" id="guideGoRow"><a class="btn" id="guideGo" href="#studio">Open in Studio (all settings) →</a></div>
     </section>
+  <section class="panel" id="brandShoot">
+    <h2>Plain models for this brand</h2>
+    <p class="hint">Pick the brand, your categories, styles and colours. <b>Test</b> makes one model per category (its front and one of the brand's poses, about 2 AI images each) so you can check the brand's look first; <b>Run</b> makes the full shoot: the same models in every colour, uploaded to Google Drive. The brand's adult rules (age, height, build) are used for Men and Women only.</p>
+    <div class="row">
+      <label class="field"><span>Brand guide</span><select id="brGuide"></select></label>
+      <label class="field"><span>Fabric</span><select id="brFabric"></select></label>
+      <label class="field"><span>Models per category</span><input type="number" id="brModels" value="10" min="1" max="300"></label>
+      <label class="field"><span>AI</span><select id="brProvider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></label>
+    </div>
+    <div class="field"><span>Categories</span><div class="chips" id="brCats"></div></div>
+    <div class="field"><span>Styles</span><div class="chips" id="brTops"></div></div>
+    <div class="field"><span>Colours</span><div class="chips" id="brCols"></div></div>
+    <label class="check"><input type="checkbox" id="brKidSmile" checked> <span>Kids keep a natural cheerful smile (brand expression rules are written for adults)</span></label>
+    <p class="hint" id="brSummary"></p>
+    <div class="row"><button class="btn" id="brTest" type="button">Test: one model per category</button><button class="btn primary" id="brRun" type="button">Run the brand shoot</button></div>
+    <p class="e" id="brErr"></p>
+    <div id="brOut"></div>
+  </section>
 </div>
 <main id="studioTab" class="studio">
   <div class="studiohead">
@@ -1003,6 +1021,8 @@ function clearGuide() {  // back to the regular studio look
 }
 async function guidesRefresh(pick) {
   const r = await api("/api/guides"); S.guides = r.guides;
+  if (pick && $("brGuide")) { S.guides.sort((a, b) => (b.id === pick) - (a.id === pick)); }
+  setTimeout(brRender);
   $("guideSaved").classList.toggle("hide", !r.guides.length);
   $("guideSel").innerHTML = r.guides.map((g) => `<option value="${esc(g.id)}">${esc(g.marketplace)} (${esc(g.file || "")})</option>`).join("");
   if (pick) $("guideSel").value = pick;
@@ -1094,6 +1114,86 @@ const MARKET_NAMES = { amazon: "Amazon", flipkart: "Flipkart", myntra: "Myntra",
 const FACTS = [["brand", "Brand"], ["sizes", "Sizes (comma separated)"], ["mrp", "MRP ₹"], ["price", "Selling price ₹"], ["gsm", "GSM"],
   ["fabric", "Fabric (e.g. 100% Cotton)"], ["hsn", "HSN code"], ["gst", "GST %"], ["weight", "Weight (g)"], ["wash_care", "Wash care"],
   ["origin", "Country of origin"], ["manufacturer", "Manufacturer name & address"], ["packer", "Packer name & address"], ["stock", "Stock per size"]];
+// ---------- Brand shoots: plain models made to a brand's image direction (its saved guide)
+const CAT_NAMES = { Men: "Men", Women: "Women", Kids_Boys: "Boys", Kids_Girls: "Girls" };
+function brChips(id, items, picked) {
+  $(id).innerHTML = items.map(([v, t]) => `<label class="check"><input type="checkbox" value="${esc(v)}"${picked.includes(v) ? " checked" : ""}> <span>${esc(t)}</span></label>`).join("");
+}
+const brPicked = (id) => [...$(id).querySelectorAll("input:checked")].map((i) => i.value);
+function brGuide() { return (S.guides || []).find((g) => g.id === $("brGuide").value); }
+function brBody(g, cat, tops, cols) {
+  const kids = cat.startsWith("Kids");
+  const extra = [g.extra || "", kids && $("brKidSmile").checked ? "For this child: a natural, soft cheerful smile is right" : ""].filter(Boolean).join(". ");
+  return { category: cat, top: tops[0], tops: tops.slice(1), auto_bottom: true, bottom: (S.opts.bottom_defaults || {})[tops[0]] || "Trackpants",
+    top_colours: cols, fabric: $("brFabric").value, pairing: "match", models: +$("brModels").value || 1,
+    poses: g.poses, custom_poses: g.custom_poses || {}, extra: extra.slice(0, 1000), adult_extra: kids ? "" : (g.adult_extra || ""),
+    canvas: g.canvas || [2000, 2000], background: g.background || "", guide: g.marketplace, ...(g.shot ? { shot: g.shot } : {}),
+    provider: $("brProvider").value, ...($("brProvider").value === "openai" ? { quality: "medium" } : {}) };
+}
+function brPlan() {
+  const g = brGuide(), cats = brPicked("#brCats"), tops = brPicked("#brTops"), cols = brPicked("#brCols");
+  const jobs = cats.map((c) => [c, tops.filter((t) => (c.startsWith("Kids") ? !S.opts.adult_only_tops.includes(t) : !S.opts.kids_only_tops.includes(t)))]).filter(([, t]) => t.length);
+  return { g, cats, tops, cols, jobs };
+}
+function brRefreshSummary() {
+  const { g, jobs, cols } = brPlan();
+  if (!g) { $("brSummary").textContent = "Upload a brand guide above first."; return; }
+  const models = +$("brModels").value || 1, poses = (g.poses || []).length;
+  const styles = jobs.reduce((n, [, t]) => n + t.length, 0);
+  $("brSummary").textContent = `${g.marketplace}: ${g.canvas ? g.canvas[0] + " × " + g.canvas[1] + " px, " : ""}${g.background || "studio backdrop"}, ${poses} poses. `
+    + `${jobs.length} categories × ${styles ? Math.round(styles / Math.max(1, jobs.length)) : 0} styles on average × ${models} models × ${cols.length} colours `
+    + `= about ${fmt(styles * models * poses * cols.length)} photos (colours are recoloured, so only the base photos cost AI images).`;
+}
+function brRender() {
+  const g = brGuide(); if (!S.opts) return;
+  $("brGuide").innerHTML = (S.guides || []).map((x) => `<option value="${esc(x.id)}">${esc(x.marketplace)}</option>`).join("") || '<option value="">No guides yet</option>';
+  if (g) $("brGuide").value = g.id;
+  if (!$("brFabric").options.length) $("brFabric").innerHTML = Object.keys(S.opts.palettes).map((f) => `<option value="${esc(f)}">${esc(f.replace(/([a-z])([A-Z])/g, "$1 $2"))}</option>`).join("");
+  if (!$("brCats").children.length) brChips("#brCats", S.opts.categories.map((c) => [c, CAT_NAMES[c] || c]), S.opts.categories);
+  if (!$("brTops").children.length) brChips("#brTops", S.opts.tops.map((t) => [t, nice(t)]), ["HalfSleeveTee"]);
+  const keep = brPicked("#brCols");
+  brChips("#brCols", Object.keys(S.opts.palettes[$("brFabric").value] || {}).map((c) => [c, c]), keep.length ? keep : ["Black", "White"]);
+  brRefreshSummary();
+}
+async function brTestRun() {
+  const { g, jobs, cols } = brPlan(); $("brErr").textContent = "";
+  if (!g || !jobs.length || !cols.length) { $("brErr").textContent = "Pick a brand, at least one category, style and colour."; return; }
+  const pose = (g.poses || []).find((p) => p !== "front_main") || "front_main";
+  $("brTest").disabled = $("brRun").disabled = true;
+  $("brOut").innerHTML = `<p class="hint">Making one test model per category in ${esc(nice(jobs[0][1][0]))}, ${esc(cols[0])}: front and ${esc(label(pose))}…</p><div class="gallery" id="brGal"></div>`;
+  try {
+    for (const [cat, tops] of jobs) {
+      const body = { ...brBody(g, cat, [tops[0]], [cols[0]]), models: 1, preview_pose: pose };
+      delete body.tops; delete body.auto_bottom;
+      let st = await api("/api/preview", body);
+      while (!st.done) { await new Promise((r) => setTimeout(r, 4000)); st = await api(`/api/preview/${st.id}`); }
+      if (st.error || !st.result) { $("brGal").insertAdjacentHTML("beforeend", `<p class="e">${esc(CAT_NAMES[cat])}: ${esc(st.error || "no photo")}</p>`); continue; }
+      // each test replaces the last one on the server: the photos are kept here in the page
+      for (const [rel, what] of [[st.result.replace(/[^/]+\.png$/, "front_main.png"), "front"], [st.result, label(pose)]]) {
+        if (what === "front" && pose === "front_main") continue;
+        const blob = await (await fetch("/files/" + rel.split("/").map(encodeURIComponent).join("/"))).blob();
+        $("brGal").insertAdjacentHTML("beforeend", `<a class="card" href="${URL.createObjectURL(blob)}" target="_blank" rel="noopener"><img src="${URL.createObjectURL(blob)}" alt=""><span class="cap"><b>${esc(CAT_NAMES[cat])}</b> · ${esc(what)}</span></a>`);
+      }
+    }
+    $("brGal").insertAdjacentHTML("afterend", '<p class="hint">Happy with the look? Press Run. Not right? Tell Claude what to change in the brand settings.</p>');
+  } catch (e) { $("brErr").textContent = e.message; }
+  $("brTest").disabled = $("brRun").disabled = false;
+}
+async function brStartRun() {
+  const { g, jobs, cols } = brPlan(); $("brErr").textContent = "";
+  if (!g || !jobs.length || !cols.length) { $("brErr").textContent = "Pick a brand, at least one category, style and colour."; return; }
+  if (!confirm(`Start the ${g.marketplace} shoot: ${jobs.length} categories, ${cols.length} colours, ${+$("brModels").value || 1} models each? It runs on the server and uploads to Google Drive.`)) return;
+  try {
+    const r = await api("/api/runs/start", { bodies: jobs.map(([cat, tops]) => brBody(g, cat, tops, cols)), label: `${g.marketplace} brand shoot` });
+    $("brOut").innerHTML = `<p class="hint">Started (${r.batches} batches, one after another). Follow it on the Dashboard; photos upload to Drive as they pass QC.</p>`;
+  } catch (e) { $("brErr").textContent = e.message; }
+}
+function initBrandShoot() {
+  ["#brCats", "#brTops", "#brCols"].forEach((id) => $(id).addEventListener("change", brRefreshSummary));
+  $("brModels").oninput = brRefreshSummary; $("brGuide").onchange = brRefreshSummary; $("brFabric").onchange = brRender;
+  $("brTest").onclick = brTestRun; $("brRun").onclick = brStartRun;
+  if (!isAdmin()) $("brRun").classList.add("hide");
+}
 async function initListings() {
   $("lsMarkets").innerHTML = Object.entries(MARKET_NAMES).map(([k, v]) => `<label class="check"><input type="checkbox" value="${k}" checked> <span>${v}</span></label>`).join("");
   $("lsTemplates").innerHTML = Object.entries(MARKET_NAMES).filter(([k]) => k !== "shopify").map(([k, v]) => `<label class="field"><span>${v} template (.xlsx)</span><input type="file" data-m="${k}" accept=".xlsx,.xlsm"></label>`).join("");
@@ -1144,7 +1244,7 @@ async function initDropbox() {
 }
 function initCloud() {
   ["tabPrints", "tabMarket", "tabListings"].forEach((id) => $(id).classList.remove("hide"));
-  initGuide(); initPrints(); initDriveRun(); initListings(); if (isAdmin()) initDropbox();
+  initGuide(); initBrandShoot(); initPrints(); initDriveRun(); initListings(); if (isAdmin()) initDropbox();
   ["signOut", "agentPanel", "setsPanel", "drivePanel", "saveCloud"].forEach((id) => $(id).classList.remove("hide"));
   // on the server there's no local folder to copy to: photos go to Google Drive by themselves
   ["exportSelField", "exportPathField", "exportWhatRow", "driveHint", "outDirBox"].forEach((id) => $(id).classList.add("hide"));
@@ -1192,7 +1292,7 @@ function initCloud() {
 
 // Studio and Recolor are two tabs of one page; Recolor loads the first time it is opened.
 const TABS = { dashboard: "dashTab", studio: "studioTab", recolor: "recolorTab", prints: "printTab", listings: "listingsTab", market: "marketTab", settings: "settingsTab" };
-const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", listings: "Listings", market: "Marketplace", settings: "Settings" };
+const TITLES = { dashboard: "Dashboard", recolor: "Recolor", prints: "Print placement", listings: "Listings", market: "Brand shoots", settings: "Settings" };
 function showTab(tab) {
   const f = $("recolorTab");
   if (tab === "recolor" && !f.src) f.src = "/recolor/";
@@ -1204,6 +1304,7 @@ function showTab(tab) {
   if (tab === "dashboard") setTimeout(loadDashboard);  // after the whole script has loaded
   if (tab === "prints" && S.opts && S.opts.cloud) { setTimeout(printTabRefresh); setTimeout(driveRunRefresh); }
   if (tab === "listings" && S.opts && S.opts.cloud) setTimeout(listingsRefresh);
+  if (tab === "market" && S.opts) setTimeout(brRender);
 }
 // "#studio" is a tab; "#stepColours" is a part of one (the Studio step links): that tab stays open
 function tabFromHash() {

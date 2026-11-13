@@ -893,7 +893,10 @@ def clean_guide(ans: dict, filename: str) -> dict:
         ours = next((pose for word, pose in POSE_ALIASES if word in name), None)
         if ours in poses or name in poses:
             continue
-        if ours:  # the Studio's own wording stays (it keeps e.g. a true rear view), the guide's direction is added
+        if ours == "front_main":  # the guide's own front pose (e.g. relaxed, not a stiff straight stance) replaces ours
+            custom[ours] = f"front view, body and face toward the camera, the whole front of the garment visible; {direction}"
+            poses.append(ours)
+        elif ours:  # the Studio's own wording stays (it keeps e.g. a true rear view), the guide's direction is added
             custom[ours] = f"{L.POSES[ours]}; {direction}"
             poses.append(ours)
         else:
@@ -902,7 +905,9 @@ def clean_guide(ans: dict, filename: str) -> dict:
     if "front_main" not in poses:
         poses.insert(0, "front_main")
     model, avoid = words(ans.get("model"), 600).rstrip("."), words(ans.get("avoid"), 300).rstrip(".")
-    extra = (model + (". " if model and avoid else "") + (f"Avoid: {avoid}" if avoid else ""))[:1000]
+    extra = model + (". " if model and avoid else "") + (f"Avoid: {avoid}" if avoid else "")
+    if len(extra) > 1000:  # cut at the last whole item, never in the middle of a word
+        extra = extra[:1000].rsplit(",", 1)[0]
     return {"marketplace": words(ans.get("marketplace"), 60) or os.path.splitext(filename)[0][:60],
             "canvas": canvas, "background": words(ans.get("background"), 200),
             "shot": {"full": "outfit", "top": "top"}.get(framing, ""), "poses": poses, "custom_poses": custom,
