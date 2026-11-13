@@ -742,3 +742,14 @@ def test_brand_sample_looks_go_to_adult_models_in_turn():
     w = studio.Spec(category="Women", top="HalfSleeveTee", top_colours=["Black"], looks=brand_settings(g, "Women")["looks"])
     assert "messy high bun" in studio.describe_model(w, 1) and "olive" in studio.describe_model(w, 2)
     assert studio.describe_model(w, 1) != studio.describe_model(w, 3)  # same look, own face
+
+
+def test_a_beige_brand_backdrop_passes_the_background_check():
+    import numpy as np
+
+    from jagimage import studio
+    from jagimage.recolor import hex_to_lab
+
+    lab = np.tile(hex_to_lab("#E2CFB5").astype(np.float32), (200, 200, 1))
+    assert studio.backdrop_problem(lab) is not None  # too warm for the grey studio's check
+    assert studio.backdrop_problem(lab, studio.backdrop_chroma("warm beige (#EFE6DA) split backdrop")) is None

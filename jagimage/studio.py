@@ -664,7 +664,22 @@ def is_rate_limit(exc: Exception) -> bool:
         or ("resource_exhausted" in text and "credits" not in text)
 
 
-def backdrop_problem(lab) -> Optional[str]:
+def backdrop_chroma(background: str) -> float:
+    """How colourful a brand's backdrop may be (a warm beige studio is a little colourful); 0: the grey studio's limit."""
+    if not background:
+        return 0.0
+    m = re.search(r"#[0-9A-Fa-f]{6}", background)
+    if m:
+        import numpy as np
+
+        from .recolor import hex_to_lab
+
+        lab = hex_to_lab(m.group(0))
+        return max(BACKDROP_MAX_CHROMA, float(np.hypot(lab[1], lab[2])) + 0.03)
+    return 0.06 if re.search(r"beige|cream|ivory|sand|warm|tint", background, re.I) else 0.0
+
+
+def backdrop_problem(lab, max_chroma: float = 0.0) -> Optional[str]:
     """Why an AI photo isn't on the plain light grey studio backdrop (the AI sometimes ignores it and
     puts the model outdoors), or None. Reads the top edge and the upper sides, where only backdrop is:
     tested studio photos stay below 0.008 colourfulness and above 0.84 lightness there."""
@@ -674,7 +689,7 @@ def backdrop_problem(lab) -> Optional[str]:
     edge = np.concatenate([lab[:12].reshape(-1, 3), lab[:int(h * 0.7), :12].reshape(-1, 3), lab[:int(h * 0.7), -12:].reshape(-1, 3)])
     colourful = float(np.percentile(np.hypot(edge[:, 1], edge[:, 2]), 90))
     light = float(np.median(edge[:, 0]))
-    if colourful > BACKDROP_MAX_CHROMA or light < BACKDROP_MIN_LIGHT:
+    if colourful > (max_chroma or BACKDROP_MAX_CHROMA) or light < BACKDROP_MIN_LIGHT:
         return f"the background isn't the plain studio backdrop (colour {colourful:.3f}, lightness {light:.2f})"
     return None
 
@@ -1184,7 +1199,7 @@ class Batch:
         from .recolor import MASK_VERSION, MaskError, garment_mask, rgb_to_lab, save_mask, split_outfit
 
         lab = rgb_to_lab(np.asarray(Image.open(path).convert("RGB")))
-        why = backdrop_problem(lab)
+        why = backdrop_problem(lab, backdrop_chroma(self.spec.background))
         if why:
             raise MaskError(why)
         top, _ = garment_mask(lab, TOP_BASES[base[0]][1])
