@@ -26,7 +26,7 @@ from PIL import Image
 
 from . import library as L
 from . import printqc
-from .prints import PLACES, PrintError, adjust, artwork, measure, open_image, place_print, rule_check
+from .prints import PLACES, PrintError, adjust, artwork, measure, open_image, place_print, rule_check, visible_part
 from .recolor import hex_to_lab, rgb_to_lab
 from .segment import SegmentError, shirt_mask
 
@@ -617,6 +617,7 @@ class PrintRun:
                     self.counts["left_out"] += 1
                     self._note("left_out", colour=prod["colour"], print=pname, why=verdict["reason"])
                     continue
+                art = visible_part(art, hex_)  # sized by what shows on this colour (a dark backing doesn't count)
                 n += 1
                 sku = make_sku(self.pattern, sku_fields(self.brand, prod, pname, n))
                 from .prints import fit_for
