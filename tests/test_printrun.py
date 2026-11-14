@@ -893,3 +893,12 @@ def test_library_prints_name_the_photos_by_their_design_number():
     assert printrun._file_name("MENS_FULL SLEEVE_4_GREY_ Fianl") == "4"
     assert printrun._file_name("Unicorn 02") == "Unicorn 02"  # a plain name stays as it is
     assert printrun._file_name("a/b") == "a-b"
+
+
+def test_hoodie_prints_sit_higher_and_stay_above_the_pocket():
+    from jagimage.prints import FIT, fit_for, rule
+
+    assert fit_for("Kids_Boys", "Hoodie") == "kids_hoodie" and fit_for("Men", "Hoodie") == "men_hoodie"
+    assert fit_for("Kids_Boys", "Sweatshirt") == "kids"
+    _, below, _, tall = rule("chest_large:kids_hoodie")
+    assert below < FIT["kids"][1] and tall < FIT["kids"][2]

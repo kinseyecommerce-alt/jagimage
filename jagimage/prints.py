@@ -15,8 +15,8 @@ from scipy import ndimage
 PLACES: Dict[str, Tuple[float, float, float]] = {
     "chest_large": (0.45, 0.20, 0.0),  # centre front: sized by who wears it and the design's shape (FIT)
     "chest_medium": (0.42, 0.14, 0.0),
-    "left_chest": (0.17, 0.16, 0.22),  # the wearer's left chest = the viewer's right in a front photo
-    "zip_chest": (0.17, 0.16, 0.0),    # a zip hoodie: beside the zip on the wearer's left chest (offset from ZIP_GAP_CM)
+    "left_chest": (0.17, 0.11, 0.22),  # the wearer's left chest = the viewer's right in a front photo
+    "zip_chest": (0.17, 0.11, 0.0),    # a zip hoodie: beside the zip on the wearer's left chest (offset from ZIP_GAP_CM)
 }
 # a zip hoodie's print starts this far (cm) from the zip, on the viewer's right; the zip's own half-width is added
 ZIP_GAP_CM, ZIP_HALF_CM = 1.0, 0.4
@@ -141,8 +141,9 @@ def adjust(dx=0.0, dy=0.0, scale=1.0) -> dict:
 # tall artwork is held by its height. As shares of the chest width (a 4-5 year old's tee is about 12-13 in
 # across, a man's medium about 20 in), for "chest_large": (width, top line below the neckline, most height).
 FIT = {"kids": (0.45, 0.20, 0.50),   # approved by the shop on its kids' tees (the GYM print, a little higher, 2026-11)
-       "women": (0.48, 0.20, 0.60),
-       "men": (0.55, 0.18, 0.68),
+       "women": (0.48, 0.20, 0.54),
+       # a tall print stops at mid-chest height on adults (a long one ran down onto the stomach, 2026-11)
+       "men": (0.55, 0.18, 0.60),
        # oversized (drop-shoulder) tees: a lower, wider neckline, so the print starts further down and a tall
        # print is held a little shorter (it no longer reaches the neckband)
        "men_oversized": (0.52, 0.26, 0.60),
@@ -151,7 +152,11 @@ FIT = {"kids": (0.45, 0.20, 0.50),   # approved by the shop on its kids' tees (t
        # (approved on the kids' sleeveless, 2026-11)
        "kids_sleeveless": (0.56, 0.28, 0.60),
        "women_sleeveless": (0.56, 0.26, 0.66),
-       "men_sleeveless": (0.64, 0.24, 0.72)}
+       "men_sleeveless": (0.64, 0.24, 0.72),
+       # pullover hoodies: the print sits higher and stays above the front pocket (it hung down to the pocket)
+       "kids_hoodie": (0.42, 0.15, 0.40),
+       "women_hoodie": (0.44, 0.15, 0.44),
+       "men_hoodie": (0.50, 0.14, 0.48)}
 SQUARE = (0.75, 1.33)   # width / height of a square-ish design
 SQUARE_SHARE = 0.85     # ...which gets this share of the full width
 
@@ -163,6 +168,8 @@ def fit_for(category: str, style: str = "") -> str:
         return f"{who}_oversized"
     if style == "SleevelessTee" and f"{who}_sleeveless" in FIT:
         return f"{who}_sleeveless"
+    if style == "Hoodie" and f"{who}_hoodie" in FIT:
+        return f"{who}_hoodie"
     return who
 
 
