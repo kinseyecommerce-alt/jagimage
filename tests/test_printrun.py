@@ -912,14 +912,3 @@ def test_a_faint_haze_or_stray_speck_on_the_canvas_doesnt_shrink_the_design():
     a[10:14, 10:14] = (255, 255, 255, 255)        # a stray speck in the corner
     a[100:900, 100:900, 3] = np.maximum(a[100:900, 100:900, 3], 60)  # a faint haze
     assert design_box(Image.fromarray(a)) == (350, 400, 650, 600)
-
-
-def test_a_dark_backing_that_doesnt_show_on_a_black_tee_doesnt_shrink_the_print():
-    from jagimage.prints import visible_part
-
-    a = np.zeros((1000, 1000, 4), np.uint8)
-    a[100:900, 100:900] = (5, 5, 5, 255)          # a near-black backing, drawn for black tees
-    a[400:600, 350:650] = (255, 255, 255, 255)    # the design that shows
-    on_black = visible_part(Image.fromarray(a), "#000000")
-    assert on_black.width < 400 and on_black.height < 300
-    assert visible_part(Image.fromarray(a), "#FF0000").size == (840, 840)  # on red the backing shows: kept

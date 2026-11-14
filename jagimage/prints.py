@@ -81,33 +81,6 @@ def artwork(img: Image.Image) -> Image.Image:
     return Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA")
 
 
-def visible_part(art: Image.Image, shirt_hex: str, pad: float = 0.02) -> Image.Image:
-    """The print cut to the part that shows on a shirt of this colour: a dark backing or frame drawn for a black
-    tee is "no ink" there, and only made the visible design come out small. Nothing that shows is changed."""
-    from .recolor import hex_to_lab, rgb_to_lab
-
-    a = artwork(art)
-    try:
-        shirt = hex_to_lab(shirt_hex)
-    except (ValueError, TypeError):
-        return a
-    small = a.copy()
-    small.thumbnail((400, 400))
-    rgba = np.asarray(small)
-    seen = (rgba[..., 3] > 128) & (np.linalg.norm(rgb_to_lab(rgba[..., :3]) - shirt, axis=-1) > 0.15)  # (visible ink is 0.18 away)
-    if seen.sum() < 20:
-        return a
-    m = Image.fromarray((seen * 255).astype(np.uint8), "L")
-    box = design_box(Image.merge("RGBA", [m, m, m, m]))
-    if not box:
-        return a
-    k = a.width / small.width
-    p = pad * max(a.size)
-    x0, y0, x1, y1 = (max(0, int(box[0] * k - p)), max(0, int(box[1] * k - p)),
-                      min(a.width, int(box[2] * k + p)), min(a.height, int(box[3] * k + p)))
-    return a.crop((x0, y0, x1, y1))
-
-
 def design_box(art: Image.Image):
     """The box of the design itself on its canvas: its solid ink, without a faint haze or glow around it and
     without stray specks left on the canvas (they made a design come out small). None for an empty print."""
