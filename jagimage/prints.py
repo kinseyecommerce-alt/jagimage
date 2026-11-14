@@ -81,6 +81,29 @@ def artwork(img: Image.Image) -> Image.Image:
     return Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA")
 
 
+def design_box(art: Image.Image):
+    """The box of the design itself on its canvas: its solid ink, without a faint haze or glow around it and
+    without stray specks left on the canvas (they made a design come out small). None for an empty print."""
+    from scipy import ndimage
+
+    a = np.asarray(art.getchannel("A"))
+    solid = a > 128
+    if not solid.any():  # a print made only of soft ink: its faint parts are all there is
+        solid = a > 40
+        if not solid.any():
+            return None
+    # specks: small separate bits far from the rest (a dot of the design's own, like the i's dot, is kept
+    # because it lies within the design's reach)
+    near = ndimage.binary_dilation(solid, iterations=max(2, int(0.03 * max(a.shape))))
+    lab, n = ndimage.label(near)
+    if n > 1:
+        sizes = ndimage.sum(solid, lab, index=range(1, n + 1))
+        keep = [i + 1 for i, v in enumerate(sizes) if v >= 0.01 * sizes.max()]
+        solid = solid & np.isin(lab, keep)
+    ys, xs = np.nonzero(solid)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
 def chest(mask: np.ndarray):
     """The chest of the shirt in a front photo: (centre x, neckline y, chest width) in pixels."""
     m = mask > 0.5
@@ -197,7 +220,7 @@ def _layout(mask: np.ndarray, art: Image.Image, place: str, dx=0.0, dy=0.0, scal
     H, W = mask.shape[:2]
     cx, neck, cw = chest(mask)
     art = artwork(art)
-    bbox = art.getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()  # faint haze around a design isn't the design
+    bbox = design_box(art)
     if not bbox:
         raise PrintError("the print is empty (fully transparent)")
     art = art.crop(bbox)  # the design itself, without the empty canvas around it

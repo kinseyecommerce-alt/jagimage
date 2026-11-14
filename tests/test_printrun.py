@@ -902,3 +902,13 @@ def test_hoodie_prints_sit_higher_and_stay_above_the_pocket():
     assert fit_for("Kids_Boys", "Sweatshirt") == "kids"
     _, below, _, tall = rule("chest_large:kids_hoodie")
     assert below < FIT["kids"][1] and tall < FIT["kids"][2]
+
+
+def test_a_faint_haze_or_stray_speck_on_the_canvas_doesnt_shrink_the_design():
+    from jagimage.prints import design_box
+
+    a = np.zeros((1000, 1000, 4), np.uint8)
+    a[400:600, 350:650] = (255, 255, 255, 255)
+    a[10:14, 10:14] = (255, 255, 255, 255)        # a stray speck in the corner
+    a[100:900, 100:900, 3] = np.maximum(a[100:900, 100:900, 3], 60)  # a faint haze
+    assert design_box(Image.fromarray(a)) == (350, 400, 650, 600)
