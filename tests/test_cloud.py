@@ -296,8 +296,9 @@ class FakeOpenAIChat:
         self.answer, self.models = answer, []
         self.chat = SimpleNamespace(completions=self)
 
-    def create(self, model, messages, response_format):
+    def create(self, model, messages, response_format, **extra):
         self.models.append(model)
+        assert extra == ({"reasoning_effort": "minimal"} if model.startswith("gpt-5") else {})
         if len(self.models) == 1:
             raise RuntimeError(f"The model `{model}` does not exist or you do not have access to it.")
         assert response_format == {"type": "json_object"} and "JSON schema" in messages[0]["content"]
@@ -322,7 +323,7 @@ def test_agent_uses_the_openai_key_when_there_is_no_gemini_key(tmp_path, monkeyp
                                                    "provider": "gemini", "gemini_model": "flash", "batch": True}, cookie=cookie)
         plan = json.loads(body)
         assert code == 200, plan
-        assert len(chat.models) == 2 and cloud.agent.used == "openai"
+        assert chat.models == ["gpt-4.1-mini", "gpt-5-mini"] and cloud.agent.used == "openai"  # the low-cost model first
         assert plan["batches"][0]["styles"] == ["HalfSleeveTee", "FullSleeveTee", "SleevelessTee", "Hoodie", "Sweatshirt"]
         assert "OpenAI" in plan["reply"]
         bodies = cloud.plans[plan["plan_id"]]["bodies"]
@@ -436,7 +437,7 @@ def test_guide_screenshot_goes_to_openai_as_a_picture(monkeypatch):
     chat = FakeOpenAIChat(MYNTRA)
     seen = []
     real = chat.create
-    chat.create = lambda model, messages, response_format: (seen.append(messages), real(model, messages, response_format))[1]
+    chat.create = lambda model, messages, response_format, **kw: (seen.append(messages), real(model, messages, response_format, **kw))[1]
     buf = io.BytesIO()
     Image.new("RGB", (600, 800), "#cccccc").save(buf, "PNG")
     g = Agent(openai_client=chat).read_guide("page1.png", buf.getvalue())
@@ -699,3 +700,29 @@ def test_remake_and_approve_routes_answer(tmp_path):
         assert call(base + f"/api/batches/{sp.name}/remake", {"models": [9]}, cookie=cookie)[0] == 400
     finally:
         httpd.shutdown()
+
+
+def test_a_failed_gemini_is_skipped_for_a_while_and_the_artwork_is_sent_small(monkeypatch):
+    from PIL import Image
+
+    from jagimage.cloud import Agent
+
+    chat = FakeOpenAIChat({"ok": True, "score": 9, "issues": [], "dx": 0, "dy": 0, "scale": 1})
+    seen = []
+    real = chat.create
+    chat.create = lambda model, messages, response_format, **kw: (seen.append(messages), real(model, messages, response_format, **kw))[1]
+    a = Agent(openai_client=chat)
+    calls = []
+
+    def no_credit(*args):
+        calls.append(1)
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(a, "_ask_gemini", no_credit)
+    photo, art = Image.new("RGB", (400, 500), "black"), Image.new("RGBA", (200, 200), (255, 0, 0, 255))
+    a.check_print(photo, art)
+    a.check_print(photo, art)
+    assert calls == [1]  # tried once, then straight to OpenAI
+    parts = seen[-1][1]["content"]
+    assert parts[1]["image_url"]["detail"] == "auto" and parts[2]["image_url"]["detail"] == "low"

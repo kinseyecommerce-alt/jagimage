@@ -1004,12 +1004,16 @@ class Agent:
     """Turns a request in plain words into Studio batch requests with their cost. It only plans:
     nothing is made until the person presses Start on the plan."""
 
-    OPENAI_MODELS = ("gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini")  # first one the account can use
+    # the low-cost models first (the first one the account can use): the jobs here (finding the shirt, judging a
+    # print's placement, planning a batch) are short answers that a small model does well
+    OPENAI_MODELS = ("gpt-4.1-mini", "gpt-5-mini", "gpt-4o-mini")
+    GEMINI_PAUSE = 1800  # after Gemini fails (e.g. out of credits), go straight to OpenAI for this long
 
     def __init__(self, client=None, model: Optional[str] = None, openai_client=None):
         self.client, self.openai_client = client, openai_client
         self.model = model or os.environ.get("JAGIMAGE_AGENT_MODEL", "gemini-flash-latest")
         self.used = None  # "gemini" or "openai": which one answered last
+        self.gemini_failed = 0.0  # when Gemini last failed (with OpenAI there, it isn't tried again for a while)
 
     def _ask(self, message: str, system: Optional[str] = None, schema: dict = AGENT_SCHEMA, images=()) -> dict:
         """Plans with whichever AI has a key: Gemini first, OpenAI when there is no Gemini key or Gemini
@@ -1019,7 +1023,7 @@ class Agent:
         openai = self.openai_client is not None or bool(os.environ.get("OPENAI_API_KEY"))
         if not gemini and not openai:
             raise RuntimeError("The agent needs an AI key: add a Gemini or OpenAI key in Settings → API keys")
-        if gemini:
+        if gemini and not (openai and time.time() - self.gemini_failed < self.GEMINI_PAUSE):
             try:
                 ans = self._ask_gemini(message, system, schema, images)
                 self.used = "gemini"
@@ -1027,6 +1031,7 @@ class Agent:
             except Exception:
                 if not openai:
                     raise
+                self.gemini_failed = time.time()
         ans = self._ask_openai(message, system, schema, images)
         self.used = "openai"
         return ans
@@ -1040,7 +1045,7 @@ class Agent:
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         resp = client.models.generate_content(
-            model=self.model, contents=[types.Part.from_bytes(data=d, mime_type=m) for d, m in images] + [message] if images else message,
+            model=self.model, contents=[types.Part.from_bytes(data=i[0], mime_type=i[1]) for i in images] + [message] if images else message,
             config=types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json",
                                                response_schema=schema, temperature=0.1))
         return json.loads(resp.text)
@@ -1053,13 +1058,17 @@ class Agent:
             client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         system = system + "\nAnswer with one JSON object only, shaped like this JSON schema:\n" + json.dumps(schema)
         content = message if not images else [{"type": "text", "text": message}] + [
-            {"type": "image_url", "image_url": {"url": f"data:{m};base64," + base64.b64encode(d).decode()}} for d, m in images]
+            # an image may say "low" (a third item): the model sees it small, for a fraction of the cost
+            {"type": "image_url", "image_url": {"url": f"data:{i[1]};base64," + base64.b64encode(i[0]).decode(),
+                                                "detail": i[2] if len(i) > 2 else "auto"}} for i in images]
         models = [os.environ["JAGIMAGE_AGENT_OPENAI_MODEL"]] if os.environ.get("JAGIMAGE_AGENT_OPENAI_MODEL") else self.OPENAI_MODELS
         last = None
         for model in models:
             try:
+                extra = {"reasoning_effort": "minimal"} if model.startswith("gpt-5") else {}  # no paid thinking for short answers
                 resp = client.chat.completions.create(model=model, response_format={"type": "json_object"},
-                                                      messages=[{"role": "system", "content": system}, {"role": "user", "content": content}])
+                                                      messages=[{"role": "system", "content": system}, {"role": "user", "content": content}],
+                                                      **extra)
                 return json.loads(resp.choices[0].message.content)
             except Exception as exc:  # a model this account can't use: try the next one
                 last = exc
@@ -1138,7 +1147,7 @@ class Agent:
         facts = ("" if not measured else "\nMeasured by the software: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in measured.items())
                  + " (gaps, width and off-centre as shares of the chest width; hidden as a share of the print).")
         ans = self._ask("Check the print placement on image 1 (image 2 is the artwork)." + facts, PRINT_CHECK_SYSTEM,
-                        PRINT_CHECK_SCHEMA, [jpeg(photo, 1024), jpeg(art, 512)])
+                        PRINT_CHECK_SCHEMA, [jpeg(photo, 1024), (*jpeg(art, 512), "low")])  # the artwork only needs a glance
         fix = adjust(ans.get("dx"), ans.get("dy"), ans.get("scale"))
         issues = [" ".join(str(i).split())[:160] for i in (ans.get("issues") or []) if str(i).strip()][:5]
         score = max(0, min(10, int(ans.get("score") or 0)))
