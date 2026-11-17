@@ -624,9 +624,8 @@ class DriveSync:
             if b is None or b.spec.base_from or not b.spec.free_after_upload:
                 continue
             twins = [studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
-            if (root / "_complete").exists():
-                if waiting(root) or any(waiting(root.parent / t) or not (root.parent / t / "_complete").exists() for t in twins):
-                    continue
+            if (root / "_complete").exists() and not waiting(root) and all(
+                    not waiting(root.parent / t) and (root.parent / t / "_complete").exists() for t in twins):
                 pngs = sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png"))
             else:  # a batch still going: the models already finished (every fabric) and all uploaded leave now
                 pngs = []

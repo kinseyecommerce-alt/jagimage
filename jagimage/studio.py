@@ -890,6 +890,8 @@ class Batch:
         if stage == "prints":
             self.run_prints()
             return self.counts
+        if stage != "bases":  # an earlier run's "complete" no longer holds while this one makes photos
+            (self.root / "_complete").unlink(missing_ok=True)
         if self.spec.base_from:  # a twin only recolours the base photos of its source batch
             stage = "recolor"
         if stage == "qc":  # the QC agent looks at the bases already made; rejected ones are made again
