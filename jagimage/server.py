@@ -231,7 +231,7 @@ class Job:
         if e["kind"] == "recoloured" and self.batch is self.batches[0]:
             p = Path(e["path"])  # a twin fabric's photos are in their own batch folder, beside this one
             self.recent.appendleft(str(p.relative_to(self.batch.root) if self.batch.root in p.parents else p.relative_to(self.batch.root.parent)))
-        if e["kind"] in ("ai_done", "recoloured", "errors", "batch"):
+        if e["kind"] in ("ai_done", "recoloured", "errors", "batch", "waiting"):
             self.log.appendleft(e)
         if e["kind"] == "batch":
             self.batch_state = e

@@ -485,3 +485,18 @@ def test_a_twin_colour_with_no_shoot_doesnt_keep_a_model_unfinished(tmp_path, sh
     twin = b.twins()[0]
     shoots = {twin.spec.base_key(t, bt) for t, bt in twin.spec.pairs(1)}
     assert (tmp_path / sp.name / "m0001" / studio.MODEL_DONE).exists(), shoots
+
+
+def test_a_new_ai_photo_waits_while_the_disk_is_nearly_full(tmp_path, shop_colours, monkeypatch):
+    import threading
+
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="PureCotton", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False)
+    events, calls = [], []
+    b = studio.Batch(sp, out=tmp_path, generate=lambda p, r: calls.append(p) or fake_generate(p, r), workers=1,
+                     on_event=events.append)
+    monkeypatch.setattr(studio, "MIN_FREE_BYTES", 10 ** 18)  # never enough
+    monkeypatch.setattr(studio, "DISK_WAIT_S", 0.05)
+    threading.Timer(0.3, b.stop.set).start()  # the person stops the run while it waits
+    b.run_model(1)
+    assert not calls and any(e["kind"] == "waiting" for e in events)  # nothing made (or paid for) on a full disk

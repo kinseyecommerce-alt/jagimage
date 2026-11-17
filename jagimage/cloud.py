@@ -624,15 +624,14 @@ class DriveSync:
             if b is None or b.spec.base_from or not b.spec.free_after_upload:
                 continue
             twins = [studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
-            if (root / "_complete").exists() and not waiting(root) and all(
-                    not waiting(root.parent / t) and (root.parent / t / "_complete").exists() for t in twins):
-                pngs = sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png"))
-            else:  # a batch still going: the models already finished (every fabric) and all uploaded leave now
-                pngs = []
-                for md in sorted(root.glob("m[0-9][0-9][0-9][0-9]")):
-                    if (md / studio.MODEL_DONE).exists() and not any(
-                            waiting(r, md.name) for r in [root] + [root.parent / t for t in twins]):
-                        pngs += sorted(md.glob("_base/*/*.png"))
+            # model by model: a model's base photos leave once all its photos (every fabric) are on Drive, and it is
+            # finished: marked so by its run, or its batch and the batch's twins are complete
+            complete = (root / "_complete").exists() and all((root.parent / t / "_complete").exists() for t in twins)
+            pngs = []
+            for md in sorted(root.glob("m[0-9][0-9][0-9][0-9]")):
+                if (complete or (md / studio.MODEL_DONE).exists()) and not any(
+                        waiting(r, md.name) for r in [root] + [root.parent / t for t in twins]):
+                    pngs += sorted(md.glob("_base/*/*.png"))
             for png in pngs:
                 if "_mask" in png.name or ".tmp." in png.name or studio.archived(png):
                     continue  # masks stay; a .tmp file is still being written

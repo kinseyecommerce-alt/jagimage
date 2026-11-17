@@ -131,6 +131,8 @@ WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paire
 ARCHIVED = ".archived"  # next to a base photo moved to Google Drive (kinseymodels2026/_bases/...) to free the disk
 MODEL_DONE = "_finished.json"  # in a model's folder: all its photos (every fabric) are made; its bases may go to Drive
 _TWIN_LOCK = threading.Lock()
+MIN_FREE_BYTES = 500_000_000  # a new AI photo waits while less than this is free on the disk
+DISK_WAIT_S = 30
 FACE_SIDE = 1280  # px: a model's saved face (its first front), the reference for its other top styles
 
 
@@ -1203,11 +1205,32 @@ class Batch:
             self._register_face(m, path)  # no-op once the model has a face in this category
         self._event("ai_done", model=m, path=str(path), base=base_dir(base), pose=pose)
 
+    def _wait_for_disk(self):
+        """A new AI photo waits while the disk is nearly full: finished photos and base photos leave for Drive
+        meanwhile. Without this a big batch filled the disk and its paid photos couldn't be saved."""
+        import shutil
+
+        said = False
+        while not self.stop.is_set():
+            try:
+                free = shutil.disk_usage(self.root).free
+            except OSError:
+                return
+            if free >= MIN_FREE_BYTES:
+                return
+            if not said:
+                self._event("waiting", path=str(self.root), error=f"disk nearly full ({free // 1_000_000} MB free): waiting for Drive")
+                said = True
+            self.stop.wait(DISK_WAIT_S)
+
     def _shoot(self, m, base, pose, path: Path, first_front: Path) -> bool:
         """Make one base photo if missing. False if it couldn't be made."""
         if path.exists() or archived(path):
             self._event("ai_skipped", model=m, path=str(path))
             return True
+        self._wait_for_disk()
+        if self.stop.is_set():
+            return False
         req = self._request(m, base, pose, path, first_front)
         if req is None:
             self._event("errors", model=m, path=str(path), error="its reference front is missing")
