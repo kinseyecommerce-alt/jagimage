@@ -443,3 +443,32 @@ def test_a_wrong_back_is_shot_again_from_its_front_on_drive(tmp_path, shop_colou
     counts = studio.Batch(sp, out=tmp_path, generate=gen, workers=1, restore=restore).run()
     assert len(calls) == 1 and str(front) in calls[0]  # only the back, made from the front brought back
     assert counts["recoloured"] == 1 and (tmp_path / sp.name / "m0001" / "_base" / "light-light" / "back.png").exists()
+
+
+def test_a_finished_model_goes_to_drive_while_its_batch_is_still_going(tmp_path, shop_colours):
+    """A big batch's base photos don't fit on the server: each model, once its photos in every fabric are made and
+    uploaded, sends its bases to Drive at once (not when the whole batch is done)."""
+    from jagimage.cloud import DriveSync
+
+    store = {}
+
+    class FakeDrive:
+        connected = True
+
+        def upload(self, local, parts, name):
+            store["/".join(parts + [name])] = 1
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="PureCotton", models=2,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False,
+                     drive_layout="catalogue", free_after_upload=True, also_fabrics=["CottonMix"])
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    (tmp_path / sp.name).mkdir(parents=True)
+    (tmp_path / sp.name / "spec.json").write_text(__import__("json").dumps(__import__("dataclasses").asdict(sp)))
+    b.run_model(1)  # model 1 done in both fabrics; model 2 not made yet (the batch is still going)
+    twin = tmp_path / studio.fabric_twin(sp, "CottonMix").name
+    assert (tmp_path / sp.name / "m0001" / studio.MODEL_DONE).exists() and list(twin.glob("m0001/*/*.jpg"))
+    DriveSync(FakeDrive(), lambda: str(tmp_path)).run_once()
+    front = tmp_path / sp.name / "m0001" / "_base" / "light-light" / "front_main.png"
+    assert not front.exists() and studio.archived(front)  # left the server
+    assert f"_bases/{sp.name}/m0001/light-light/front_main.png" in store
+    assert any(k.startswith("Cotton Mix/") for k in store) and any(k.startswith("Pure Cotton/") for k in store)
+    assert not (tmp_path / sp.name / "_complete").exists()

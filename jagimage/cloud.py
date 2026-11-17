@@ -605,21 +605,30 @@ class DriveSync:
         every photo made from them, its fabric twins' too, is on Drive: the disk holds only batches in progress."""
         from . import qcagent, studio
 
-        def waiting(r: Path) -> bool:
-            """A finished photo still to be uploaded. Photos held for review don't count: they keep their JPG on the
-            server, and a base that is needed again (to recolour them afresh) comes back from Drive."""
+        def waiting(r: Path, model: str = "m[0-9][0-9][0-9][0-9]") -> bool:
+            """A finished photo of batch r (of one model folder only, when given) still to be uploaded. Photos held
+            for review don't count: they keep their JPG on the server, and a base that is needed again (to recolour
+            them afresh) comes back from Drive."""
             gated = (b := self._batch(r)) is not None and b.spec.qc_agent
             return any(not gated or qcagent.passed(j.parent / "qc.json", j.name.rsplit("_", 1)[0])
-                       for j in r.glob("m[0-9][0-9][0-9][0-9]/*/*_*x*.jpg"))
+                       for j in r.glob(f"{model}/*/*_*x*.jpg"))
         roots = {spec.parent for spec in Path(self.out_dir()).glob("*/spec.json")}
         for root in sorted(roots):
             b = self._batch(root)
-            if b is None or b.spec.base_from or not b.spec.free_after_upload or not (root / "_complete").exists():
+            if b is None or b.spec.base_from or not b.spec.free_after_upload:
                 continue
             twins = [studio.fabric_twin(b.spec, f).name for f in b.spec.also_fabrics]
-            if waiting(root) or any(waiting(root.parent / t) or not (root.parent / t / "_complete").exists() for t in twins):
-                continue
-            for png in sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png")):
+            if (root / "_complete").exists():
+                if waiting(root) or any(waiting(root.parent / t) or not (root.parent / t / "_complete").exists() for t in twins):
+                    continue
+                pngs = sorted(root.glob("m[0-9][0-9][0-9][0-9]/_base/*/*.png"))
+            else:  # a batch still going: the models already finished (every fabric) and all uploaded leave now
+                pngs = []
+                for md in sorted(root.glob("m[0-9][0-9][0-9][0-9]")):
+                    if (md / studio.MODEL_DONE).exists() and not any(
+                            waiting(r, md.name) for r in [root] + [root.parent / t for t in twins]):
+                        pngs += sorted(md.glob("_base/*/*.png"))
+            for png in pngs:
                 if "_mask" in png.name or ".tmp." in png.name or studio.archived(png):
                     continue  # masks stay; a .tmp file is still being written
                 try:

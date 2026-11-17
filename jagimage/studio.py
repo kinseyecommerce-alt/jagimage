@@ -129,6 +129,9 @@ WHITE_TOP_BOTTOM = "Black"  # bottoms aren't made in white: a white top is paire
 
 
 ARCHIVED = ".archived"  # next to a base photo moved to Google Drive (kinseymodels2026/_bases/...) to free the disk
+MODEL_DONE = "_finished.json"  # in a model's folder: all its photos (every fabric) are made; its bases may go to Drive
+_TWIN_LOCK = threading.Lock()
+FACE_SIDE = 1280  # px: a model's saved face (its first front), the reference for its other top styles
 
 
 def archived(path: Path) -> bool:
@@ -915,14 +918,11 @@ class Batch:
         return self.counts
 
     def _run_twins(self):
-        """The same models recoloured into each of also_fabrics' colours, in a twin batch per fabric."""
-        for fabric in self.spec.also_fabrics:
+        """The same models recoloured into each of also_fabrics' colours, in a twin batch per fabric (each model's
+        twin photos are mostly made already, right after its own: this makes what is still missing)."""
+        for twin in self.twins():  # its photos count in this batch's totals
             if self.stop.is_set():
                 return
-            twin = Batch(fabric_twin(self.spec, fabric), out=self.root.parent, generate=None, workers=self.workers,
-                         retries=self.retries, on_event=lambda e: self._event(e.pop("kind"), **e), redo=self.redo,
-                         inspector=self._inspector, restore=self.restore)  # its photos count in this batch's totals
-            twin.stop = self.stop
             twin.run("recolor")
 
     def requalify(self):
@@ -1039,6 +1039,37 @@ class Batch:
                     continue
                 if stage != "bases" and (path.exists() or self._restore(m, base, pose, path)):
                     self._recolour_base(m, base, pose)
+        if stage == "bases" or self.stop.is_set() or spec.base_from:
+            return
+        # the other fabrics' colours of this model now, while its base photos are here: then the model is finished
+        # and its base photos can go to Drive at once (a whole batch's bases don't fit on the server's disk)
+        twins = self.twins()
+        for twin in twins:
+            if self.stop.is_set():
+                return
+            twin.run_model(m, "recolor")
+        if all(b.model_finished(m) for b in [self] + twins):
+            (md / MODEL_DONE).write_text(json.dumps({"time": round(time.time())}))
+
+    def twins(self) -> List["Batch"]:
+        """This batch's fabric twins (the same models in also_fabrics' colours), made once."""
+        with _TWIN_LOCK:
+            if getattr(self, "_twins", None) is None:
+                self._twins = []
+                for fabric in self.spec.also_fabrics:
+                    twin = Batch(fabric_twin(self.spec, fabric), out=self.root.parent, generate=None, workers=self.workers,
+                                 retries=self.retries, on_event=lambda e: self._event(e.pop("kind"), **e), redo=self.redo,
+                                 inspector=self._inspector, restore=self.restore)
+                    twin.stop = self.stop
+                    twin.root.mkdir(parents=True, exist_ok=True)
+                    (twin.root / "spec.json").write_text(json.dumps(asdict(twin.spec), indent=2))
+                    self._twins.append(twin)
+            return self._twins
+
+    def model_finished(self, m: int) -> bool:
+        """Every photo of model m in this batch is made."""
+        return all(self._done(self.out_path(m, t, b, pose), pose)
+                   for t, b in self.spec.pairs(m) for pose in self.spec.poses)
 
     def _restore(self, m, base, pose, path: Path) -> bool:
         """A base photo moved to Google Drive comes back when a photo made from it is missing (a colour or combo
@@ -1105,7 +1136,15 @@ class Batch:
 
         face.parent.mkdir(parents=True, exist_ok=True)
         tmp = face.with_name(f".{face.name}.{threading.get_ident()}.tmp")
-        shutil.copy2(front, tmp)
+        try:  # a smaller copy: the face reference doesn't need the full photo (hundreds of them stay on the server)
+            from PIL import Image
+
+            with Image.open(front) as im:
+                im = im.convert("RGB")
+                im.thumbnail((FACE_SIDE, FACE_SIDE), Image.LANCZOS)
+                im.save(tmp, "PNG", optimize=True)
+        except Exception:
+            shutil.copy2(front, tmp)
         tmp.replace(face)
 
     def _request(self, m, base, pose, path: Path, first_front: Path):
