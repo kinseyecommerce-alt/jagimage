@@ -737,3 +737,23 @@ def test_the_photo_qc_asks_the_stronger_model_with_its_usual_thinking():
     chat.create = lambda model, messages, response_format, **kw: (calls.append((model, kw)), real(model, messages, response_format, **kw))[1]
     Agent(openai_client=chat)._ask("check", "sys", {"type": "object"}, careful=True)
     assert calls == [("gpt-5-mini", {}), ("gpt-4.1-mini", {})]  # the first one "doesn't exist" in the fake
+
+
+def test_disk_clean_takes_off_only_what_can_be_made_again(tmp_path):
+    import os
+    import time
+
+    from jagimage.server import clean_data, data_usage
+
+    old = time.time() - 7 * 3600
+    (tmp_path / "print_cache").mkdir()
+    (tmp_path / "print_cache" / "a.png").write_bytes(b"x" * 1000)
+    (tmp_path / "white-abc").mkdir()
+    (tmp_path / "printed" / "run1" / "SKU").mkdir(parents=True)
+    (tmp_path / "printed" / "run1" / "SKU" / "319.jpg").write_bytes(b"x")
+    for p in (tmp_path / "print_cache" / "a.png", tmp_path / "white-abc", tmp_path / "printed" / "run1"):
+        os.utime(p, (old, old))
+    assert set(data_usage(tmp_path)) == {"print_cache", "white-abc", "printed"}
+    assert clean_data(tmp_path)["removed"] == 2
+    assert not (tmp_path / "print_cache" / "a.png").exists() and not (tmp_path / "white-abc").exists()
+    assert (tmp_path / "printed" / "run1" / "SKU" / "319.jpg").exists()  # print runs' photos stay

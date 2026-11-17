@@ -34,6 +34,49 @@ KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "meta": "META
 RUNPOD_URL_ENV = "JAGIMAGE_RUNPOD_URL"
 
 
+def _size_mb(path: Path) -> float:
+    n = 0
+    for f in path.rglob("*"):
+        try:
+            if f.is_file():
+                n += f.stat().st_size
+        except OSError:
+            pass
+    return round(n / 1e6, 1)
+
+
+def data_usage(data: Path) -> dict:
+    """MB per folder of the app's data folder (print cache, printed test photos, models, ...)."""
+    data = Path(data)
+    return {d.name: _size_mb(d) for d in sorted(data.iterdir()) if d.is_dir()} if data.exists() else {}
+
+
+def clean_data(data: Path, older_than: float = 6 * 3600) -> dict:
+    """Frees the server's disk of what can be made again, never photos waiting for Drive or for review: the
+    print artwork cache (downloaded again from the print library when needed), leftover temp folders of
+    white-background jobs. Print runs' photos stay (the Listing tab and review use them)."""
+    import shutil
+
+    data, now, freed, removed = Path(data), time.time(), 0.0, []
+
+    def drop(path: Path):
+        nonlocal freed
+        mb = _size_mb(path) if path.is_dir() else round(path.stat().st_size / 1e6, 1)
+        shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(missing_ok=True)
+        freed += mb
+        removed.append(path.name)
+
+    cache = data / "print_cache"
+    if cache.exists():
+        for f in cache.iterdir():
+            if now - f.stat().st_mtime > older_than:
+                drop(f)
+    for d in data.glob("white-*"):
+        if d.is_dir() and now - d.stat().st_mtime > older_than:
+            drop(d)
+    return {"freed_mb": round(freed, 1), "removed": len(removed)}
+
+
 def ready() -> dict:
     """Which engines can make images now: a key saved (RunPod also needs the pod address)."""
     return {p: bool(os.environ.get(env)) and (p != "runpod" or bool(os.environ.get(RUNPOD_URL_ENV)))
@@ -610,7 +653,7 @@ def make_handler(app: Studio):
                 return self._json(steps)
             if parts == ["api", "disk"]:  # admin: what fills the server's disk, per batch and kind of file
                 self._admin()
-                return self._json(app.disk())
+                return self._json({**app.disk(), "data": data_usage(c.data)})
             if parts == ["api", "drive", "top"]:  # what is directly in the photos folder (admin: to tidy it)
                 self._admin()
                 return self._json({"items": c.drive.top_items()})
@@ -826,6 +869,9 @@ def make_handler(app: Studio):
                 self._admin()
                 c.drive.set_client(body.get("client_id"), body.get("client_secret"))
                 return self._json(c.drive_status())
+            if parts == ["api", "disk", "clean"]:  # admin: take off what can be made again (nothing on Drive is touched)
+                self._admin()
+                return self._json(clean_data(c.data))
             if parts == ["api", "drive", "inventory"]:
                 self._admin()
                 if c.inventory.get("running"):
