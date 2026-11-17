@@ -472,3 +472,16 @@ def test_a_finished_model_goes_to_drive_while_its_batch_is_still_going(tmp_path,
     assert f"_bases/{sp.name}/m0001/light-light/front_main.png" in store
     assert any(k.startswith("Cotton Mix/") for k in store) and any(k.startswith("Pure Cotton/") for k in store)
     assert not (tmp_path / sp.name / "_complete").exists()
+
+
+def test_a_twin_colour_with_no_shoot_doesnt_keep_a_model_unfinished(tmp_path, shop_colours):
+    """The twin's list may have a light top on dark bottoms, a shoot the source batch doesn't make (never made
+    before either): the model still finishes, so its bases can go to Drive."""
+    sp = studio.Spec(category="Kids_Boys", top="HalfSleeveTee", bottom="Shorts", fabric="PureCotton", models=1,
+                     colour_pairs=[["Red", "Red"]], poses=["front_main"], one_base=True, keep_png=False,
+                     drive_layout="catalogue", free_after_upload=True, also_fabrics=["CottonMix"])
+    b = studio.Batch(sp, out=tmp_path, generate=fake_generate, workers=1)
+    b.run_model(1)
+    twin = b.twins()[0]
+    shoots = {twin.spec.base_key(t, bt) for t, bt in twin.spec.pairs(1)}
+    assert (tmp_path / sp.name / "m0001" / studio.MODEL_DONE).exists(), shoots

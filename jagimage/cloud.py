@@ -575,6 +575,12 @@ class DriveSync:
                     return row, None
                 except FileNotFoundError as exc:  # this photo (or its base) went meanwhile: skip it, send the rest
                     return row, ("skip", f"skipped: {type(exc).__name__}: {exc}"[:300])
+                except (OSError, SyntaxError) as exc:
+                    if "truncated" not in str(exc) and "cannot identify image" not in str(exc):
+                        return row, ("fail", f"{root.name}/{key}: {type(exc).__name__}: {exc}"[:400])
+                    # a photo half-written (e.g. the disk was full): it goes, so the next run makes it again
+                    Path(jpg).unlink(missing_ok=True)
+                    return row, ("skip", f"broken photo removed, made again next run: {root.name}/{key}"[:300])
                 except Exception as exc:  # network, quota, revoked access: try again next round
                     return row, ("fail", f"{root.name}/{key}: {type(exc).__name__}: {exc}"[:400])
             # several uploads at once, and finished photos leave the server every chunk (not only after hours)

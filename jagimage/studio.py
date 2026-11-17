@@ -1067,9 +1067,13 @@ class Batch:
             return self._twins
 
     def model_finished(self, m: int) -> bool:
-        """Every photo of model m in this batch is made."""
+        """Every photo of model m in this batch that can be made is made. A fabric twin's colour whose shoot (base
+        photo) its source batch doesn't make, e.g. a light top on dark bottoms, is never made: it doesn't count."""
+        def makeable(t, b, pose):
+            base = self.base_path(m, self.spec.base_key(t, b), pose)
+            return base.exists() or archived(base)
         return all(self._done(self.out_path(m, t, b, pose), pose)
-                   for t, b in self.spec.pairs(m) for pose in self.spec.poses)
+                   for t, b in self.spec.pairs(m) for pose in self.spec.poses if makeable(t, b, pose))
 
     def _restore(self, m, base, pose, path: Path) -> bool:
         """A base photo moved to Google Drive comes back when a photo made from it is missing (a colour or combo
