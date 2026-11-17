@@ -1007,6 +1007,8 @@ class Agent:
     # the low-cost models first (the first one the account can use): the jobs here (finding the shirt, judging a
     # print's placement, planning a batch) are short answers that a small model does well
     OPENAI_MODELS = ("gpt-4.1-mini", "gpt-5-mini", "gpt-4o-mini")
+    # the photo QC: the cheap model saw pockets on plain kids' shorts and threw most new photos away (2026-11)
+    CAREFUL_MODELS = ("gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini")
     GEMINI_PAUSE = 1800  # after Gemini fails (e.g. out of credits), go straight to OpenAI for this long
 
     def __init__(self, client=None, model: Optional[str] = None, openai_client=None):
@@ -1015,7 +1017,7 @@ class Agent:
         self.used = None  # "gemini" or "openai": which one answered last
         self.gemini_failed = 0.0  # when Gemini last failed (with OpenAI there, it isn't tried again for a while)
 
-    def _ask(self, message: str, system: Optional[str] = None, schema: dict = AGENT_SCHEMA, images=()) -> dict:
+    def _ask(self, message: str, system: Optional[str] = None, schema: dict = AGENT_SCHEMA, images=(), careful: bool = False) -> dict:
         """Plans with whichever AI has a key: Gemini first, OpenAI when there is no Gemini key or Gemini
         can't be used (e.g. out of credits)."""
         system = system or agent_system()
@@ -1032,7 +1034,7 @@ class Agent:
                 if not openai:
                     raise
                 self.gemini_failed = time.time()
-        ans = self._ask_openai(message, system, schema, images)
+        ans = self._ask_openai(message, system, schema, images, careful)
         self.used = "openai"
         return ans
 
@@ -1050,7 +1052,8 @@ class Agent:
                                                response_schema=schema, temperature=0.1))
         return json.loads(resp.text)
 
-    def _ask_openai(self, message: str, system: str, schema: dict = AGENT_SCHEMA, images=()) -> dict:
+    def _ask_openai(self, message: str, system: str, schema: dict = AGENT_SCHEMA, images=(), careful: bool = False) -> dict:
+        """careful: a judgement that throws away paid work when wrong (the photo QC): the stronger model, thinking"""
         client = self.openai_client
         if client is None:
             from openai import OpenAI
@@ -1061,11 +1064,13 @@ class Agent:
             # an image may say "low" (a third item): the model sees it small, for a fraction of the cost
             {"type": "image_url", "image_url": {"url": f"data:{i[1]};base64," + base64.b64encode(i[0]).decode(),
                                                 "detail": i[2] if len(i) > 2 else "auto"}} for i in images]
-        models = [os.environ["JAGIMAGE_AGENT_OPENAI_MODEL"]] if os.environ.get("JAGIMAGE_AGENT_OPENAI_MODEL") else self.OPENAI_MODELS
+        models = ([os.environ["JAGIMAGE_AGENT_OPENAI_MODEL"]] if os.environ.get("JAGIMAGE_AGENT_OPENAI_MODEL")
+                  else self.CAREFUL_MODELS if careful else self.OPENAI_MODELS)
         last = None
         for model in models:
             try:
-                extra = {"reasoning_effort": "minimal"} if model.startswith("gpt-5") else {}  # no paid thinking for short answers
+                # no paid thinking for short answers; the careful check thinks as the model normally does
+                extra = {"reasoning_effort": "minimal"} if model.startswith("gpt-5") and not careful else {}
                 resp = client.chat.completions.create(model=model, response_format={"type": "json_object"},
                                                       messages=[{"role": "system", "content": system}, {"role": "user", "content": content}],
                                                       **extra)

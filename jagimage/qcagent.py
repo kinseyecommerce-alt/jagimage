@@ -48,7 +48,7 @@ def default_ask(model: Optional[str] = None) -> Callable:
     agent = Agent(model=model or os.environ.get("JAGIMAGE_QC_MODEL") or None)
 
     def ask(message: str, image: bytes) -> dict:
-        return agent._ask(message, system=SYSTEM, schema=SCHEMA, images=[(image, "image/jpeg")])
+        return agent._ask(message, system=SYSTEM, schema=SCHEMA, images=[(image, "image/jpeg")], careful=True)
     return ask
 
 

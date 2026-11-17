@@ -298,7 +298,7 @@ class FakeOpenAIChat:
 
     def create(self, model, messages, response_format, **extra):
         self.models.append(model)
-        assert extra == ({"reasoning_effort": "minimal"} if model.startswith("gpt-5") else {})
+        assert extra in ({}, {"reasoning_effort": "minimal"})
         if len(self.models) == 1:
             raise RuntimeError(f"The model `{model}` does not exist or you do not have access to it.")
         assert response_format == {"type": "json_object"} and "JSON schema" in messages[0]["content"]
@@ -726,3 +726,14 @@ def test_a_failed_gemini_is_skipped_for_a_while_and_the_artwork_is_sent_small(mo
     assert calls == [1]  # tried once, then straight to OpenAI
     parts = seen[-1][1]["content"]
     assert parts[1]["image_url"]["detail"] == "auto" and parts[2]["image_url"]["detail"] == "low"
+
+
+def test_the_photo_qc_asks_the_stronger_model_with_its_usual_thinking():
+    from jagimage.cloud import Agent
+
+    chat = FakeOpenAIChat({"ok": True, "problems": []})
+    calls = []
+    real = chat.create
+    chat.create = lambda model, messages, response_format, **kw: (calls.append((model, kw)), real(model, messages, response_format, **kw))[1]
+    Agent(openai_client=chat)._ask("check", "sys", {"type": "object"}, careful=True)
+    assert calls == [("gpt-5-mini", {}), ("gpt-4.1-mini", {})]  # the first one "doesn't exist" in the fake
