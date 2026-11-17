@@ -757,3 +757,29 @@ def test_disk_clean_takes_off_only_what_can_be_made_again(tmp_path):
     assert clean_data(tmp_path)["removed"] == 2
     assert not (tmp_path / "print_cache" / "a.png").exists() and not (tmp_path / "white-abc").exists()
     assert (tmp_path / "printed" / "run1" / "SKU" / "319.jpg").exists()  # print runs' photos stay
+
+
+def test_photo_clean_removes_pngs_whose_jpg_is_made_and_shrinks_faces(tmp_path):
+    import json
+
+    from PIL import Image
+
+    from jagimage import studio
+    from jagimage.server import clean_photos
+
+    root = tmp_path / "Kids_Boys_X"
+    (root / "m0001" / "Red__Red").mkdir(parents=True)
+    (root / "m0001" / "_base" / "light-light").mkdir(parents=True)
+    (root / "spec.json").write_text(json.dumps({"free_after_upload": True, "canvas": [2000, 2000]}))
+    Image.new("RGB", (40, 40)).save(root / "m0001" / "Red__Red" / "front_main.png")
+    (root / "m0001" / "Red__Red" / "front_main_2000x2000.jpg").write_bytes(b"x")
+    Image.new("RGB", (40, 40)).save(root / "m0001" / "Red__Red" / "back.png")   # its JPG went to Drive
+    (root / "_freed.txt").write_text("m0001/Red__Red/back_2000x2000.jpg\n")
+    Image.new("RGB", (40, 40)).save(root / "m0001" / "_base" / "light-light" / "front_main.png")
+    (tmp_path / "_faces" / "Kids_Boys").mkdir(parents=True)
+    Image.new("RGB", (studio.FACE_SIDE * 2, studio.FACE_SIDE * 2)).save(tmp_path / "_faces" / "Kids_Boys" / "m0001.png")
+    out = clean_photos(tmp_path)
+    assert out["photos_files"] == 3
+    assert not (root / "m0001" / "Red__Red" / "front_main.png").exists() and not (root / "m0001" / "Red__Red" / "back.png").exists()
+    assert (root / "m0001" / "_base" / "light-light" / "front_main.png").exists()  # base photos stay
+    assert max(Image.open(tmp_path / "_faces" / "Kids_Boys" / "m0001.png").size) == studio.FACE_SIDE

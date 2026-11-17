@@ -51,7 +51,50 @@ def data_usage(data: Path) -> dict:
     return {d.name: _size_mb(d) for d in sorted(data.iterdir()) if d.is_dir()} if data.exists() else {}
 
 
-def clean_data(data: Path, older_than: float = 6 * 3600) -> dict:
+def clean_photos(out: Path) -> dict:
+    """The photos folder: full-size PNGs of finished photos whose 2000x2000 JPG is made (the JPG is what goes to
+    Drive; the PNG is only made again by a redo), and saved faces shrunk to studio.FACE_SIDE. Base photos stay."""
+    from PIL import Image
+
+    freed, n = 0.0, 0
+    for root in [d for d in Path(out).iterdir() if d.is_dir() and (d / "spec.json").exists()]:
+        try:
+            spec = json.loads((root / "spec.json").read_text())
+        except (OSError, ValueError):
+            continue
+        canvas = spec.get("canvas") or []
+        if not spec.get("free_after_upload") or len(canvas) != 2:
+            continue
+        from jagimage.catalogue import freed as freed_list
+
+        gone = freed_list(root)
+        for png in root.glob("m[0-9][0-9][0-9][0-9]/*/*.png"):
+            if png.parent.name.startswith("_") or "_mask" in png.name or ".tmp" in png.name:
+                continue
+            jpg = png.with_name(f"{png.stem}_{canvas[0]}x{canvas[1]}.jpg")
+            if jpg.exists() or jpg.relative_to(root).as_posix() in gone:
+                freed += png.stat().st_size / 1e6
+                png.unlink(missing_ok=True)
+                n += 1
+    for face in (Path(out) / "_faces").glob("*/*.png"):
+        try:
+            with Image.open(face) as im:
+                if max(im.size) <= studio.FACE_SIDE:
+                    continue
+                before = face.stat().st_size
+                im = im.convert("RGB")
+                im.thumbnail((studio.FACE_SIDE, studio.FACE_SIDE), Image.LANCZOS)
+                tmp = face.with_name(f".{face.name}.tmp")
+                im.save(tmp, "PNG", optimize=True)
+            tmp.replace(face)
+            freed += (before - face.stat().st_size) / 1e6
+            n += 1
+        except OSError:
+            continue
+    return {"photos_freed_mb": round(freed, 1), "photos_files": n}
+
+
+def clean_data(data: Path, older_than: float = 6 * 3600, runs=()) -> dict:
     """Frees the server's disk of what can be made again, never photos waiting for Drive or for review: the
     print artwork cache (downloaded again from the print library when needed), leftover temp folders of
     white-background jobs. Print runs' photos stay (the Listing tab and review use them)."""
@@ -73,6 +116,10 @@ def clean_data(data: Path, older_than: float = 6 * 3600) -> dict:
                 drop(f)
     for d in data.glob("white-*"):
         if d.is_dir() and now - d.stat().st_mtime > older_than:
+            drop(d)
+    for r in runs:  # print runs named by an admin (tests): their photos on the server go
+        d = (data / "printed" / r).resolve()
+        if d.parent == (data / "printed").resolve() and d.is_dir():
             drop(d)
     return {"freed_mb": round(freed, 1), "removed": len(removed)}
 
@@ -871,7 +918,8 @@ def make_handler(app: Studio):
                 return self._json(c.drive_status())
             if parts == ["api", "disk", "clean"]:  # admin: take off what can be made again (nothing on Drive is touched)
                 self._admin()
-                return self._json(clean_data(c.data))
+                out = clean_data(c.data, runs=[str(r) for r in (body.get("print_runs") or []) if isinstance(r, str)])
+                return self._json({**out, **clean_photos(Path(app.out))})
             if parts == ["api", "drive", "inventory"]:
                 self._admin()
                 if c.inventory.get("running"):
