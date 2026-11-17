@@ -1224,6 +1224,12 @@ class Batch:
             res = check_base(self.inspector, img.convert("RGB"), self.spec, pose, masks)
         (path.parent / f"{pose}_base_qc.json").write_text(json.dumps(res, indent=1))
         if res["ok"] is False:
+            try:  # kept beside the base for a person to look at (the last one rejected for this pose)
+                import shutil
+
+                shutil.copyfile(tmp, path.parent / f"{pose}_rejected.png")
+            except OSError:
+                pass
             self._event("base_rejected", model=m, path=str(path), problems=res["problems"])
             raise MaskError("QC agent: " + "; ".join(res["problems"])[:400])
 
